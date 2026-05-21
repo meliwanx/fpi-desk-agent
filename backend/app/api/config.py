@@ -410,7 +410,9 @@ async def list_providers(settings: SettingsDep, registry: ProviderRegistryDep) -
         # update, etc.), try to register from the persisted config. The
         # cost is bounded — one rebuild per missing endpoint per page
         # load — and most healing paths are instant because manual model
-        # lists skip the /v1/models discovery call.
+        # lists skip the /v1/models discovery call. We refresh only this
+        # provider's models rather than the whole registry so unrelated
+        # providers don't get re-polled on every settings page load.
         if not is_disabled and provider is None:
             try:
                 healed = create_desktop_provider(
@@ -422,7 +424,7 @@ async def list_providers(settings: SettingsDep, registry: ProviderRegistryDep) -
                 )
                 await healed.list_models()
                 registry.register(healed)
-                await registry.refresh_models()
+                await registry.refresh_provider(pid)
                 provider = healed
             except Exception as e:
                 logger.warning("Heal-on-read failed for %s: %s", pid, e)

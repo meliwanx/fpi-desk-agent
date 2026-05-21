@@ -180,8 +180,18 @@ export function RapidMLXPanel() {
     !!status?.running &&
     canonicalRapidMlxModel(status.current_model) ===
       canonicalRapidMlxModel(alias);
+  // Active = running OR mid-startup. Removing a model while it's loading
+  // would race with the spawning process — backend rejects it anyway, but
+  // gating in the UI avoids a confusing error toast.
+  const isActiveModelAlias = (alias: string | undefined) =>
+    !!alias &&
+    (!!status?.running || !!status?.process_running) &&
+    canonicalRapidMlxModel(status?.current_model ?? "") ===
+      canonicalRapidMlxModel(alias);
   const selectedModelIsRunning =
     isRunningModelAlias(modelInput) && status?.port === selectedPort;
+  const selectedModelIsActive =
+    isActiveModelAlias(modelInput) && status?.port === selectedPort;
   const primaryActionLabel = selectedModelIsRunning
     ? "Running"
     : status?.running
@@ -189,6 +199,7 @@ export function RapidMLXPanel() {
       : "Start";
   const primaryActionDisabled =
     startMutation.isPending ||
+    uninstallMutation.isPending ||
     selectedModelIsRunning ||
     !!isStarting ||
     rapidVariants.length === 0 ||
@@ -431,10 +442,12 @@ export function RapidMLXPanel() {
                       })
                     }
                     disabled={
-                      removeMutation.isPending || selectedModelIsRunning
+                      removeMutation.isPending ||
+                      uninstallMutation.isPending ||
+                      selectedModelIsActive
                     }
                     title={
-                      selectedModelIsRunning
+                      selectedModelIsActive
                         ? "Stop Rapid-MLX before removing the running model"
                         : "Remove downloaded Rapid-MLX model"
                     }
@@ -484,8 +497,8 @@ export function RapidMLXPanel() {
                   installedVariants.length === 1
                     ? installedVariants[0].rapidMlxAlias
                     : undefined;
-                const removableAliasIsRunning =
-                  isRunningModelAlias(removableAlias);
+                const removableAliasIsActive =
+                  isActiveModelAlias(removableAlias);
                 const selected = model.id === selectedModel.id;
                 return (
                   <div
@@ -531,11 +544,13 @@ export function RapidMLXPanel() {
                             });
                           }}
                           disabled={
-                            removeMutation.isPending || removableAliasIsRunning
+                            removeMutation.isPending ||
+                            uninstallMutation.isPending ||
+                            removableAliasIsActive
                           }
                           className="rounded p-1 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-secondary)] hover:text-[var(--color-destructive)] disabled:opacity-60"
                           title={
-                            removableAliasIsRunning
+                            removableAliasIsActive
                               ? "Stop Rapid-MLX before removing the running model"
                               : `Remove ${removableAlias}`
                           }

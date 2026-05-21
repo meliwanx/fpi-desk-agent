@@ -90,6 +90,11 @@ export function CustomEndpointEditForm({
   const [baseUrl, setBaseUrl] = useState(endpoint.base_url || "");
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
+  // Set when the user explicitly opts to wipe the existing api_key.
+  // We can't infer "clear" from an empty input field — that's
+  // semantically "leave unchanged" so add/edit-headers-only flows
+  // don't accidentally erase the key.
+  const [clearApiKey, setClearApiKey] = useState(false);
 
   const [models, setModels] = useState<ModelRow[]>(() => {
     const existing = endpoint.models ?? [];
@@ -161,7 +166,12 @@ export function CustomEndpointEditForm({
         .filter((m) => m.id.length > 0),
     };
 
-    if (apiKey.trim()) {
+    if (clearApiKey && !apiKey.trim()) {
+      // Explicit clear: send empty string so the backend wipes the
+      // stored key. The visible input being empty isn't enough on its
+      // own — that path means "no change".
+      payload.api_key = "";
+    } else if (apiKey.trim()) {
       payload.api_key = apiKey.trim();
     }
 
@@ -301,25 +311,55 @@ export function CustomEndpointEditForm({
         />
       </div>
 
-      {/* API key — unchanged unless filled */}
+      {/* API key — unchanged unless filled or explicitly cleared */}
       <div className="space-y-1.5">
-        <label className="text-xs font-medium text-[var(--text-secondary)]">
-          {t("customApiKeyLabel", { defaultValue: "API key" })}
-        </label>
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-medium text-[var(--text-secondary)]">
+            {t("customApiKeyLabel", { defaultValue: "API key" })}
+          </label>
+          {endpoint.masked_key && !clearApiKey && (
+            <button
+              type="button"
+              onClick={() => {
+                setClearApiKey(true);
+                setApiKey("");
+              }}
+              className="text-ui-3xs text-[var(--text-tertiary)] hover:text-[var(--color-destructive)] underline-offset-2 hover:underline"
+            >
+              {t("customApiKeyClear", { defaultValue: "Clear key" })}
+            </button>
+          )}
+          {clearApiKey && (
+            <button
+              type="button"
+              onClick={() => setClearApiKey(false)}
+              className="text-ui-3xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] underline-offset-2 hover:underline"
+            >
+              {t("undo", { defaultValue: "Undo" })}
+            </button>
+          )}
+        </div>
         <div className="relative">
           <Input
             type={showKey ? "text" : "password"}
             value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
+            onChange={(e) => {
+              setApiKey(e.target.value);
+              if (e.target.value && clearApiKey) setClearApiKey(false);
+            }}
             placeholder={
-              endpoint.masked_key
-                ? t("customApiKeyEditPlaceholderExisting", {
-                    defaultValue: "{{masked}} (leave blank to keep)",
-                    masked: endpoint.masked_key,
+              clearApiKey
+                ? t("customApiKeyClearedPlaceholder", {
+                    defaultValue: "Key will be removed on save",
                   })
-                : t("customApiKeyEditPlaceholderEmpty", {
-                    defaultValue: "Enter a key to add one (optional)",
-                  })
+                : endpoint.masked_key
+                  ? t("customApiKeyEditPlaceholderExisting", {
+                      defaultValue: "{{masked}} (leave blank to keep)",
+                      masked: endpoint.masked_key,
+                    })
+                  : t("customApiKeyEditPlaceholderEmpty", {
+                      defaultValue: "Enter a key to add one (optional)",
+                    })
             }
             className="pr-8 font-mono text-xs bg-[var(--surface-primary)]"
             autoComplete="one-time-code"
@@ -336,10 +376,21 @@ export function CustomEndpointEditForm({
             )}
           </button>
         </div>
-        <p className="text-ui-3xs text-[var(--text-tertiary)]">
-          {t("customApiKeyEditHelp", {
-            defaultValue: "Leave blank to keep the existing key.",
-          })}
+        <p
+          className={`text-ui-3xs ${
+            clearApiKey
+              ? "text-[var(--color-destructive)]"
+              : "text-[var(--text-tertiary)]"
+          }`}
+        >
+          {clearApiKey
+            ? t("customApiKeyClearedHelp", {
+                defaultValue:
+                  "Saving will wipe the stored key. Type a new key to replace instead.",
+              })
+            : t("customApiKeyEditHelp", {
+                defaultValue: "Leave blank to keep the existing key.",
+              })}
         </p>
       </div>
 
