@@ -464,7 +464,10 @@ export function CustomEndpointEditForm({
             if (row.kind === "existing") {
               return (
                 <div key={`existing-${row.name}`} className="flex items-center gap-2">
-                  <div className="flex flex-1 items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[var(--surface-primary)] border border-[var(--border-primary)] text-xs font-mono text-[var(--text-tertiary)]">
+                  <div
+                    className="flex flex-1 items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[var(--surface-primary)] border border-[var(--border-primary)] text-xs font-mono text-[var(--text-tertiary)]"
+                    title={row.name}
+                  >
                     <Lock className="h-3 w-3 shrink-0" />
                     <span className="truncate">{row.name}</span>
                   </div>
