@@ -27,17 +27,31 @@ interface ModelRow {
   name: string;
 }
 
-interface HeaderRow {
+/** Existing header — name is immutable; user can replace value or delete. */
+interface ExistingHeaderRow {
+  kind: "existing";
+  name: string;
+  maskedValue: string;
+  newValue: string; // empty = keep current; non-empty = upsert
+  deleted: boolean;
+}
+
+/** Net-new header added in this edit session. */
+interface NewHeaderRow {
+  kind: "new";
   name: string;
   value: string;
 }
+
+type HeaderRow = ExistingHeaderRow | NewHeaderRow;
 
 interface PatchPayload {
   name?: string;
   base_url?: string;
   api_key?: string;
   models?: CustomEndpointModel[];
-  headers?: Record<string, string>;
+  /** JSON Merge Patch delta — null marks a key for deletion. */
+  headers?: Record<string, string | null>;
 }
 
 interface CustomEndpointEditFormProps {
@@ -58,9 +72,12 @@ function extractApiDetail(err: unknown, fallback: string): string {
  *    immutable (it's the provider ID).
  * 2. API key is blank by default. Empty submit ⇒ field is omitted from the
  *    PATCH so the backend keeps the existing key.
- * 3. Headers pre-fill the existing names but leave values blank (the GET
- *    response only returns masked values). The section is only sent when the
- *    user actually touches it; otherwise existing headers are preserved.
+ * 3. Headers pre-fill as rows of existing keys (name locked, value blank
+ *    with a masked placeholder for reference). Each row tracks its own
+ *    intent — keep, replace, or delete — and the submit builds a
+ *    JSON Merge Patch delta so untouched rows aren't sent. This lets the
+ *    user add or change one header without re-typing the others' values,
+ *    which the GET response can't echo back unmasked.
  */
 export function CustomEndpointEditForm({
   endpoint,
@@ -80,17 +97,26 @@ export function CustomEndpointEditForm({
     return existing.map((m) => ({ id: m.id, name: m.name ?? "" }));
   });
 
-  // Snapshot the masked values for hint display only — never sent back.
+  // Snapshot the masked values for placeholder display — never sent back.
   const maskedHeaders = useMemo(
     () => endpoint.headers ?? {},
     [endpoint.headers],
   );
-  const [headers, setHeaders] = useState<HeaderRow[]>(() => {
-    const names = Object.keys(maskedHeaders);
-    if (names.length === 0) return [{ name: "", value: "" }];
-    return names.map((n) => ({ name: n, value: "" }));
+  const [headerRows, setHeaderRows] = useState<HeaderRow[]>(() => {
+    const existingEntries = Object.entries(maskedHeaders);
+    if (existingEntries.length === 0) {
+      return [{ kind: "new", name: "", value: "" }];
+    }
+    return existingEntries.map(
+      ([name, masked]): ExistingHeaderRow => ({
+        kind: "existing",
+        name,
+        maskedValue: masked,
+        newValue: "",
+        deleted: false,
+      }),
+    );
   });
-  const [headersDirty, setHeadersDirty] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -139,15 +165,27 @@ export function CustomEndpointEditForm({
       payload.api_key = apiKey.trim();
     }
 
-    if (headersDirty) {
-      const headerMap: Record<string, string> = {};
-      for (const h of headers) {
-        const n = h.name.trim();
-        if (n.length === 0) continue;
-        if (h.value.length === 0) continue;
-        headerMap[n] = h.value;
+    // Build a JSON Merge Patch delta — untouched existing rows are
+    // omitted, so they survive on the backend even if the user only
+    // changed one header. ``null`` marks a deletion.
+    const headersDelta: Record<string, string | null> = {};
+    for (const row of headerRows) {
+      if (row.kind === "existing") {
+        if (row.deleted) {
+          headersDelta[row.name] = null;
+        } else if (row.newValue.length > 0) {
+          headersDelta[row.name] = row.newValue;
+        }
+        // else: untouched — omit so backend preserves it.
+      } else {
+        const n = row.name.trim();
+        if (n.length > 0 && row.value.length > 0) {
+          headersDelta[n] = row.value;
+        }
       }
-      payload.headers = headerMap;
+    }
+    if (Object.keys(headersDelta).length > 0) {
+      payload.headers = headersDelta;
     }
 
     updateEndpoint.mutate(payload);
@@ -166,26 +204,44 @@ export function CustomEndpointEditForm({
         : prev.filter((_, i) => i !== idx),
     );
 
-  const markHeadersDirty = () => {
-    if (!headersDirty) setHeadersDirty(true);
+  const updateExistingValue = (idx: number, newValue: string) => {
+    setHeaderRows((prev) =>
+      prev.map((row, i) =>
+        i === idx && row.kind === "existing" ? { ...row, newValue } : row,
+      ),
+    );
   };
-  const updateHeader = (idx: number, patch: Partial<HeaderRow>) => {
-    markHeadersDirty();
-    setHeaders((prev) =>
-      prev.map((h, i) => (i === idx ? { ...h, ...patch } : h)),
+  const updateNewName = (idx: number, name: string) => {
+    setHeaderRows((prev) =>
+      prev.map((row, i) =>
+        i === idx && row.kind === "new" ? { ...row, name } : row,
+      ),
+    );
+  };
+  const updateNewValue = (idx: number, value: string) => {
+    setHeaderRows((prev) =>
+      prev.map((row, i) =>
+        i === idx && row.kind === "new" ? { ...row, value } : row,
+      ),
     );
   };
   const addHeader = () => {
-    markHeadersDirty();
-    setHeaders((prev) => [...prev, { name: "", value: "" }]);
+    setHeaderRows((prev) => [...prev, { kind: "new", name: "", value: "" }]);
   };
   const removeHeader = (idx: number) => {
-    markHeadersDirty();
-    setHeaders((prev) =>
-      prev.length === 1
-        ? [{ name: "", value: "" }]
-        : prev.filter((_, i) => i !== idx),
-    );
+    setHeaderRows((prev) => {
+      const row = prev[idx];
+      if (!row) return prev;
+      if (row.kind === "existing") {
+        // Mark for deletion but keep the row out of the visual list so
+        // the user can keep adding new rows. The deleted name still
+        // contributes a ``null`` to the submit delta.
+        return prev.map((r, i) =>
+          i === idx && r.kind === "existing" ? { ...r, deleted: true } : r,
+        );
+      }
+      return prev.filter((_, i) => i !== idx);
+    });
   };
 
   const submitDisabled = !baseUrl.trim() || updateEndpoint.isPending;
@@ -338,38 +394,62 @@ export function CustomEndpointEditForm({
         </button>
       </div>
 
-      {/* Headers — unchanged unless touched */}
+      {/* Headers — per-row edit; untouched rows survive on the backend */}
       <div className="space-y-2">
         <label className="text-xs font-medium text-[var(--text-secondary)]">
           {t("customHeadersLabel", { defaultValue: "Headers (optional)" })}
         </label>
-        {!headersDirty && (
-          <p className="text-ui-3xs text-[var(--text-tertiary)]">
-            {t("customHeadersEditHelp", {
-              defaultValue:
-                "Existing values are hidden. Touch any field to replace the full set; leave untouched to keep them as-is.",
-            })}
-          </p>
-        )}
-        {headersDirty && (
-          <p className="text-ui-3xs text-[var(--color-destructive)]">
-            {t("customHeadersDirtyWarning", {
-              defaultValue:
-                "Headers will be replaced entirely. Re-enter values for any headers you want to keep.",
-            })}
-          </p>
-        )}
+        <p className="text-ui-3xs text-[var(--text-tertiary)]">
+          {t("customHeadersEditHint", {
+            defaultValue:
+              "Leave a value blank to keep it. Trash deletes the header. Add new rows below.",
+          })}
+        </p>
         <div className="space-y-2">
-          {headers.map((h, idx) => {
-            const maskedExisting = maskedHeaders[h.name.trim()];
+          {headerRows.map((row, idx) => {
+            if (row.kind === "existing" && row.deleted) {
+              return null;
+            }
+            if (row.kind === "existing") {
+              return (
+                <div key={`existing-${row.name}`} className="flex items-center gap-2">
+                  <div className="flex flex-1 items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[var(--surface-primary)] border border-[var(--border-primary)] text-xs font-mono text-[var(--text-tertiary)]">
+                    <Lock className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{row.name}</span>
+                  </div>
+                  <Input
+                    type="text"
+                    value={row.newValue}
+                    onChange={(e) =>
+                      updateExistingValue(idx, e.target.value)
+                    }
+                    placeholder={t("customHeaderValueExistingPlaceholder", {
+                      defaultValue: "{{masked}} (leave blank to keep)",
+                      masked: row.maskedValue || "••••",
+                    })}
+                    className="font-mono text-xs bg-[var(--surface-primary)] flex-1"
+                    autoComplete="off"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeHeader(idx)}
+                    className="text-[var(--text-tertiary)] hover:text-[var(--color-destructive)] p-1"
+                    aria-label={t("remove")}
+                    title={t("customHeaderDeleteTitle", {
+                      defaultValue: "Delete this header",
+                    })}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              );
+            }
             return (
-              <div key={idx} className="flex items-center gap-2">
+              <div key={`new-${idx}`} className="flex items-center gap-2">
                 <Input
                   type="text"
-                  value={h.name}
-                  onChange={(e) =>
-                    updateHeader(idx, { name: e.target.value })
-                  }
+                  value={row.name}
+                  onChange={(e) => updateNewName(idx, e.target.value)}
                   placeholder={t("customHeaderNamePlaceholder")}
                   className="font-mono text-xs bg-[var(--surface-primary)] flex-1"
                   autoComplete="off"
@@ -377,18 +457,9 @@ export function CustomEndpointEditForm({
                 />
                 <Input
                   type="text"
-                  value={h.value}
-                  onChange={(e) =>
-                    updateHeader(idx, { value: e.target.value })
-                  }
-                  placeholder={
-                    maskedExisting
-                      ? t("customHeaderValueExistingPlaceholder", {
-                          defaultValue: "{{masked}} (re-enter to keep)",
-                          masked: maskedExisting,
-                        })
-                      : t("customHeaderValuePlaceholder")
-                  }
+                  value={row.value}
+                  onChange={(e) => updateNewValue(idx, e.target.value)}
+                  placeholder={t("customHeaderValuePlaceholder")}
                   className="font-mono text-xs bg-[var(--surface-primary)] flex-1"
                   autoComplete="off"
                 />

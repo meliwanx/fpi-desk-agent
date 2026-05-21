@@ -257,10 +257,14 @@ class RapidMLXManager:
                 if not cache_dir.exists():
                     continue
                 try:
+                    # HF cache lays out as snapshots/<hash>/<file> (symlink)
+                    # → blobs/<sha> (real content). f.stat() follows symlinks
+                    # so counting both would double the reported number.
+                    # Count only the real blob files.
                     size = sum(
                         f.stat().st_size
                         for f in cache_dir.rglob("*")
-                        if f.is_file()
+                        if f.is_file() and not f.is_symlink()
                     )
                 except Exception:
                     size = 0

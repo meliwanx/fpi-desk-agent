@@ -732,10 +732,21 @@ async def update_custom_endpoint(
         models_payload = [{"id": m.id, "name": m.name} for m in body.models]
     else:
         models_payload = list(found.get("models") or [])
-    if body.headers is not None:
-        headers_payload = dict(body.headers)
+    # Headers follow JSON Merge Patch semantics on PATCH — body.headers is
+    # a delta, never a full replacement. This stops the edit form's
+    # masked round-trip (we mask values on GET, so we can't safely echo
+    # them back on save) from silently wiping headers the user hasn't
+    # touched.
+    existing_headers: dict[str, str] = dict(found.get("headers") or {})
+    if body.headers is None:
+        headers_payload = existing_headers
     else:
-        headers_payload = dict(found.get("headers") or {})
+        headers_payload = dict(existing_headers)
+        for key, value in body.headers.items():
+            if value is None:
+                headers_payload.pop(key, None)
+            else:
+                headers_payload[key] = value
 
     # --- Phase 2: validate (outside lock — network I/O) ---
     if needs_rebuild:
