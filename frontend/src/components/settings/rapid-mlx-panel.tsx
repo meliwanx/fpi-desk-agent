@@ -322,7 +322,19 @@ export function RapidMLXPanel() {
                     setUninstallResult(null);
                     setUninstallOpen(true);
                   }}
-                  title="Uninstall Rapid-MLX from OpenYak"
+                  disabled={
+                    stopMutation.isPending ||
+                    startMutation.isPending ||
+                    removeMutation.isPending ||
+                    uninstallMutation.isPending
+                  }
+                  title={
+                    stopMutation.isPending
+                      ? "Wait for the current stop to finish"
+                      : startMutation.isPending
+                        ? "Wait for the current start to finish"
+                        : "Uninstall Rapid-MLX from OpenYak"
+                  }
                 >
                   <PowerOff className="mr-1 h-3 w-3" />
                   Uninstall

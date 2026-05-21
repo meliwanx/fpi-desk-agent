@@ -658,7 +658,10 @@ async def create_custom_endpoint(
 
     registry.register(test_provider)
     try:
-        await registry.refresh_models()
+        # Only refresh this provider — the BYOK/Ollama/Rapid-MLX providers
+        # don't change when we add a custom endpoint, so the full sweep
+        # was waste.
+        await registry.refresh_provider(endpoint_id)
     except Exception as e:
         logger.warning("Failed to refresh models after adding custom endpoint %s: %s", endpoint_id, e)
 
@@ -722,12 +725,15 @@ async def update_custom_endpoint(
     # Any change to fields that flow into the provider constructor requires
     # rebuilding. Also rebuild when re-enabling a previously disabled
     # endpoint — the toggle-off path explicitly unregisters the provider,
-    # so the on-path has to put it back.
+    # so the on-path has to put it back. An empty ``headers`` delta (``{}``)
+    # is treated as no-change so well-meaning clients that always send the
+    # field don't trigger a wasted rebuild + /v1/models call.
+    headers_delta_has_changes = bool(body.headers)
     needs_rebuild = (
         body.base_url is not None
         or body.api_key is not None
         or body.models is not None
-        or body.headers is not None
+        or headers_delta_has_changes
         or (enabled and not prev_enabled)
     )
     if body.models is not None:
@@ -796,7 +802,8 @@ async def update_custom_endpoint(
         registry.unregister(endpoint_id)
         registry.register(test_provider)
         try:
-            await registry.refresh_models()
+            # Single-provider refresh — see create_custom_endpoint above.
+            await registry.refresh_provider(endpoint_id)
         except Exception as e:
             logger.warning("Failed to refresh models after updating custom endpoint %s: %s", endpoint_id, e)
     elif not enabled:
