@@ -275,6 +275,8 @@
   "customHeaderValueExistingPlaceholder": "{{masked}}（留空保持不变）",
   "customHeadersEditHint": "留空保留原值，垃圾桶删除该 header，下方可继续添加新行。",
   "customHeaderDeleteTitle": "删除此 header",
+  "customHeaderDeletedHint": "保存后将被删除。",
+  "customHeaderDuplicate": "Header \"{{name}}\" 重复出现，header 名必须唯一。",
   "customBaseUrlRequired": "Base URL 不能为空。",
   "editProvider": "编辑 Provider",
   "cancel": "取消",

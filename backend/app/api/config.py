@@ -716,38 +716,28 @@ async def update_custom_endpoint(
         if not found:
             raise HTTPException(404, "Custom endpoint not found")
 
-    name = body.name.strip() if body.name is not None else found.get("name", "Custom Endpoint")
-    base_url = body.base_url if body.base_url is not None else found.get("base_url", "")
-    api_key = body.api_key.strip() if body.api_key is not None else found.get("api_key", "")
-    enabled = body.enabled if body.enabled is not None else found.get("enabled", True)
+    existing_base_url = found.get("base_url", "")
+    existing_api_key = found.get("api_key", "")
+    existing_models = list(found.get("models") or [])
+    existing_headers: dict[str, str] = dict(found.get("headers") or {})
     prev_enabled = bool(found.get("enabled", True))
 
-    # Any change to fields that flow into the provider constructor requires
-    # rebuilding. Also rebuild when re-enabling a previously disabled
-    # endpoint — the toggle-off path explicitly unregisters the provider,
-    # so the on-path has to put it back. An empty ``headers`` delta (``{}``)
-    # is treated as no-change so well-meaning clients that always send the
-    # field don't trigger a wasted rebuild + /v1/models call.
-    headers_delta_has_changes = bool(body.headers)
-    needs_rebuild = (
-        body.base_url is not None
-        or body.api_key is not None
-        or body.models is not None
-        or headers_delta_has_changes
-        or (enabled and not prev_enabled)
-    )
+    name = body.name.strip() if body.name is not None else found.get("name", "Custom Endpoint")
+    base_url = body.base_url if body.base_url is not None else existing_base_url
+    api_key = body.api_key.strip() if body.api_key is not None else existing_api_key
+    enabled = body.enabled if body.enabled is not None else found.get("enabled", True)
+
     if body.models is not None:
         models_payload = [{"id": m.id, "name": m.name} for m in body.models]
     else:
-        models_payload = list(found.get("models") or [])
+        models_payload = list(existing_models)
+
     # Headers follow JSON Merge Patch semantics on PATCH — body.headers is
-    # a delta, never a full replacement. This stops the edit form's
-    # masked round-trip (we mask values on GET, so we can't safely echo
-    # them back on save) from silently wiping headers the user hasn't
-    # touched.
-    existing_headers: dict[str, str] = dict(found.get("headers") or {})
+    # a delta, never a full replacement. We mask values on GET, so the
+    # frontend can't safely echo them back; instead it only sends keys it
+    # explicitly changed.
     if body.headers is None:
-        headers_payload = existing_headers
+        headers_payload = dict(existing_headers)
     else:
         headers_payload = dict(existing_headers)
         for key, value in body.headers.items():
@@ -755,6 +745,20 @@ async def update_custom_endpoint(
                 headers_payload.pop(key, None)
             else:
                 headers_payload[key] = value
+
+    # Only rebuild the provider when a constructor-relevant field's
+    # *effective value* actually changed — comparing against the stored
+    # config avoids wasted /v1/models calls when the client always sends
+    # all fields (e.g. the edit form re-sends base_url even when the user
+    # only edited Display name). Re-enabling a previously disabled
+    # endpoint also rebuilds, because toggle-off explicitly unregisters.
+    needs_rebuild = (
+        base_url != existing_base_url
+        or api_key != existing_api_key
+        or models_payload != existing_models
+        or headers_payload != existing_headers
+        or (enabled and not prev_enabled)
+    )
 
     # --- Phase 2: validate (outside lock — network I/O) ---
     if needs_rebuild:

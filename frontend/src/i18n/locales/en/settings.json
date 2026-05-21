@@ -275,6 +275,8 @@
   "customHeaderValueExistingPlaceholder": "{{masked}} (leave blank to keep)",
   "customHeadersEditHint": "Leave a value blank to keep it. Trash deletes the header. Add new rows below.",
   "customHeaderDeleteTitle": "Delete this header",
+  "customHeaderDeletedHint": "Will be removed on save.",
+  "customHeaderDuplicate": "Header \"{{name}}\" is listed more than once. Header names must be unique.",
   "customBaseUrlRequired": "Base URL is required.",
   "editProvider": "Edit provider",
   "cancel": "Cancel",

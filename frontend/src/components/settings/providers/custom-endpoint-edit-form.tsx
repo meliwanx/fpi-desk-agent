@@ -175,6 +175,37 @@ export function CustomEndpointEditForm({
       payload.api_key = apiKey.trim();
     }
 
+    // Validate new-row names: reject duplicates among new rows, and
+    // duplicates that collide with a still-present existing row. (A
+    // collision with a *deleted* existing row is also blocked — if the
+    // user wants to "rename" the same header in place, they should
+    // re-enter the value on the existing row instead.) Without this
+    // check, the dict-based delta below would silently last-write-wins
+    // and the user would lose the earlier entry without warning.
+    const newNamesSeen = new Set<string>();
+    const existingNames = new Set(
+      headerRows.flatMap((r) =>
+        r.kind === "existing" ? [r.name.toLowerCase()] : [],
+      ),
+    );
+    for (const row of headerRows) {
+      if (row.kind !== "new") continue;
+      const n = row.name.trim();
+      if (n.length === 0) continue;
+      const lower = n.toLowerCase();
+      if (newNamesSeen.has(lower) || existingNames.has(lower)) {
+        setError(
+          t("customHeaderDuplicate", {
+            defaultValue:
+              "Header \"{{name}}\" is listed more than once. Header names must be unique.",
+            name: n,
+          }),
+        );
+        return;
+      }
+      newNamesSeen.add(lower);
+    }
+
     // Build a JSON Merge Patch delta — untouched existing rows are
     // omitted, so they survive on the backend even if the user only
     // changed one header. ``null`` marks a deletion.
@@ -243,15 +274,23 @@ export function CustomEndpointEditForm({
       const row = prev[idx];
       if (!row) return prev;
       if (row.kind === "existing") {
-        // Mark for deletion but keep the row out of the visual list so
-        // the user can keep adding new rows. The deleted name still
-        // contributes a ``null`` to the submit delta.
+        // Mark for deletion. The row stays in state and is still
+        // rendered (with strikethrough + Undo) so the user can revert
+        // without cancelling the whole edit. Submit converts deleted=true
+        // into a ``null`` entry in the headers delta.
         return prev.map((r, i) =>
           i === idx && r.kind === "existing" ? { ...r, deleted: true } : r,
         );
       }
       return prev.filter((_, i) => i !== idx);
     });
+  };
+  const undoDeleteHeader = (idx: number) => {
+    setHeaderRows((prev) =>
+      prev.map((r, i) =>
+        i === idx && r.kind === "existing" ? { ...r, deleted: false } : r,
+      ),
+    );
   };
 
   const submitDisabled = !baseUrl.trim() || updateEndpoint.isPending;
@@ -459,7 +498,33 @@ export function CustomEndpointEditForm({
         <div className="space-y-2">
           {headerRows.map((row, idx) => {
             if (row.kind === "existing" && row.deleted) {
-              return null;
+              return (
+                <div
+                  key={`existing-${row.name}`}
+                  className="flex items-center gap-2 opacity-60"
+                >
+                  <div
+                    className="flex flex-1 items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[var(--surface-primary)] border border-[var(--border-primary)] text-xs font-mono text-[var(--text-tertiary)]"
+                    title={row.name}
+                  >
+                    <Lock className="h-3 w-3 shrink-0" />
+                    <span className="truncate line-through">{row.name}</span>
+                  </div>
+                  <div className="flex flex-1 items-center text-ui-3xs text-[var(--color-destructive)]">
+                    {t("customHeaderDeletedHint", {
+                      defaultValue:
+                        "Will be removed on save.",
+                    })}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => undoDeleteHeader(idx)}
+                    className="text-ui-3xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] underline-offset-2 hover:underline px-1"
+                  >
+                    {t("undo", { defaultValue: "Undo" })}
+                  </button>
+                </div>
+              );
             }
             if (row.kind === "existing") {
               return (
