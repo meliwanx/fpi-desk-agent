@@ -5,12 +5,13 @@ import { useTranslation } from 'react-i18next';
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Archive, MessageCircle, Pin, PinOff } from "lucide-react";
+import { Archive, Loader2, MessageCircle, Pin, PinOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { API, queryKeys } from "@/lib/constants";
 import { getChatRoute } from "@/lib/routes";
 import { useDebouncedPrefetch } from "@/hooks/use-debounced-prefetch";
+import { useChatSession } from "@/stores/chat-store";
 import type { PaginatedMessages } from "@/types/message";
 import {
   ContextMenu,
@@ -70,6 +71,10 @@ export const SessionItem = memo(function SessionItem({
     : rawTitle;
   const relativeTime = getRelativeTimeLabel(session.time_updated);
   const channelBadge = session.slug ? getChannelBadge(session.slug) : null;
+  // Live status badge: shows whenever this session has an in-flight stream
+  // attached, including ones the user navigated away from.
+  const liveBucket = useChatSession(session.id);
+  const isLive = liveBucket.isGenerating || liveBucket.isCompacting;
   const hasDirectory = !!session.directory && session.directory !== ".";
   const deeplink = `openyak://chat?sessionId=${encodeURIComponent(session.id)}`;
   const pinLabel = session.is_pinned
@@ -316,6 +321,12 @@ export const SessionItem = memo(function SessionItem({
                   >
                     {title}
                   </span>
+                  {isLive && (
+                    <Loader2
+                      aria-label={t('sessionIsGenerating', { defaultValue: 'Generating in background' })}
+                      className="h-3 w-3 shrink-0 animate-spin text-[var(--brand-primary)]"
+                    />
+                  )}
                 </p>
                 {snippet && (
                   <p className="mt-0.5 truncate text-ui-2xs leading-4 text-[var(--text-tertiary)]">
