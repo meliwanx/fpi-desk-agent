@@ -393,14 +393,67 @@ async def get_messages(
     return list(result.scalars().all())
 
 
+# Providers that use a reasoning passback protocol OTHER than DeepSeek's
+# OpenAI-compat `reasoning_content` field. Echoing reasoning back as
+# `reasoning_content` would be wasted context at best and rejected at worst, so
+# skip them here and let each one's native code path handle reasoning:
+#   - openrouter: `reasoning` / `reasoning_details` (signed blocks)
+#   - anthropic: native API, signed `thinking_blocks`
+#   - google:    native Gemini API, `thought` parts
+#   - openai / azure / openai-subscription: o-series reasoning lives server-side
+#     and is never returned in chat completions; nothing to echo
+# Every other openai-compat provider (deepseek, kimi, qwen, zhipu, groq,
+# mistral, xai, together, deepinfra, cerebras, cohere, perplexity, fireworks,
+# minimax, siliconflow, xiaomi, ollama, rapid-mlx, generic BYOK, etc.) returns
+# reasoning via `reasoning_content`; for any thinking-mode model the spec says
+# (and DeepSeek v4 / Kimi K2 / Qwen3 actively require) the prior turn must
+# echo it back on multi-turn tool-call follow-ups.
+_REASONING_CONTENT_SKIP_PROVIDERS: frozenset[str] = frozenset({
+    "openrouter",
+    "anthropic",
+    "google",
+    "openai",
+    "openai-subscription",
+    "azure",
+})
+
+# Models that explicitly REJECT `reasoning_content` on input. Echoing back 400s.
+# Currently only DeepSeek's legacy R1 (`deepseek-reasoner`). Use exact match —
+# a hypothetical future `deepseek-reasoner-v2` could revert to the v4 echo rule
+# and we don't want a prefix match to silently strip it.
+_REASONING_CONTENT_REJECT_MODELS: frozenset[str] = frozenset({
+    "deepseek-reasoner",
+})
+
+
+def _provider_uses_reasoning_content(provider_id: str | None, model_id: str | None) -> bool:
+    """Decide whether to echo prior `reasoning_content` to the active provider."""
+    if not provider_id or provider_id in _REASONING_CONTENT_SKIP_PROVIDERS:
+        return False
+    if model_id and model_id in _REASONING_CONTENT_REJECT_MODELS:
+        return False
+    return True
+
+
 async def get_message_history_for_llm(
     db: AsyncSession,
     session_id: str,
+    *,
+    provider_id: str | None = None,
+    model_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Load message history formatted for LLM consumption.
 
     Converts stored messages/parts into the OpenAI message format:
     [{role: "user", content: "..."}, {role: "assistant", content: "..."}, ...]
+
+    For openai-compat-family providers that use DeepSeek's `reasoning_content`
+    convention, the prior assistant turn's accumulated reasoning is re-attached
+    as ``reasoning_content`` so thinking-mode multi-turn follow-ups (DeepSeek
+    v4 / Kimi K2 / Qwen3 / etc.) do not 400. Providers with their own reasoning
+    protocol (OpenRouter / Anthropic / Gemini / native OpenAI) and the legacy
+    `deepseek-reasoner` R1 model are skipped — see
+    ``_provider_uses_reasoning_content``.
     """
     messages = await get_messages(db, session_id)
     llm_messages = []
@@ -425,6 +478,8 @@ async def get_message_history_for_llm(
 
     if compaction_anchor:
         messages = messages[compaction_anchor:]
+
+    echo_reasoning = _provider_uses_reasoning_content(provider_id, model_id)
 
     max_assistant_text_chars = 40_000
     max_tool_output_chars = 20_000
@@ -468,8 +523,9 @@ async def get_message_history_for_llm(
                 llm_messages.append({"role": "user", "content": content})
 
         elif role == "assistant":
-            # Collect assistant text and tool calls
+            # Collect assistant text, reasoning, and tool calls
             text_parts = []
+            reasoning_parts: list[str] = []
             tool_calls = []
             tool_results = []
 
@@ -479,6 +535,8 @@ async def get_message_history_for_llm(
 
                 if part_type == "text":
                     text_parts.append(part_data.get("text", ""))
+                elif part_type == "reasoning":
+                    reasoning_parts.append(part_data.get("text", ""))
                 elif part_type == "tool":
                     tool_name = part_data.get("tool", "")
                     call_id = part_data.get("call_id", "")
@@ -521,8 +579,23 @@ async def get_message_history_for_llm(
                             "content": output or "(no output)",
                         })
 
-            # Build assistant message
-            if text_parts or tool_calls:
+            # Build assistant message. A turn with only reasoning (no text and
+            # no tool_calls) is rare but legal — preserve it when reasoning is
+            # being echoed so the assistant entry doesn't go missing from the
+            # alternating role sequence.
+            reasoning_text = ""
+            if echo_reasoning and reasoning_parts:
+                joined = "\n".join(r for r in reasoning_parts if r)
+                if joined:
+                    # Reasoning blocks can be tens of thousands of chars per
+                    # turn — trim to the same per-message budget as the
+                    # assistant content so a single thinking-heavy turn cannot
+                    # consume the request budget by itself.
+                    reasoning_text = trim_for_context(
+                        joined, max_assistant_text_chars, "reasoning",
+                    )
+
+            if text_parts or tool_calls or reasoning_text:
                 assistant_content = "\n".join(text_parts) if text_parts else ""
                 if assistant_content:
                     assistant_content = trim_for_context(
@@ -536,6 +609,8 @@ async def get_message_history_for_llm(
                 }
                 if tool_calls:
                     assistant_msg["tool_calls"] = tool_calls
+                if reasoning_text:
+                    assistant_msg["reasoning_content"] = reasoning_text
                 llm_messages.append(assistant_msg)
 
             # Append tool results
