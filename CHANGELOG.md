@@ -6,6 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/), and this project
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-05-31
+
+### Added
+
+- **chat (per-session model memory):** Model selection is now scoped to each session instead of being one global setting. Every chat remembers the model it was last using, and the top-left selector restores it — along with its provider — when you return to that session, so switching the model in one chat no longer bleeds into the others. The last-used model is persisted on the session row on every prompt (including edit-and-resend) and restored on entry; brand-new or pre-existing sessions with no stored model fall back to the global default. (#148, closes #143)
+
+### Fixed
+
+- **providers (vision):** Eliminated false "can't read images" warnings introduced with the up-front vision check. Attachment support is now gated by a curated allowlist of vision-capable model families validated against the live models.dev catalog, so models that *can* read images are no longer wrongly flagged at attach time. (#142)
+
 ## [1.2.1] - 2026-05-29
 
 ### Added
