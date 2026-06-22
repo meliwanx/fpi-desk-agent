@@ -6,7 +6,7 @@ import hashlib
 import json
 import mimetypes
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +21,7 @@ from app.company_auth.model_policy_sync import sync_company_model_policy
 from app.company_auth.store import (
     CompanyFeedback,
     CompanyModelPolicy,
+    CompanySessionRecord,
     CompanyUpdateAsset,
     CompanyUpdatePolicy,
     CompanyUser,
@@ -170,6 +171,66 @@ class AdminFeedbackResponse(BaseModel):
 
 class AdminFeedbackListResponse(BaseModel):
     items: list[AdminFeedbackResponse]
+
+
+class AdminCompanySessionResponse(BaseModel):
+    id: str
+    user_id: str
+    user_email: str
+    user_display_name: str
+    user_role: str
+    user_is_active: bool
+    device_id: str
+    device_name: str
+    platform: str
+    app_version: str
+    ip_address: str
+    user_agent: str
+    is_online: bool
+    expires_at: datetime
+    revoked_at: datetime | None = None
+    time_created: datetime
+    last_seen_at: datetime
+    revoked_by_user_id: str = ""
+    revoked_by_email: str = ""
+    revoked_reason: str = ""
+
+
+class AdminCompanySessionListResponse(BaseModel):
+    total: int
+    items: list[AdminCompanySessionResponse]
+
+
+class AdminRevokeSessionsRequest(BaseModel):
+    session_ids: list[str] = Field(default_factory=list)
+    user_ids: list[str] = Field(default_factory=list)
+    reason: str = ""
+
+
+class AdminRevokeSessionRequest(BaseModel):
+    reason: str = ""
+
+
+class AdminRevokeSessionsResponse(BaseModel):
+    revoked_count: int
+
+
+class AdminActionResponse(BaseModel):
+    id: str
+    actor_user_id: str
+    actor_email: str
+    actor_display_name: str
+    action: str
+    target_type: str
+    target_id: str
+    metadata: dict[str, Any]
+    time_created: datetime
+    time_updated: datetime
+
+
+class AdminActionListResponse(BaseModel):
+    total: int
+    items: list[AdminActionResponse]
 
 
 class AuditIngestSession(BaseModel):
@@ -431,6 +492,21 @@ async def _record_admin_action(
     )
 
 
+def _public_admin_action(action: AuditAdminAction) -> AdminActionResponse:
+    return AdminActionResponse(
+        id=action.id,
+        actor_user_id=action.actor_user_id,
+        actor_email=action.actor_email,
+        actor_display_name=action.actor_display_name,
+        action=action.action,
+        target_type=action.target_type,
+        target_id=action.target_id,
+        metadata=action.metadata_json or {},
+        time_created=action.time_created,
+        time_updated=action.time_updated,
+    )
+
+
 @router.get("/admin/users", response_model=list[AdminUserResponse])
 async def list_admin_users(request: Request) -> list[AdminUserResponse]:
     _require_admin(request)
@@ -476,6 +552,120 @@ async def update_admin_user(
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     return _public_user(user)
+
+
+@router.get("/admin/sessions", response_model=AdminCompanySessionListResponse)
+async def list_admin_company_sessions(
+    request: Request,
+    user_id: str | None = None,
+    include_revoked: bool = False,
+    limit: int = 100,
+    offset: int = 0,
+) -> AdminCompanySessionListResponse:
+    _require_admin(request)
+    store = _company_store(request)
+    total, sessions = await store.list_sessions(
+        include_revoked=include_revoked,
+        user_id=user_id,
+        limit=limit,
+        offset=offset,
+    )
+    now = datetime.now(timezone.utc)
+    presence = getattr(request.app.state, "company_presence", None)
+    online_session_ids = await presence.online_session_ids() if presence is not None and presence.available else set()
+    return AdminCompanySessionListResponse(
+        total=total,
+        items=[
+            _public_company_session(session, now=now, online_session_ids=online_session_ids)
+            for session in sessions
+        ],
+    )
+
+
+@router.post("/admin/sessions/{session_id}/revoke", response_model=AdminRevokeSessionsResponse)
+async def revoke_admin_company_session(
+    session_id: str,
+    request: Request,
+    db: DbDep,
+    body: AdminRevokeSessionRequest | None = None,
+) -> AdminRevokeSessionsResponse:
+    admin = _require_admin(request)
+    reason = (body.reason if body else "").strip()
+    revoked_count = await _company_store(request).revoke_session_by_id(
+        session_id,
+        revoked_by_user_id=admin.id,
+        revoked_by_email=admin.email,
+        reason=reason,
+    )
+    if revoked_count:
+        await _record_admin_action(
+            db,
+            user=admin,
+            action="revoke_company_session",
+            target_type="company_session",
+            target_id=session_id,
+            metadata={"reason": reason},
+        )
+    return AdminRevokeSessionsResponse(revoked_count=revoked_count)
+
+
+@router.post("/admin/users/{user_id}/revoke-sessions", response_model=AdminRevokeSessionsResponse)
+async def revoke_admin_user_company_sessions(
+    user_id: str,
+    request: Request,
+    db: DbDep,
+    body: AdminRevokeSessionRequest | None = None,
+) -> AdminRevokeSessionsResponse:
+    admin = _require_admin(request)
+    reason = (body.reason if body else "").strip()
+    revoked_count = await _company_store(request).revoke_sessions(
+        user_ids=[user_id],
+        revoked_by_user_id=admin.id,
+        revoked_by_email=admin.email,
+        reason=reason,
+    )
+    if revoked_count:
+        await _record_admin_action(
+            db,
+            user=admin,
+            action="revoke_company_user_sessions",
+            target_type="company_user",
+            target_id=user_id,
+            metadata={"reason": reason, "revoked_count": revoked_count},
+        )
+    return AdminRevokeSessionsResponse(revoked_count=revoked_count)
+
+
+@router.post("/admin/sessions/revoke-bulk", response_model=AdminRevokeSessionsResponse)
+async def revoke_admin_company_sessions_bulk(
+    request: Request,
+    db: DbDep,
+    body: AdminRevokeSessionsRequest,
+) -> AdminRevokeSessionsResponse:
+    admin = _require_admin(request)
+    reason = body.reason.strip()
+    revoked_count = await _company_store(request).revoke_sessions(
+        session_ids=body.session_ids,
+        user_ids=body.user_ids,
+        revoked_by_user_id=admin.id,
+        revoked_by_email=admin.email,
+        reason=reason,
+    )
+    if revoked_count:
+        await _record_admin_action(
+            db,
+            user=admin,
+            action="revoke_company_sessions_bulk",
+            target_type="company_session",
+            target_id="bulk",
+            metadata={
+                "reason": reason,
+                "session_ids": body.session_ids,
+                "user_ids": body.user_ids,
+                "revoked_count": revoked_count,
+            },
+        )
+    return AdminRevokeSessionsResponse(revoked_count=revoked_count)
 
 
 @router.get("/admin/model-policy", response_model=AdminModelPolicyResponse)
@@ -615,6 +805,58 @@ def _public_feedback(request: Request, feedback: CompanyFeedback) -> AdminFeedba
         image_download_url=image_download_url,
         time_created=feedback.time_created,
         time_updated=feedback.time_updated,
+    )
+
+
+def _as_aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _is_session_online(
+    session: CompanySessionRecord,
+    *,
+    now: datetime | None = None,
+    online_session_ids: set[str] | None = None,
+) -> bool:
+    current = now or datetime.now(timezone.utc)
+    if session.revoked_at is not None:
+        return False
+    if _as_aware_utc(session.expires_at) <= current:
+        return False
+    if online_session_ids is not None and session.id in online_session_ids:
+        return True
+    return _as_aware_utc(session.last_seen_at) >= current - timedelta(seconds=120)
+
+
+def _public_company_session(
+    session: CompanySessionRecord,
+    *,
+    now: datetime | None = None,
+    online_session_ids: set[str] | None = None,
+) -> AdminCompanySessionResponse:
+    return AdminCompanySessionResponse(
+        id=session.id,
+        user_id=session.user_id,
+        user_email=session.user_email,
+        user_display_name=session.user_display_name,
+        user_role=session.user_role,
+        user_is_active=session.user_is_active,
+        device_id=session.device_id,
+        device_name=session.device_name,
+        platform=session.platform,
+        app_version=session.app_version,
+        ip_address=session.ip_address,
+        user_agent=session.user_agent,
+        is_online=_is_session_online(session, now=now, online_session_ids=online_session_ids),
+        expires_at=session.expires_at,
+        revoked_at=session.revoked_at,
+        time_created=session.time_created,
+        last_seen_at=session.last_seen_at,
+        revoked_by_user_id=session.revoked_by_user_id,
+        revoked_by_email=session.revoked_by_email,
+        revoked_reason=session.revoked_reason,
     )
 
 
@@ -982,6 +1224,23 @@ async def get_audit_summary(
     db: DbDep,
 ) -> dict[str, Any]:
     _require_admin(request)
+    now = datetime.now(timezone.utc)
+    settings = getattr(request.app.state, "settings", None)
+    activity_days = []
+    online_users: set[str] = set()
+    online_sessions = 0
+    store = getattr(request.app.state, "company_auth_store", None)
+    presence = getattr(request.app.state, "company_presence", None)
+    online_session_ids = await presence.online_session_ids() if presence is not None and presence.available else set()
+    if store is not None and hasattr(store, "activity_days"):
+        activity_days = await store.activity_days(days=30)
+    if store is not None and hasattr(store, "list_sessions"):
+        _, company_sessions = await store.list_sessions(include_revoked=False, limit=10_000)
+        for session in company_sessions:
+            if _is_session_online(session, now=now, online_session_ids=online_session_ids):
+                online_sessions += 1
+                online_users.add(session.user_id)
+
     usage = (
         await db.execute(
             select(
@@ -1008,12 +1267,31 @@ async def get_audit_summary(
             select(func.count()).select_from(AuditRiskFinding).where(AuditRiskFinding.status == "open")
         )
     ).scalar_one()
+    today = now.date().isoformat()
+    today_activity = next((item for item in activity_days if item.date == today), None)
     return {
         "sessions": {"total": sessions_total},
         "messages": {"total": messages_total},
         "files": {"total": files_total, "uploaded": files_uploaded},
         "tool_calls": {"total": tool_calls_total},
         "risks": {"total": risks_total, "open": risks_open},
+        "activity": {
+            "daily_active_users": today_activity.active_users if today_activity else 0,
+            "online_users": len(online_users),
+            "online_sessions": online_sessions,
+            "redis": {
+                "enabled": bool(getattr(settings, "redis_enabled", False)),
+                "available": bool(presence is not None and presence.available),
+            },
+            "series": [
+                {
+                    "date": item.date,
+                    "active_users": item.active_users,
+                    "session_count": item.session_count,
+                }
+                for item in activity_days
+            ],
+        },
         "usage": {
             "input_tokens": int(usage["input_tokens"] or 0),
             "output_tokens": int(usage["output_tokens"] or 0),
@@ -1024,6 +1302,34 @@ async def get_audit_summary(
             "cost": float(usage["cost"] or 0),
         },
     }
+
+
+@router.get("/admin/audit/admin-actions", response_model=AdminActionListResponse)
+async def list_admin_actions(
+    request: Request,
+    db: DbDep,
+    action: str | None = None,
+    actor_user_id: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> AdminActionListResponse:
+    _require_admin(request)
+    stmt = select(AuditAdminAction)
+    count_stmt = select(func.count()).select_from(AuditAdminAction)
+    filters = []
+    if action:
+        filters.append(AuditAdminAction.action == action.strip())
+    if actor_user_id:
+        filters.append(AuditAdminAction.actor_user_id == actor_user_id.strip())
+    for condition in filters:
+        stmt = stmt.where(condition)
+        count_stmt = count_stmt.where(condition)
+    stmt = stmt.order_by(AuditAdminAction.time_created.desc()).offset(max(0, int(offset or 0))).limit(
+        min(max(int(limit or 100), 1), 500)
+    )
+    total = (await db.execute(count_stmt)).scalar_one()
+    rows = list((await db.execute(stmt)).scalars().all())
+    return AdminActionListResponse(total=int(total or 0), items=[_public_admin_action(row) for row in rows])
 
 
 @router.get("/admin/audit/risks")

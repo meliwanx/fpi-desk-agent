@@ -195,6 +195,31 @@ h2 {
   font-size: 13px;
 }
 
+.activity-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.activity-day {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px;
+}
+
+.activity-day strong {
+  font-size: 18px;
+}
+
+.activity-day span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .button {
   display: inline-flex;
   align-items: center;
@@ -211,6 +236,16 @@ h2 {
 
 .button:hover {
   opacity: .92;
+}
+
+.button.danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
+}
+
+.danger-text {
+  color: var(--danger);
 }
 
 .button:disabled {
@@ -272,6 +307,14 @@ label {
   gap: 10px;
   margin-bottom: 14px;
   flex-wrap: wrap;
+}
+
+.action-filter {
+  max-width: 220px;
+}
+
+.empty-state {
+  margin-top: 14px;
 }
 
 .hint {

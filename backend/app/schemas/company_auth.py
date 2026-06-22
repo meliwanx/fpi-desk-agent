@@ -20,6 +20,7 @@ class CompanyLoginRequest(BaseModel):
 
 
 class CompanyLoginResponse(BaseModel):
+    session_id: str
     token: str
     expires_at: datetime
     user: CompanyUserInfo

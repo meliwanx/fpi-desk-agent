@@ -97,6 +97,10 @@ class Settings(BaseSettings):
     company_auth_bootstrap_password: str = ""
     company_auth_bootstrap_file: str = "company_auth_bootstrap.json"
     company_auth_session_days: int = 30
+    redis_enabled: bool = False
+    redis_url: str = ""
+    redis_prefix: str = "fpi_agent"
+    redis_presence_ttl_seconds: int = 90
 
     # --- Enterprise audit sync ---
     audit_sync_enabled: bool = False

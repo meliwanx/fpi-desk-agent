@@ -57,12 +57,28 @@ class CompanyAuthMiddleware:
 
         headers = dict(scope.get("headers", []))
         token = headers.get(b"x-fpi-session", b"").decode("latin-1", errors="replace").strip()
-        user = await store.get_session_user(token)
+        get_context = getattr(store, "get_session_context", None)
+        context = await get_context(token) if get_context is not None else None
+        user = context.user if context is not None else await store.get_session_user(token)
         if user is None:
             await self._reject(send, 401, "Company login required")
             return
 
-        scope.setdefault("state", {})["company_user"] = user
+        state_scope = scope.setdefault("state", {})
+        state_scope["company_user"] = user
+        state_scope["company_session_id"] = context.session_id if context is not None else ""
+        presence = getattr(state, "company_presence", None) if state else None
+        if presence is not None and context is not None:
+            await presence.touch_session(
+                user_id=user.id,
+                session_id=context.session_id,
+                metadata={
+                    "platform": context.platform,
+                    "app_version": context.app_version,
+                    "device_id": context.device_id,
+                    "device_name": context.device_name,
+                },
+            )
         await self.app(scope, receive, send)
 
     @staticmethod

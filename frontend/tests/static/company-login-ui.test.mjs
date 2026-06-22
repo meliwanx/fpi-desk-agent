@@ -29,3 +29,15 @@ assert.match(
   /desktopAPI\.close\(\)/,
   "company login window controls should include a close action",
 );
+
+assert.match(
+  loginGate,
+  /X-FPI-App-Version/,
+  "company login should send app version metadata for server-side session observability",
+);
+
+assert.match(
+  loginGate,
+  /X-FPI-Platform/,
+  "company login should send platform metadata for server-side session observability",
+);

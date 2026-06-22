@@ -35,10 +35,33 @@ interface CompanySessionResponse {
 }
 
 const REMEMBERED_LOGIN_EMAIL_KEY = "fpi-agent-login-email";
+const COMPANY_DEVICE_ID_KEY = "fpi-agent-device-id";
 
 function readRememberedLoginEmail(): string {
   if (typeof window === "undefined") return "";
   return localStorage.getItem(REMEMBERED_LOGIN_EMAIL_KEY) || "";
+}
+
+function readCompanyDeviceId(): string {
+  if (typeof window === "undefined") return "";
+  const existing = localStorage.getItem(COMPANY_DEVICE_ID_KEY);
+  if (existing) return existing;
+  const generated =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `device-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  localStorage.setItem(COMPANY_DEVICE_ID_KEY, generated);
+  return generated;
+}
+
+async function readDesktopAppVersion(): Promise<string> {
+  if (!IS_DESKTOP) return "";
+  try {
+    const { getVersion } = await import("@tauri-apps/api/app");
+    return await getVersion();
+  } catch {
+    return "";
+  }
 }
 
 function LoginWindowControls() {
@@ -101,6 +124,7 @@ function LoginWindowControls() {
 }
 
 export function CompanyLoginGate({ children }: { children: ReactNode }) {
+  const platform = usePlatform();
   const [session, setSession] = useState<CompanySessionPayload | null>(null);
   const [checking, setChecking] = useState(true);
   const [email, setEmail] = useState(() => readRememberedLoginEmail());
@@ -162,10 +186,19 @@ export function CompanyLoginGate({ children }: { children: ReactNode }) {
     setError(null);
     const account = email.trim();
     try {
+      const appVersion = await readDesktopAppVersion();
       const response = await enterpriseApi.post<CompanyLoginResponse>(
         API.COMPANY_AUTH.LOGIN,
         { email: account, password },
-        { includeCompanySession: false },
+        {
+          includeCompanySession: false,
+          headers: {
+            "X-FPI-Device-ID": readCompanyDeviceId(),
+            "X-FPI-Device-Name": navigator.platform || navigator.userAgent || "Desktop",
+            "X-FPI-Platform": platform === "unknown" ? "" : platform,
+            "X-FPI-App-Version": appVersion,
+          },
+        },
       );
       if (rememberEmail) {
         localStorage.setItem(REMEMBERED_LOGIN_EMAIL_KEY, account);

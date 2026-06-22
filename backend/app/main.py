@@ -127,6 +127,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     company_auth_store = None
     if settings.company_auth_enabled:
         from app.company_auth.store import CompanyAuthStore
+        from app.company_auth.presence import CompanyPresenceStore
 
         company_auth_store = CompanyAuthStore(
             get_company_auth_database_url(settings),
@@ -143,9 +144,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
         app.state.company_auth_store = company_auth_store
         set_company_auth_store(company_auth_store)
+        if settings.redis_enabled:
+            app.state.company_presence = await CompanyPresenceStore.from_url(
+                settings.redis_url,
+                prefix=settings.redis_prefix,
+                ttl_seconds=settings.redis_presence_ttl_seconds,
+            )
+        else:
+            app.state.company_presence = CompanyPresenceStore(redis=None)
         logger.info("Company auth enabled for %s", settings.company_auth_bootstrap_email)
     else:
         app.state.company_auth_store = None
+        app.state.company_presence = None
         set_company_auth_store(None)
 
     # Provider registry
@@ -566,6 +576,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     company_auth_store = getattr(app.state, "company_auth_store", None)
     if company_auth_store is not None:
         await company_auth_store.dispose()
+    company_presence = getattr(app.state, "company_presence", None)
+    if company_presence is not None:
+        await company_presence.close()
 
     from app.sandbox.manager import reset_sandbox_manager
 

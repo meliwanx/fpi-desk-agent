@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Header, HTTPException, Response, status
+from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 
 from app.company_auth.store import CompanyUser
 from app.dependencies import CompanyAuthStoreDep
@@ -27,14 +27,24 @@ def _public_user(user: CompanyUser) -> CompanyUserInfo:
 
 @router.post("/company-auth/login", response_model=CompanyLoginResponse)
 async def login(
+    request: Request,
     body: CompanyLoginRequest,
     store: CompanyAuthStoreDep,
 ) -> CompanyLoginResponse:
     user = await store.authenticate(body.email, body.password)
     if user is None:
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    session = await store.create_session(user.id)
+    session = await store.create_session(
+        user.id,
+        device_id=request.headers.get("x-fpi-device-id", ""),
+        device_name=request.headers.get("x-fpi-device-name", ""),
+        platform=request.headers.get("x-fpi-platform", ""),
+        app_version=request.headers.get("x-fpi-app-version", ""),
+        ip_address=request.client.host if request.client else "",
+        user_agent=request.headers.get("user-agent", ""),
+    )
     return CompanyLoginResponse(
+        session_id=session.id,
         token=session.token,
         expires_at=session.expires_at,
         user=_public_user(user),

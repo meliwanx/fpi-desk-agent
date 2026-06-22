@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 
 import pytest
+from sqlalchemy import select
 
 from app.company_auth.store import CompanyAuthStore, CompanyModelEntry, CompanyModelPolicy, CompanyUser
 from app.models.audit import (
@@ -308,6 +309,166 @@ async def test_admin_can_upload_update_asset_and_bind_policy(app_client, tmp_pat
         assert policy["macos_asset_id"] == asset["id"]
         assert policy["macos_asset"]["id"] == asset["id"]
         assert policy["macos_asset"]["uploaded_by_display_name"] == "Admin"
+    finally:
+        await store.dispose()
+
+
+async def test_admin_can_list_and_revoke_company_sessions(app_client, db, tmp_path):
+    store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
+    await store.startup()
+    app_client.app.state.company_auth_store = store
+    app_client.app.middleware_stack = None
+
+    admin = CompanyUser(
+        id="admin-1",
+        email="admin@example.com",
+        display_name="Admin",
+        role="admin",
+        is_active=True,
+    )
+
+    async def inject_admin(request, call_next):
+        request.state.company_user = admin
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_admin)
+
+    try:
+        employee = await store.create_user(
+            email="employee@example.com",
+            display_name="员工一",
+            password="EmployeePassword123!",
+            role="user",
+        )
+        session = await store.create_session(
+            employee.id,
+            device_id="desktop-001",
+            device_name="财务部电脑",
+            platform="windows",
+            app_version="1.4.0",
+            ip_address="203.0.113.10",
+            user_agent="fpi-agent/1.4.0",
+        )
+
+        listed = await app_client.get("/api/admin/sessions")
+        assert listed.status_code == 200
+        payload = listed.json()
+        assert payload["total"] == 1
+        item = payload["items"][0]
+        assert item["id"] == session.id
+        assert item["user_email"] == "employee@example.com"
+        assert item["device_name"] == "财务部电脑"
+        assert item["platform"] == "windows"
+        assert item["app_version"] == "1.4.0"
+        assert item["is_online"] is True
+
+        revoked = await app_client.post(
+            f"/api/admin/sessions/{session.id}/revoke",
+            json={"reason": "账号风险，需要重新登录"},
+        )
+        assert revoked.status_code == 200
+        assert revoked.json()["revoked_count"] == 1
+        assert await store.get_session_user(session.token) is None
+
+        actions = (await db.execute(select(AuditAdminAction))).scalars().all()
+        assert [(action.action, action.target_type, action.target_id) for action in actions] == [
+            ("revoke_company_session", "company_session", session.id)
+        ]
+        assert actions[0].metadata_json["reason"] == "账号风险，需要重新登录"
+
+        action_log = await app_client.get("/api/admin/audit/admin-actions")
+        assert action_log.status_code == 200
+        action_item = action_log.json()["items"][0]
+        assert action_item["actor_email"] == "admin@example.com"
+        assert action_item["action"] == "revoke_company_session"
+        assert action_item["target_id"] == session.id
+        assert action_item["metadata"]["reason"] == "账号风险，需要重新登录"
+    finally:
+        await store.dispose()
+
+
+async def test_admin_can_bulk_revoke_user_sessions(app_client, tmp_path):
+    store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
+    await store.startup()
+    app_client.app.state.company_auth_store = store
+    app_client.app.middleware_stack = None
+
+    async def inject_admin(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="admin-1",
+            email="admin@example.com",
+            display_name="Admin",
+            role="admin",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_admin)
+
+    try:
+        first = await store.create_user(
+            email="first@example.com",
+            display_name="员工一",
+            password="Password123!",
+            role="user",
+        )
+        second = await store.create_user(
+            email="second@example.com",
+            display_name="员工二",
+            password="Password123!",
+            role="user",
+        )
+        first_session = await store.create_session(first.id)
+        second_session = await store.create_session(second.id)
+
+        response = await app_client.post(
+            "/api/admin/sessions/revoke-bulk",
+            json={"user_ids": [first.id, second.id], "reason": "批量安全复核"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["revoked_count"] == 2
+        assert await store.get_session_user(first_session.token) is None
+        assert await store.get_session_user(second_session.token) is None
+    finally:
+        await store.dispose()
+
+
+async def test_admin_summary_includes_activity_and_online_metrics(app_client, tmp_path):
+    store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
+    await store.startup()
+    app_client.app.state.company_auth_store = store
+    app_client.app.middleware_stack = None
+
+    async def inject_admin(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="admin-1",
+            email="admin@example.com",
+            display_name="Admin",
+            role="admin",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_admin)
+
+    try:
+        employee = await store.create_user(
+            email="employee@example.com",
+            display_name="员工一",
+            password="Password123!",
+            role="user",
+        )
+        await store.create_session(employee.id, platform="macos", app_version="1.4.0")
+
+        response = await app_client.get("/api/admin/audit/summary")
+
+        assert response.status_code == 200
+        activity = response.json()["activity"]
+        assert activity["daily_active_users"] == 1
+        assert activity["online_users"] == 1
+        assert activity["online_sessions"] == 1
+        assert activity["series"][-1]["active_users"] == 1
     finally:
         await store.dispose()
 

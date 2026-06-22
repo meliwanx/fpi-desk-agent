@@ -11,7 +11,7 @@ import {
   type ModelPolicy,
 } from "./modelPolicy";
 
-type Tab = "overview" | "sessions" | "risks" | "tools" | "feedback" | "users" | "models" | "updates";
+type Tab = "overview" | "sessions" | "risks" | "tools" | "feedback" | "users" | "actions" | "models" | "updates";
 
 interface UserInfo {
   id: string;
@@ -32,6 +32,20 @@ interface Summary {
   files: { total: number; uploaded: number };
   tool_calls: { total: number };
   risks: { total: number; open: number };
+  activity: {
+    daily_active_users: number;
+    online_users: number;
+    online_sessions: number;
+    redis?: {
+      enabled: boolean;
+      available: boolean;
+    };
+    series: Array<{
+      date: string;
+      active_users: number;
+      session_count: number;
+    }>;
+  };
   usage: {
     input_tokens: number;
     output_tokens: number;
@@ -41,6 +55,28 @@ interface Summary {
     total_tokens: number;
     cost: number;
   };
+}
+
+interface CompanySession {
+  id: string;
+  user_id: string;
+  user_email: string;
+  user_display_name: string;
+  user_role: string;
+  user_is_active: boolean;
+  device_id: string;
+  device_name: string;
+  platform: string;
+  app_version: string;
+  ip_address: string;
+  user_agent: string;
+  is_online: boolean;
+  expires_at: string;
+  revoked_at: string | null;
+  time_created: string;
+  last_seen_at: string;
+  revoked_by_email: string;
+  revoked_reason: string;
 }
 
 interface AuditSession {
@@ -80,6 +116,19 @@ interface ToolCallItem {
   workspace: string;
   session_title: string;
   employee: { display_name: string; email: string } | null;
+  time_updated: string;
+}
+
+interface AdminActionItem {
+  id: string;
+  actor_user_id: string;
+  actor_email: string;
+  actor_display_name: string;
+  action: string;
+  target_type: string;
+  target_id: string;
+  metadata: Record<string, unknown>;
+  time_created: string;
   time_updated: string;
 }
 
@@ -409,6 +458,7 @@ export function App() {
             ["tools", "工具调用"],
             ["feedback", "问题反馈"],
             ["users", "员工管理"],
+            ["actions", "管控日志"],
             ["models", "模型管控"],
             ["updates", "版本更新"],
           ].map(([key, label]) => (
@@ -442,6 +492,7 @@ export function App() {
         {tab === "tools" && <ToolCalls api={api} />}
         {tab === "feedback" && <FeedbackPanel api={api} token={token} />}
         {tab === "users" && <Users api={api} />}
+        {tab === "actions" && <AdminActions api={api} />}
         {tab === "models" && <ModelPolicyPanel api={api} />}
         {tab === "updates" && <UpdatePolicyPanel api={api} />}
       </main>
@@ -457,6 +508,7 @@ function tabTitle(tab: Tab): string {
     tools: "工具调用",
     feedback: "问题反馈",
     users: "员工管理",
+    actions: "管控日志",
     models: "模型管控",
     updates: "版本更新",
   }[tab];
@@ -470,6 +522,7 @@ function tabSubtitle(tab: Tab): string {
     tools: "审计模型调用的本地工具、输入、输出和状态。",
     feedback: "查看员工提交的问题描述和截图。",
     users: "创建员工账号、查看角色和启用状态。",
+    actions: "追踪管理员的下载、踢号、批量管控等关键动作。",
     models: "统一控制客户端可见模型和默认模型。",
     updates: "发布客户端版本策略，控制是否强制员工升级。",
   }[tab];
@@ -544,6 +597,9 @@ function Overview({ api }: { api: ReturnType<typeof useApi> }) {
   if (!summary) return <div className="card muted">加载中...</div>;
 
   const cards = [
+    ["今日活跃", summary.activity.daily_active_users],
+    ["在线员工", summary.activity.online_users],
+    ["在线设备", summary.activity.online_sessions],
     ["会话", summary.sessions.total],
     ["消息", summary.messages.total],
     ["工具调用", summary.tool_calls.total],
@@ -570,6 +626,20 @@ function Overview({ api }: { api: ReturnType<typeof useApi> }) {
           <span>缓存写：{formatNumber(summary.usage.cache_write_tokens)}</span>
           <span>成本：${summary.usage.cost.toFixed(4)}</span>
         </div>
+      </div>
+      <div className="card wide">
+        <h2>近 30 天活跃</h2>
+        <div className="activity-strip">
+          {summary.activity.series.slice(-14).map((item) => (
+            <div className="activity-day" key={item.date}>
+              <strong>{formatNumber(item.active_users)}</strong>
+              <span>{item.date.slice(5)}</span>
+            </div>
+          ))}
+        </div>
+        <p className="muted">
+          Redis 在线态：{summary.activity.redis?.available ? "已启用" : "未启用或不可用"}，数据库 last_seen 作为兜底。
+        </p>
       </div>
     </div>
   );
@@ -713,6 +783,70 @@ function ToolCalls({ api }: { api: ReturnType<typeof useApi> }) {
   );
 }
 
+function adminActionLabel(action: string): string {
+  return {
+    "audit.file.download": "下载审计文件",
+    revoke_company_session: "踢单个会话",
+    revoke_company_user_sessions: "踢员工全部设备",
+    revoke_company_sessions_bulk: "批量踢号",
+  }[action] || action || "-";
+}
+
+function AdminActions({ api }: { api: ReturnType<typeof useApi> }) {
+  const [items, setItems] = useState<AdminActionItem[]>([]);
+  const [actionFilter, setActionFilter] = useState("");
+  const [error, setError] = useState("");
+
+  async function loadActions() {
+    setError("");
+    const query = actionFilter ? `?action=${encodeURIComponent(actionFilter)}` : "";
+    try {
+      const data = await api<{ items: AdminActionItem[] }>(`/api/admin/audit/admin-actions${query}`);
+      setItems(data.items);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "管控日志加载失败");
+    }
+  }
+
+  useEffect(() => {
+    void loadActions();
+  }, []);
+
+  return (
+    <section className="card">
+      <div className="toolbar">
+        <select className="input action-filter" value={actionFilter} onChange={(event) => setActionFilter(event.target.value)}>
+          <option value="">全部动作</option>
+          <option value="audit.file.download">下载审计文件</option>
+          <option value="revoke_company_session">踢单个会话</option>
+          <option value="revoke_company_user_sessions">踢员工全部设备</option>
+          <option value="revoke_company_sessions_bulk">批量踢号</option>
+        </select>
+        <button className="button" onClick={() => void loadActions()}>查询</button>
+      </div>
+      {error && <p className="error">{error}</p>}
+      <table>
+        <thead><tr><th>时间</th><th>管理员</th><th>动作</th><th>目标</th><th>详情</th></tr></thead>
+        <tbody>
+          {items.map((item) => (
+            <tr key={item.id}>
+              <td>{compactDate(item.time_created)}</td>
+              <td>
+                <strong>{item.actor_display_name || item.actor_email}</strong>
+                <div className="muted">{item.actor_email}</div>
+              </td>
+              <td><span className="pill">{adminActionLabel(item.action)}</span></td>
+              <td className="mono">{item.target_type}:{item.target_id}</td>
+              <td className="mono">{compactAuditValue(item.metadata, 240)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {items.length === 0 && !error && <p className="muted empty-state">暂无管控日志</p>}
+    </section>
+  );
+}
+
 function FeedbackPanel({ api, token }: { api: ReturnType<typeof useApi>; token: string }) {
   const [items, setItems] = useState<FeedbackItem[]>([]);
   const [error, setError] = useState("");
@@ -810,15 +944,28 @@ function FeedbackImagePreview({ url, token, alt }: { url: string; token: string;
 
 function Users({ api }: { api: ReturnType<typeof useApi> }) {
   const [users, setUsers] = useState<UserInfo[]>([]);
+  const [sessions, setSessions] = useState<CompanySession[]>([]);
+  const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("user");
+  const [revokeReason, setRevokeReason] = useState("管理员强制重新登录");
+  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
   async function loadUsers() {
     const data = await api<UserInfo[]>("/api/admin/users");
     setUsers(data);
+  }
+
+  async function loadSessions() {
+    const data = await api<{ items: CompanySession[] }>("/api/admin/sessions");
+    setSessions(data.items);
+  }
+
+  async function loadAll() {
+    await Promise.all([loadUsers(), loadSessions()]);
   }
 
   async function createUser() {
@@ -831,14 +978,58 @@ function Users({ api }: { api: ReturnType<typeof useApi> }) {
       setEmail("");
       setDisplayName("");
       setPassword("");
-      await loadUsers();
+      await loadAll();
     } catch {
       setError("新增员工失败");
     }
   }
 
+  function toggleSession(sessionId: string, checked: boolean) {
+    setSelectedSessionIds((current) =>
+      checked ? Array.from(new Set([...current, sessionId])) : current.filter((id) => id !== sessionId),
+    );
+  }
+
+  function sessionsForUser(userId: string) {
+    return sessions.filter((session) => session.user_id === userId);
+  }
+
+  async function revokeSession(sessionId: string) {
+    setMessage("");
+    await api(`/api/admin/sessions/${encodeURIComponent(sessionId)}/revoke`, {
+      method: "POST",
+      body: JSON.stringify({ reason: revokeReason }),
+    });
+    setSelectedSessionIds((current) => current.filter((id) => id !== sessionId));
+    setMessage("已踢下线，用户下次请求会回到登录页");
+    await loadSessions();
+  }
+
+  async function revokeUserSessions(userId: string) {
+    setMessage("");
+    await api(`/api/admin/users/${encodeURIComponent(userId)}/revoke-sessions`, {
+      method: "POST",
+      body: JSON.stringify({ reason: revokeReason }),
+    });
+    setSelectedSessionIds([]);
+    setMessage("已踢下线该员工的全部设备");
+    await loadSessions();
+  }
+
+  async function revokeSelectedSessions() {
+    if (selectedSessionIds.length === 0) return;
+    setMessage("");
+    await api("/api/admin/sessions/revoke-bulk", {
+      method: "POST",
+      body: JSON.stringify({ session_ids: selectedSessionIds, reason: revokeReason }),
+    });
+    setSelectedSessionIds([]);
+    setMessage(`已批量踢下线 ${selectedSessionIds.length} 个会话`);
+    await loadSessions();
+  }
+
   useEffect(() => {
-    void loadUsers();
+    void loadAll();
   }, []);
 
   return (
@@ -858,11 +1049,66 @@ function Users({ api }: { api: ReturnType<typeof useApi> }) {
         {error && <p className="error">{error}</p>}
       </section>
       <section className="card">
+        <div className="toolbar">
+          <h2>在线与踢号</h2>
+          <input
+            className="input"
+            placeholder="踢号原因"
+            value={revokeReason}
+            onChange={(event) => setRevokeReason(event.target.value)}
+          />
+          <button className="button outline" onClick={() => void loadSessions()}>刷新在线状态</button>
+          <button
+            className="button danger"
+            disabled={selectedSessionIds.length === 0}
+            onClick={() => void revokeSelectedSessions()}
+          >
+            批量踢下线
+          </button>
+        </div>
+        {message && <p className="success">{message}</p>}
         <table>
-          <thead><tr><th>账号</th><th>姓名</th><th>角色</th><th>状态</th></tr></thead>
+          <thead><tr><th></th><th>员工</th><th>设备</th><th>平台</th><th>版本</th><th>IP</th><th>状态</th><th>最近活跃</th><th>操作</th></tr></thead>
+          <tbody>
+            {sessions.map((session) => (
+              <tr key={session.id}>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={selectedSessionIds.includes(session.id)}
+                    onChange={(event) => toggleSession(session.id, event.target.checked)}
+                  />
+                </td>
+                <td>{session.user_display_name || session.user_email}</td>
+                <td>{session.device_name || session.device_id || "未知设备"}</td>
+                <td>{session.platform || "-"}</td>
+                <td>{session.app_version || "-"}</td>
+                <td>{session.ip_address || "-"}</td>
+                <td><span className={`pill ${session.is_online ? "success" : "muted-pill"}`}>{session.is_online ? "在线" : "离线"}</span></td>
+                <td>{compactDate(session.last_seen_at)}</td>
+                <td>
+                  <button className="button ghost danger-text" onClick={() => void revokeSession(session.id)}>踢下线</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+      <section className="card">
+        <table>
+          <thead><tr><th>账号</th><th>姓名</th><th>角色</th><th>状态</th><th>在线设备</th><th>操作</th></tr></thead>
           <tbody>
             {users.map((user) => (
-              <tr key={user.id}><td>{user.email}</td><td>{user.display_name}</td><td>{user.role}</td><td>{user.is_active ? "启用" : "停用"}</td></tr>
+              <tr key={user.id}>
+                <td>{user.email}</td>
+                <td>{user.display_name}</td>
+                <td>{user.role}</td>
+                <td>{user.is_active ? "启用" : "停用"}</td>
+                <td>{sessionsForUser(user.id).filter((session) => session.is_online).length}</td>
+                <td>
+                  <button className="button ghost danger-text" onClick={() => void revokeUserSessions(user.id)}>踢全部设备</button>
+                </td>
+              </tr>
             ))}
           </tbody>
         </table>

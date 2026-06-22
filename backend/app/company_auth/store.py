@@ -19,8 +19,10 @@ from sqlalchemy import (
     Table,
     Text,
     and_,
+    func,
     insert,
     select,
+    inspect,
     update,
 )
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -47,8 +49,49 @@ class CompanyUser:
 
 @dataclass(frozen=True)
 class CompanySession:
+    id: str
     token: str
     expires_at: datetime
+
+
+@dataclass(frozen=True)
+class CompanySessionRecord:
+    id: str
+    user_id: str
+    user_email: str
+    user_display_name: str
+    user_role: str
+    user_is_active: bool
+    expires_at: datetime
+    revoked_at: datetime | None
+    time_created: datetime
+    last_seen_at: datetime
+    device_id: str
+    device_name: str
+    platform: str
+    app_version: str
+    ip_address: str
+    user_agent: str
+    revoked_by_user_id: str
+    revoked_by_email: str
+    revoked_reason: str
+
+
+@dataclass(frozen=True)
+class CompanySessionContext:
+    user: CompanyUser
+    session_id: str
+    device_id: str
+    device_name: str
+    platform: str
+    app_version: str
+
+
+@dataclass(frozen=True)
+class CompanyActivityDay:
+    date: str
+    active_users: int
+    session_count: int
 
 
 @dataclass(frozen=True)
@@ -212,6 +255,15 @@ class CompanyAuthStore:
             Column("revoked_at", DateTime(timezone=True), nullable=True),
             Column("time_created", DateTime(timezone=True), nullable=False),
             Column("last_seen_at", DateTime(timezone=True), nullable=False),
+            Column("device_id", String(128), nullable=True),
+            Column("device_name", String(255), nullable=True),
+            Column("platform", String(50), nullable=True),
+            Column("app_version", String(64), nullable=True),
+            Column("ip_address", String(64), nullable=True),
+            Column("user_agent", Text, nullable=True),
+            Column("revoked_by_user_id", String(32), nullable=True),
+            Column("revoked_by_email", String(255), nullable=True),
+            Column("revoked_reason", Text, nullable=True),
         )
         self.settings = Table(
             f"{table_prefix}_settings",
@@ -269,6 +321,7 @@ class CompanyAuthStore:
     async def startup(self) -> None:
         async with self.engine.begin() as conn:
             await conn.run_sync(self.metadata.create_all)
+            await conn.run_sync(self._add_missing_columns)
 
     async def dispose(self) -> None:
         await self.engine.dispose()
@@ -442,25 +495,68 @@ class CompanyAuthStore:
             ).mappings().one()
         return self._user_from_mapping(row)
 
-    async def create_session(self, user_id: str) -> CompanySession:
+    def _add_missing_columns(self, sync_conn) -> None:
+        inspector = inspect(sync_conn)
+        existing = {column["name"] for column in inspector.get_columns(self.sessions.name)}
+        table = sync_conn.dialect.identifier_preparer.quote(self.sessions.name)
+        columns = {
+            "device_id": "VARCHAR(128)",
+            "device_name": "VARCHAR(255)",
+            "platform": "VARCHAR(50)",
+            "app_version": "VARCHAR(64)",
+            "ip_address": "VARCHAR(64)",
+            "user_agent": "TEXT",
+            "revoked_by_user_id": "VARCHAR(32)",
+            "revoked_by_email": "VARCHAR(255)",
+            "revoked_reason": "TEXT",
+        }
+        for name, ddl_type in columns.items():
+            if name not in existing:
+                sync_conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {ddl_type}")
+
+    async def create_session(
+        self,
+        user_id: str,
+        *,
+        device_id: str = "",
+        device_name: str = "",
+        platform: str = "",
+        app_version: str = "",
+        ip_address: str = "",
+        user_agent: str = "",
+    ) -> CompanySession:
         token = generate_session_token()
         now = _utcnow()
         expires_at = now + timedelta(days=self.session_days)
+        session_id = generate_ulid()
         async with self.engine.begin() as conn:
             await conn.execute(
                 insert(self.sessions).values(
-                    id=generate_ulid(),
+                    id=session_id,
                     user_id=user_id,
                     token_hash=hash_token(token),
                     expires_at=expires_at,
                     revoked_at=None,
                     time_created=now,
                     last_seen_at=now,
+                    device_id=str(device_id or "").strip(),
+                    device_name=str(device_name or "").strip(),
+                    platform=str(platform or "").strip().lower(),
+                    app_version=str(app_version or "").strip().lstrip("vV"),
+                    ip_address=str(ip_address or "").strip(),
+                    user_agent=str(user_agent or "").strip()[:1000],
+                    revoked_by_user_id="",
+                    revoked_by_email="",
+                    revoked_reason="",
                 )
             )
-        return CompanySession(token=token, expires_at=expires_at)
+        return CompanySession(id=session_id, token=token, expires_at=expires_at)
 
     async def get_session_user(self, token: str) -> CompanyUser | None:
+        context = await self.get_session_context(token)
+        return context.user if context is not None else None
+
+    async def get_session_context(self, token: str) -> CompanySessionContext | None:
         if not token:
             return None
         now = _utcnow()
@@ -468,6 +564,11 @@ class CompanyAuthStore:
         async with self.engine.begin() as conn:
             result = await conn.execute(
                 select(
+                    self.sessions.c.id.label("session_id"),
+                    self.sessions.c.device_id,
+                    self.sessions.c.device_name,
+                    self.sessions.c.platform,
+                    self.sessions.c.app_version,
                     self.users.c.id,
                     self.users.c.email,
                     self.users.c.display_name,
@@ -493,7 +594,14 @@ class CompanyAuthStore:
                 .where(self.sessions.c.token_hash == token_digest)
                 .values(last_seen_at=now)
             )
-        return self._user_from_mapping(row)
+        return CompanySessionContext(
+            user=self._user_from_mapping(row),
+            session_id=row["session_id"],
+            device_id=row["device_id"] or "",
+            device_name=row["device_name"] or "",
+            platform=row["platform"] or "",
+            app_version=row["app_version"] or "",
+        )
 
     async def revoke_session(self, token: str) -> bool:
         if not token:
@@ -510,6 +618,143 @@ class CompanyAuthStore:
                 .values(revoked_at=_utcnow())
             )
             return (result.rowcount or 0) > 0
+
+    async def revoke_session_by_id(
+        self,
+        session_id: str,
+        *,
+        revoked_by_user_id: str = "",
+        revoked_by_email: str = "",
+        reason: str = "",
+    ) -> int:
+        if not session_id:
+            return 0
+        now = _utcnow()
+        async with self.engine.begin() as conn:
+            result = await conn.execute(
+                update(self.sessions)
+                .where(
+                    and_(
+                        self.sessions.c.id == session_id,
+                        self.sessions.c.revoked_at.is_(None),
+                    )
+                )
+                .values(
+                    revoked_at=now,
+                    revoked_by_user_id=str(revoked_by_user_id or "").strip(),
+                    revoked_by_email=str(revoked_by_email or "").strip(),
+                    revoked_reason=str(reason or "").strip(),
+                )
+            )
+        return int(result.rowcount or 0)
+
+    async def revoke_sessions(
+        self,
+        *,
+        session_ids: list[str] | None = None,
+        user_ids: list[str] | None = None,
+        revoked_by_user_id: str = "",
+        revoked_by_email: str = "",
+        reason: str = "",
+    ) -> int:
+        clean_session_ids = [value for value in (session_ids or []) if value]
+        clean_user_ids = [value for value in (user_ids or []) if value]
+        if not clean_session_ids and not clean_user_ids:
+            return 0
+        conditions = [self.sessions.c.revoked_at.is_(None)]
+        id_conditions = []
+        if clean_session_ids:
+            id_conditions.append(self.sessions.c.id.in_(clean_session_ids))
+        if clean_user_ids:
+            id_conditions.append(self.sessions.c.user_id.in_(clean_user_ids))
+        conditions.append(id_conditions[0] if len(id_conditions) == 1 else id_conditions[0] | id_conditions[1])
+        now = _utcnow()
+        async with self.engine.begin() as conn:
+            result = await conn.execute(
+                update(self.sessions)
+                .where(and_(*conditions))
+                .values(
+                    revoked_at=now,
+                    revoked_by_user_id=str(revoked_by_user_id or "").strip(),
+                    revoked_by_email=str(revoked_by_email or "").strip(),
+                    revoked_reason=str(reason or "").strip(),
+                )
+            )
+        return int(result.rowcount or 0)
+
+    async def list_sessions(
+        self,
+        *,
+        include_revoked: bool = False,
+        user_id: str | None = None,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> tuple[int, list[CompanySessionRecord]]:
+        stmt = (
+            select(
+                self.sessions.c.id,
+                self.sessions.c.user_id,
+                self.sessions.c.expires_at,
+                self.sessions.c.revoked_at,
+                self.sessions.c.time_created,
+                self.sessions.c.last_seen_at,
+                self.sessions.c.device_id,
+                self.sessions.c.device_name,
+                self.sessions.c.platform,
+                self.sessions.c.app_version,
+                self.sessions.c.ip_address,
+                self.sessions.c.user_agent,
+                self.sessions.c.revoked_by_user_id,
+                self.sessions.c.revoked_by_email,
+                self.sessions.c.revoked_reason,
+                self.users.c.email.label("user_email"),
+                self.users.c.display_name.label("user_display_name"),
+                self.users.c.role.label("user_role"),
+                self.users.c.is_active.label("user_is_active"),
+            )
+            .select_from(self.sessions.join(self.users, self.sessions.c.user_id == self.users.c.id))
+            .order_by(self.sessions.c.last_seen_at.desc())
+        )
+        count_stmt = select(func.count()).select_from(self.sessions)
+        if not include_revoked:
+            stmt = stmt.where(self.sessions.c.revoked_at.is_(None))
+            count_stmt = count_stmt.where(self.sessions.c.revoked_at.is_(None))
+        if user_id:
+            stmt = stmt.where(self.sessions.c.user_id == user_id)
+            count_stmt = count_stmt.where(self.sessions.c.user_id == user_id)
+        stmt = stmt.offset(max(0, int(offset or 0))).limit(min(max(int(limit or 200), 1), 500))
+        async with self.engine.connect() as conn:
+            total = (await conn.execute(count_stmt)).scalar_one()
+            rows = (await conn.execute(stmt)).mappings().all()
+        return int(total or 0), [self._session_record_from_mapping(row) for row in rows]
+
+    async def activity_days(self, *, days: int = 30) -> list[CompanyActivityDay]:
+        total, sessions = await self.list_sessions(include_revoked=True, limit=10_000)
+        del total
+        today = _utcnow().date()
+        start = today - timedelta(days=max(1, days) - 1)
+        buckets: dict[str, dict[str, set[str] | int]] = {
+            (start + timedelta(days=offset)).isoformat(): {"users": set(), "sessions": 0}
+            for offset in range(max(1, days))
+        }
+        for session in sessions:
+            day = session.last_seen_at.date()
+            if day < start or day > today:
+                continue
+            key = day.isoformat()
+            bucket = buckets.setdefault(key, {"users": set(), "sessions": 0})
+            users = bucket["users"]
+            if isinstance(users, set):
+                users.add(session.user_id)
+            bucket["sessions"] = int(bucket["sessions"]) + 1
+        return [
+            CompanyActivityDay(
+                date=day,
+                active_users=len(bucket["users"]) if isinstance(bucket["users"], set) else 0,
+                session_count=int(bucket["sessions"]),
+            )
+            for day, bucket in sorted(buckets.items())
+        ]
 
     async def get_model_policy(self) -> CompanyModelPolicy:
         async with self.engine.connect() as conn:
@@ -792,6 +1037,30 @@ class CompanyAuthStore:
             display_name=row["display_name"],
             role=row["role"],
             is_active=bool(row["is_active"]),
+        )
+
+    @staticmethod
+    def _session_record_from_mapping(row) -> CompanySessionRecord:
+        return CompanySessionRecord(
+            id=row["id"],
+            user_id=row["user_id"],
+            user_email=row["user_email"],
+            user_display_name=row["user_display_name"],
+            user_role=row["user_role"],
+            user_is_active=bool(row["user_is_active"]),
+            expires_at=row["expires_at"],
+            revoked_at=row["revoked_at"],
+            time_created=row["time_created"],
+            last_seen_at=row["last_seen_at"],
+            device_id=row["device_id"] or "",
+            device_name=row["device_name"] or "",
+            platform=row["platform"] or "",
+            app_version=row["app_version"] or "",
+            ip_address=row["ip_address"] or "",
+            user_agent=row["user_agent"] or "",
+            revoked_by_user_id=row["revoked_by_user_id"] or "",
+            revoked_by_email=row["revoked_by_email"] or "",
+            revoked_reason=row["revoked_reason"] or "",
         )
 
     @staticmethod

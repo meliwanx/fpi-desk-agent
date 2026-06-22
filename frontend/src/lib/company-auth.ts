@@ -9,12 +9,14 @@ export interface CompanyUserInfo {
 }
 
 export interface CompanyLoginResponse {
+  session_id: string;
   token: string;
   expires_at: string;
   user: CompanyUserInfo;
 }
 
 export interface CompanySessionPayload {
+  sessionId?: string;
   token: string;
   expiresAt: string;
   user: CompanyUserInfo;
@@ -55,6 +57,7 @@ export function getCompanySessionToken(): string | null {
 
 export function saveCompanySession(response: CompanyLoginResponse): CompanySessionPayload {
   const payload: CompanySessionPayload = {
+    sessionId: response.session_id,
     token: response.token,
     expiresAt: response.expires_at,
     user: response.user,
