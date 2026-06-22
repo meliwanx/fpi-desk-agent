@@ -145,6 +145,64 @@ pub async fn download_and_save(
     Ok(true)
 }
 
+fn safe_download_name(default_name: &str) -> String {
+    let last_segment = default_name
+        .trim()
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or("")
+        .chars()
+        .map(|ch| {
+            if ch.is_control() || matches!(ch, ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+                '_'
+            } else {
+                ch
+            }
+        })
+        .collect::<String>();
+    let trimmed = last_segment.trim_matches(|ch| ch == '.' || ch == ' ').trim();
+    if trimmed.is_empty() {
+        "fpi-agent-update.bin".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Download an update package inside the app flow and open it with the OS installer.
+#[tauri::command]
+pub async fn download_update_and_open(
+    app: AppHandle,
+    url: String,
+    default_name: String,
+) -> Result<String, String> {
+    let response = reqwest::get(&url)
+        .await
+        .map_err(|e| format!("Download failed: {e}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("Download failed with status {status}"));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read response: {e}"))?;
+
+    let update_dir = std::env::temp_dir().join("fpi-agent-updates");
+    tokio::fs::create_dir_all(&update_dir)
+        .await
+        .map_err(|e| format!("Failed to create update directory: {e}"))?;
+    let file_path = update_dir.join(safe_download_name(&default_name));
+    tokio::fs::write(&file_path, &bytes)
+        .await
+        .map_err(|e| format!("Failed to write update package: {e}"))?;
+
+    let path_string = file_path.to_string_lossy().to_string();
+    app.opener()
+        .open_path(path_string.clone(), None::<&str>)
+        .map_err(|e| format!("Failed to open update package: {e}"))?;
+    Ok(path_string)
+}
+
 /// Replace the tray's recent chat list with the given sessions (top first).
 #[tauri::command]
 pub fn update_tray_recents(

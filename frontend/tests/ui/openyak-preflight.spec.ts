@@ -190,7 +190,7 @@ async function installTauriDragDropMock(page: Page) {
 }
 
 test.describe("OpenYak UI preflight", () => {
-  test("company login path: uses 聚光 logo and starts in light theme", async ({
+  test("company login path: shows branded login page and starts in light theme", async ({
     page,
   }) => {
     await seedOpenYakStorage(page, {
@@ -200,12 +200,8 @@ test.describe("OpenYak UI preflight", () => {
 
     await page.goto("/c/new");
 
-    await expect(
-      page.getByRole("img", { name: "聚光科技" }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "聚光办公助理" }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "欢迎登录" })).toBeVisible();
+    await expect(page.getByPlaceholder("请输入账号")).toBeVisible();
     await expect
       .poll(() =>
         page.evaluate(() => document.documentElement.classList.contains("dark")),
@@ -226,9 +222,7 @@ test.describe("OpenYak UI preflight", () => {
 
     await page.goto("/c/new");
 
-    await expect(
-      page.getByRole("heading", { name: "聚光办公助理" }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "欢迎登录" })).toBeVisible();
     await expect(page.getByLabel("账号")).toBeVisible();
   });
 

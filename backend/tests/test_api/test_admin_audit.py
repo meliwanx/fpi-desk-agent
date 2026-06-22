@@ -461,7 +461,8 @@ async def test_employee_update_policy_serves_local_asset_and_counts_downloads(ap
         assert response.status_code == 200
         payload = response.json()
         assert payload["update_available"] is True
-        assert f"/api/app/update-download/{windows_asset.id}" in payload["download_url"]
+        assert f"/download/{windows_asset.id}" in payload["download_url"]
+        assert payload["download_filename"] == "FPI Agent Setup.exe"
 
         download = await app_client.get(payload["download_url"])
         assert download.status_code == 200
@@ -472,7 +473,7 @@ async def test_employee_update_policy_serves_local_asset_and_counts_downloads(ap
             "/api/app/update-policy?current_version=1.3.0&platform=linux&arch=x64"
         )
         assert fallback.status_code == 200
-        assert f"/api/app/update-download/{default_asset.id}" in fallback.json()["download_url"]
+        assert f"/download/{default_asset.id}" in fallback.json()["download_url"]
     finally:
         await store.dispose()
 

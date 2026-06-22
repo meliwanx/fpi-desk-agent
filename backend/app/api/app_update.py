@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from starlette.responses import FileResponse
+from starlette.routing import NoMatchFound
 
 from app.dependencies import SettingsDep
 
@@ -25,6 +26,8 @@ class AppUpdatePolicyResponse(BaseModel):
     force_update: bool
     release_notes: str
     download_url: str
+    download_filename: str = ""
+    download_size_bytes: int = 0
     checked_at: str
 
 
@@ -85,17 +88,21 @@ def _asset_id_for_platform(policy: Any, platform: str) -> str:
     return str(asset_id or _policy_value(policy, "default_asset_id") or "")
 
 
-async def _local_download_url_for_platform(request: Request, policy: Any, platform: str) -> str:
+async def _local_download_info_for_platform(request: Request, policy: Any, platform: str) -> tuple[str, str, int]:
     asset_id = _asset_id_for_platform(policy, platform)
     if not asset_id:
-        return ""
+        return "", "", 0
     store = _company_store(request)
     if not hasattr(store, "get_update_asset"):
-        return ""
+        return "", "", 0
     asset = await store.get_update_asset(asset_id)
     if asset is None:
-        return ""
-    return str(request.url_for("download_app_update_asset", asset_id=asset.id))
+        return "", "", 0
+    try:
+        download_url = str(request.url_for("website_download_asset", asset_id=asset.id))
+    except NoMatchFound:
+        download_url = str(request.url_for("download_app_update_asset", asset_id=asset.id))
+    return download_url, asset.original_filename or "", int(asset.size_bytes or 0)
 
 
 def build_update_response(
@@ -104,6 +111,8 @@ def build_update_response(
     current_version: str,
     platform: str,
     download_url: str | None = None,
+    download_filename: str = "",
+    download_size_bytes: int = 0,
 ) -> AppUpdatePolicyResponse:
     enabled = bool(_policy_value(policy, "enabled", False))
     latest_version = str(_policy_value(policy, "latest_version", "") or "").strip()
@@ -123,6 +132,8 @@ def build_update_response(
         force_update=force_update,
         release_notes=str(_policy_value(policy, "release_notes", "") or ""),
         download_url=download_url if download_url is not None else _legacy_download_url_for_platform(policy, platform),
+        download_filename=download_filename,
+        download_size_bytes=download_size_bytes,
         checked_at=datetime.now(timezone.utc).isoformat(),
     )
 
@@ -143,13 +154,19 @@ async def get_app_update_policy(
 ) -> AppUpdatePolicyResponse:
     del arch
     policy = await _company_store(request).get_update_policy()
-    local_download_url = await _local_download_url_for_platform(request, policy, platform)
+    local_download_url, download_filename, download_size_bytes = await _local_download_info_for_platform(
+        request,
+        policy,
+        platform,
+    )
     download_url = local_download_url or _legacy_download_url_for_platform(policy, platform)
     return build_update_response(
         policy,
         current_version=current_version,
         platform=platform,
         download_url=download_url,
+        download_filename=download_filename,
+        download_size_bytes=download_size_bytes,
     )
 
 

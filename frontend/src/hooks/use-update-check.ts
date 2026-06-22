@@ -18,6 +18,8 @@ export interface EnterpriseUpdatePolicy {
   force_update: boolean;
   release_notes: string;
   download_url: string;
+  download_filename?: string;
+  download_size_bytes?: number;
   checked_at: string;
 }
 
@@ -27,6 +29,7 @@ interface UpdateState {
   notes: string | null;
   forceUpdate: boolean;
   downloadUrl: string | null;
+  downloadFilename: string | null;
   downloading: boolean;
   progress: number;
   dismissed: boolean;
@@ -45,6 +48,7 @@ let state: UpdateState = {
   notes: null,
   forceUpdate: false,
   downloadUrl: null,
+  downloadFilename: null,
   downloading: false,
   progress: 0,
   dismissed: false,
@@ -92,6 +96,7 @@ export async function checkForUpdates(): Promise<EnterpriseUpdatePolicy | null> 
         notes: update.release_notes || null,
         forceUpdate: false,
         downloadUrl: update.download_url || null,
+        downloadFilename: update.download_filename || null,
         downloading: false,
         progress: 0,
         dismissed: false,
@@ -108,6 +113,7 @@ export async function checkForUpdates(): Promise<EnterpriseUpdatePolicy | null> 
         notes: update.release_notes || null,
         forceUpdate: false,
         downloadUrl: update.download_url || null,
+        downloadFilename: update.download_filename || null,
         dismissed: true,
         error: null,
       });
@@ -120,6 +126,7 @@ export async function checkForUpdates(): Promise<EnterpriseUpdatePolicy | null> 
       notes: update.release_notes || null,
       forceUpdate: update.force_update,
       downloadUrl: update.download_url || null,
+      downloadFilename: update.download_filename || null,
       dismissed: false,
       error: null,
     });
@@ -132,18 +139,32 @@ export async function checkForUpdates(): Promise<EnterpriseUpdatePolicy | null> 
   }
 }
 
+function fallbackUpdateFilename(downloadUrl: string, version: string | null): string {
+  try {
+    const segment = decodeURIComponent(new URL(downloadUrl).pathname.split("/").pop() || "");
+    if (segment.includes(".")) return segment;
+  } catch {
+    // Fall through to version-based name.
+  }
+  return `fpi-agent-${version || "update"}.bin`;
+}
+
 async function downloadAndInstall() {
   const downloadUrl = pendingUpdate?.download_url || state.downloadUrl;
   if (!downloadUrl) {
     setState({ error: "未配置下载地址", downloading: false });
     return;
   }
+  const defaultName =
+    pendingUpdate?.download_filename ||
+    state.downloadFilename ||
+    fallbackUpdateFilename(downloadUrl, pendingUpdate?.latest_version || state.version);
   setState({ downloading: true, error: null, progress: 0 });
   try {
-    await desktopAPI.openExternal(downloadUrl);
+    await desktopAPI.downloadUpdateAndOpen({ url: downloadUrl, defaultName });
     setState({ downloading: false, progress: 100 });
   } catch (error) {
-    console.error("Update download open failed:", error);
+    console.error("Update download failed:", error);
     const message = error instanceof Error ? error.message : String(error);
     setState({ error: message, downloading: false });
   }
@@ -171,6 +192,7 @@ const serverSnapshot: UpdateState = {
   notes: null,
   forceUpdate: false,
   downloadUrl: null,
+  downloadFilename: null,
   downloading: false,
   progress: 0,
   dismissed: false,
@@ -197,6 +219,7 @@ export function useUpdateCheck(): UpdateInfo {
     notes: snapshot.notes,
     forceUpdate: snapshot.forceUpdate,
     downloadUrl: snapshot.downloadUrl,
+    downloadFilename: snapshot.downloadFilename,
     downloading: snapshot.downloading,
     progress: snapshot.progress,
     error: snapshot.error,

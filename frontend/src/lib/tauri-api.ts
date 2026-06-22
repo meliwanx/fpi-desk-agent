@@ -24,6 +24,10 @@ export interface DesktopAPI {
     defaultName: string;
     defaultDirectory?: string | null;
   }) => Promise<boolean>;
+  downloadUpdateAndOpen: (opts: {
+    url: string;
+    defaultName: string;
+  }) => Promise<string>;
   minimize: () => Promise<void>;
   maximize: () => Promise<void>;
   close: () => Promise<void>;
@@ -69,6 +73,8 @@ export const desktopAPI: DesktopAPI = {
   openExternal: (url) => invoke("open_external", { url }),
   downloadAndSave: ({ url, data, defaultName, defaultDirectory }) =>
     invoke<boolean>("download_and_save", { url, data, defaultName, defaultDirectory }),
+  downloadUpdateAndOpen: ({ url, defaultName }) =>
+    invoke<string>("download_update_and_open", { url, defaultName }),
   minimize: () => invoke("window_minimize"),
   maximize: () => invoke("window_maximize"),
   close: () => invoke("window_close"),
