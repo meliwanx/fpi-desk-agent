@@ -309,6 +309,7 @@ async def test_update_assets_persist_metadata_and_download_counts(tmp_path):
             mime_type="application/x-apple-diskimage",
             size_bytes=12345,
             sha256="a" * 64,
+            signature="signed-updater-package-signature",
             uploaded_by_user_id="admin-1",
             uploaded_by_email="admin@example.com",
             uploaded_by_display_name="Admin",
@@ -319,6 +320,7 @@ async def test_update_assets_persist_metadata_and_download_counts(tmp_path):
         assert asset.original_filename == "FPI Agent 1.4.0.dmg"
         assert asset.download_count == 0
         assert asset.uploaded_by_email == "admin@example.com"
+        assert asset.signature == "signed-updater-package-signature"
 
         listed = await store.list_update_assets()
         assert [item.id for item in listed] == [asset.id]

@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from starlette.responses import FileResponse
+from starlette.responses import FileResponse, Response
 from starlette.routing import NoMatchFound
 
 from app.dependencies import SettingsDep
@@ -30,6 +30,18 @@ class AppUpdatePolicyResponse(BaseModel):
     download_size_bytes: int = 0
     download_sha256: str = ""
     checked_at: str
+
+
+class AppUpdateManifestPlatform(BaseModel):
+    url: str
+    signature: str
+
+
+class AppUpdateManifestResponse(BaseModel):
+    version: str
+    notes: str = ""
+    pub_date: str
+    platforms: dict[str, AppUpdateManifestPlatform]
 
 
 def _policy_value(policy: Any, key: str, default: Any = "") -> Any:
@@ -89,6 +101,13 @@ def _asset_id_for_platform(policy: Any, platform: str) -> str:
     return str(asset_id or _policy_value(policy, "default_asset_id") or "")
 
 
+def _download_url_for_asset(request: Request, asset: Any) -> str:
+    try:
+        return str(request.url_for("website_download_asset", asset_id=asset.id))
+    except NoMatchFound:
+        return str(request.url_for("download_app_update_asset", asset_id=asset.id))
+
+
 async def _local_download_info_for_platform(request: Request, policy: Any, platform: str) -> tuple[str, str, int, str, str]:
     asset_id = _asset_id_for_platform(policy, platform)
     if not asset_id:
@@ -99,12 +118,8 @@ async def _local_download_info_for_platform(request: Request, policy: Any, platf
     asset = await store.get_update_asset(asset_id)
     if asset is None:
         return "", "", 0, "", ""
-    try:
-        download_url = str(request.url_for("website_download_asset", asset_id=asset.id))
-    except NoMatchFound:
-        download_url = str(request.url_for("download_app_update_asset", asset_id=asset.id))
     return (
-        download_url,
+        _download_url_for_asset(request, asset),
         asset.original_filename or "",
         int(asset.size_bytes or 0),
         str(asset.version or ""),
@@ -167,6 +182,61 @@ def _company_store(request: Request):
     return store
 
 
+def _tauri_platform_keys(platform: str) -> list[str]:
+    normalized = _normalized_platform(platform)
+    if normalized == "macos":
+        return ["darwin-aarch64-app", "darwin-aarch64"]
+    if normalized == "windows":
+        return ["windows-x86_64-nsis", "windows-x86_64"]
+    if normalized == "linux":
+        return ["linux-x86_64-appimage", "linux-x86_64"]
+    return [
+        "darwin-aarch64-app",
+        "darwin-aarch64",
+        "windows-x86_64-nsis",
+        "windows-x86_64",
+        "linux-x86_64-appimage",
+        "linux-x86_64",
+    ]
+
+
+async def _update_asset_for_platform(request: Request, policy: Any, platform: str) -> Any | None:
+    asset_id = _asset_id_for_platform(policy, platform)
+    if not asset_id:
+        return None
+    store = _company_store(request)
+    if not hasattr(store, "get_update_asset"):
+        return None
+    return await store.get_update_asset(asset_id)
+
+
+async def _signed_manifest_platforms(
+    request: Request,
+    policy: Any,
+    *,
+    effective_version: str,
+) -> dict[str, AppUpdateManifestPlatform]:
+    platforms: dict[str, AppUpdateManifestPlatform] = {}
+    seen_asset_ids: set[str] = set()
+    for platform in ("macos", "windows", "linux", "default"):
+        asset = await _update_asset_for_platform(request, policy, platform)
+        if asset is None or asset.id in seen_asset_ids:
+            continue
+        seen_asset_ids.add(asset.id)
+        if str(asset.version or "").strip() != effective_version:
+            continue
+        signature = str(getattr(asset, "signature", "") or "").strip()
+        if not signature:
+            continue
+        entry = AppUpdateManifestPlatform(
+            url=_download_url_for_asset(request, asset),
+            signature=signature,
+        )
+        for key in _tauri_platform_keys(platform):
+            platforms.setdefault(key, entry)
+    return platforms
+
+
 @router.get("/app/update-policy", response_model=AppUpdatePolicyResponse)
 async def get_app_update_policy(
     request: Request,
@@ -191,6 +261,47 @@ async def get_app_update_policy(
         download_size_bytes=download_size_bytes,
         download_sha256=download_sha256,
         effective_latest_version=asset_version or None,
+    )
+
+
+@router.get(
+    "/app/update-manifest/{target}/{arch}/{current_version}",
+    response_model=AppUpdateManifestResponse,
+    responses={204: {"description": "No update available"}},
+)
+async def get_app_update_manifest(
+    request: Request,
+    target: str,
+    arch: str,
+    current_version: str,
+    bundle: str = "",
+) -> AppUpdateManifestResponse | Response:
+    del arch, bundle
+    policy = await _company_store(request).get_update_policy()
+    enabled = bool(_policy_value(policy, "enabled", False))
+    if not enabled:
+        return Response(status_code=204)
+
+    target_platform = _normalized_platform(target)
+    platform_asset = await _update_asset_for_platform(request, policy, target_platform)
+    policy_latest_version = str(_policy_value(policy, "latest_version", "") or "").strip()
+    effective_latest_version = str(getattr(platform_asset, "version", "") or "").strip() or policy_latest_version
+    if not effective_latest_version or _compare_versions(current_version, effective_latest_version) >= 0:
+        return Response(status_code=204)
+
+    platforms = await _signed_manifest_platforms(
+        request,
+        policy,
+        effective_version=effective_latest_version,
+    )
+    if not platforms:
+        return Response(status_code=204)
+
+    return AppUpdateManifestResponse(
+        version=effective_latest_version,
+        notes=str(_policy_value(policy, "release_notes", "") or ""),
+        pub_date=datetime.now(timezone.utc).isoformat(),
+        platforms=platforms,
     )
 
 

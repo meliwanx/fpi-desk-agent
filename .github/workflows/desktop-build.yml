@@ -16,6 +16,9 @@ jobs:
   build-windows:
     name: Windows NSIS installer
     runs-on: windows-latest
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
     steps:
       - uses: actions/checkout@v4
@@ -95,7 +98,7 @@ jobs:
             build = @{ beforeBuildCommand = "" }
             bundle = @{
               targets = @("nsis")
-              createUpdaterArtifacts = $false
+              createUpdaterArtifacts = $true
             }
           } | ConvertTo-Json -Compress -Depth 10
           Set-Content -Path "src-tauri\build.ci-windows.json" -Value $tauriConfig
@@ -107,11 +110,16 @@ jobs:
         with:
           name: windows-exe
           if-no-files-found: error
-          path: desktop-tauri/src-tauri/target/release/bundle/nsis/*.exe
+          path: |
+            desktop-tauri/src-tauri/target/release/bundle/nsis/*.exe
+            desktop-tauri/src-tauri/target/release/bundle/nsis/*.exe.sig
 
   build-macos:
     name: macOS DMG (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
     strategy:
       fail-fast: false
@@ -198,11 +206,14 @@ jobs:
           cd desktop-tauri
           npx @tauri-apps/cli build \
             --target ${{ matrix.target }} \
-            --config '{"build":{"beforeBuildCommand":""},"bundle":{"targets":["dmg"],"createUpdaterArtifacts":false}}'
+            --config '{"build":{"beforeBuildCommand":""},"bundle":{"targets":["dmg","app"],"createUpdaterArtifacts":true}}'
 
-      - name: Upload macOS DMG
+      - name: Upload macOS DMG and updater archive
         uses: actions/upload-artifact@v4
         with:
           name: macos-${{ matrix.arch }}-dmg
           if-no-files-found: error
-          path: desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+          path: |
+            desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
+            desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig

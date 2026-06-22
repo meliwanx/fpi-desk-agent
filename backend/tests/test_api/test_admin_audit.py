@@ -265,7 +265,11 @@ async def test_admin_can_upload_update_asset_and_bind_policy(app_client, tmp_pat
     try:
         uploaded = await app_client.post(
             "/api/admin/update-assets/upload",
-            data={"platform": "macos", "version": "v1.4.0"},
+            data={
+                "platform": "macos",
+                "version": "v1.4.0",
+                "signature": "signed-updater-package-signature",
+            },
             files={
                 "file": (
                     "FPI Agent 1.4.0.dmg",
@@ -284,6 +288,7 @@ async def test_admin_can_upload_update_asset_and_bind_policy(app_client, tmp_pat
         assert asset["download_count"] == 0
         assert asset["uploaded_by_email"] == "admin@example.com"
         assert len(asset["sha256"]) == 64
+        assert asset["signature"] == "signed-updater-package-signature"
 
         saved_asset = await store.get_update_asset(asset["id"])
         assert saved_asset is not None
@@ -310,6 +315,7 @@ async def test_admin_can_upload_update_asset_and_bind_policy(app_client, tmp_pat
         assert policy["macos_asset_id"] == asset["id"]
         assert policy["macos_asset"]["id"] == asset["id"]
         assert policy["macos_asset"]["uploaded_by_display_name"] == "Admin"
+        assert policy["macos_asset"]["signature"] == "signed-updater-package-signature"
     finally:
         await store.dispose()
 
@@ -685,6 +691,91 @@ async def test_employee_update_policy_serves_local_asset_and_counts_downloads(ap
         )
         assert fallback.status_code == 200
         assert f"/download/{default_asset.id}" in fallback.json()["download_url"]
+    finally:
+        await store.dispose()
+
+
+async def test_employee_update_manifest_serves_signed_tauri_assets(app_client, tmp_path):
+    store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
+    await store.startup()
+    app_client.app.state.company_auth_store = store
+    app_client.app.state.settings.update_asset_storage_dir = str(tmp_path / "update_assets")
+    app_client.app.middleware_stack = None
+
+    async def inject_employee(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="employee-1",
+            email="10001",
+            display_name="员工一",
+            role="user",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_employee)
+
+    storage_dir = tmp_path / "update_assets"
+    storage_dir.mkdir()
+    mac_bytes = b"macos-updater-archive"
+    windows_bytes = b"windows-updater-installer"
+    (storage_dir / "fpi-agent.app.tar.gz").write_bytes(mac_bytes)
+    (storage_dir / "fpi-agent-setup.exe").write_bytes(windows_bytes)
+
+    try:
+        mac_asset = await store.create_update_asset(
+            platform="macos",
+            version="1.4.0",
+            original_filename="fpi-agent_1.4.0_arm64.app.tar.gz",
+            stored_filename="fpi-agent.app.tar.gz",
+            mime_type="application/gzip",
+            size_bytes=len(mac_bytes),
+            sha256=hashlib.sha256(mac_bytes).hexdigest(),
+            signature="macos-updater-signature",
+            uploaded_by_user_id="admin-1",
+            uploaded_by_email="admin@example.com",
+            uploaded_by_display_name="Admin",
+        )
+        windows_asset = await store.create_update_asset(
+            platform="windows",
+            version="1.4.0",
+            original_filename="fpi-agent_1.4.0_x64-setup.exe",
+            stored_filename="fpi-agent-setup.exe",
+            mime_type="application/vnd.microsoft.portable-executable",
+            size_bytes=len(windows_bytes),
+            sha256=hashlib.sha256(windows_bytes).hexdigest(),
+            signature="windows-updater-signature",
+            uploaded_by_user_id="admin-1",
+            uploaded_by_email="admin@example.com",
+            uploaded_by_display_name="Admin",
+        )
+        await store.update_update_policy(
+            enabled=True,
+            latest_version="1.4.0",
+            min_supported_version="1.2.0",
+            force_update=True,
+            release_notes="应用内更新包",
+            macos_asset_id=mac_asset.id,
+            windows_asset_id=windows_asset.id,
+        )
+
+        response = await app_client.get(
+            "/api/app/update-manifest/darwin/aarch64/1.3.0?bundle=app"
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["version"] == "1.4.0"
+        assert payload["notes"] == "应用内更新包"
+        assert payload["pub_date"]
+        assert payload["platforms"]["darwin-aarch64-app"]["signature"] == "macos-updater-signature"
+        assert mac_asset.id in payload["platforms"]["darwin-aarch64-app"]["url"]
+        assert payload["platforms"]["darwin-aarch64"]["signature"] == "macos-updater-signature"
+        assert payload["platforms"]["windows-x86_64-nsis"]["signature"] == "windows-updater-signature"
+        assert windows_asset.id in payload["platforms"]["windows-x86_64-nsis"]["url"]
+
+        current = await app_client.get(
+            "/api/app/update-manifest/darwin/aarch64/1.4.0?bundle=app"
+        )
+        assert current.status_code == 204
     finally:
         await store.dispose()
 

@@ -138,6 +138,7 @@ class CompanyUpdateAsset:
     mime_type: str
     size_bytes: int
     sha256: str
+    signature: str
     uploaded_by_user_id: str
     uploaded_by_email: str
     uploaded_by_display_name: str
@@ -283,6 +284,7 @@ class CompanyAuthStore:
             Column("mime_type", String(255), nullable=False, default=""),
             Column("size_bytes", Integer, nullable=False, default=0),
             Column("sha256", String(64), nullable=False),
+            Column("signature", Text, nullable=True),
             Column("uploaded_by_user_id", String(32), nullable=False, default=""),
             Column("uploaded_by_email", String(255), nullable=False, default=""),
             Column("uploaded_by_display_name", String(255), nullable=False, default=""),
@@ -513,6 +515,15 @@ class CompanyAuthStore:
         for name, ddl_type in columns.items():
             if name not in existing:
                 sync_conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {ddl_type}")
+
+        update_asset_existing = {column["name"] for column in inspector.get_columns(self.update_assets.name)}
+        update_asset_table = sync_conn.dialect.identifier_preparer.quote(self.update_assets.name)
+        update_asset_columns = {
+            "signature": "TEXT NULL",
+        }
+        for name, ddl_type in update_asset_columns.items():
+            if name not in update_asset_existing:
+                sync_conn.exec_driver_sql(f"ALTER TABLE {update_asset_table} ADD COLUMN {name} {ddl_type}")
 
     async def create_session(
         self,
@@ -890,6 +901,7 @@ class CompanyAuthStore:
         mime_type: str,
         size_bytes: int,
         sha256: str,
+        signature: str = "",
         uploaded_by_user_id: str,
         uploaded_by_email: str,
         uploaded_by_display_name: str,
@@ -915,6 +927,7 @@ class CompanyAuthStore:
                     mime_type=str(mime_type or "").strip(),
                     size_bytes=max(0, int(size_bytes or 0)),
                     sha256=normalized_sha,
+                    signature=str(signature or "").strip(),
                     uploaded_by_user_id=str(uploaded_by_user_id or "").strip(),
                     uploaded_by_email=str(uploaded_by_email or "").strip(),
                     uploaded_by_display_name=str(uploaded_by_display_name or "").strip(),
@@ -1074,6 +1087,7 @@ class CompanyAuthStore:
             mime_type=row["mime_type"],
             size_bytes=int(row["size_bytes"] or 0),
             sha256=row["sha256"],
+            signature=row["signature"] or "",
             uploaded_by_user_id=row["uploaded_by_user_id"],
             uploaded_by_email=row["uploaded_by_email"],
             uploaded_by_display_name=row["uploaded_by_display_name"],

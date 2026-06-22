@@ -95,8 +95,7 @@
     },
     "updater": {
       "endpoints": [
-        "https://open-yak.com/update/latest.json",
-        "https://open-yak.com/downloads/latest.json"
+        "https://fpiagent.hangzhoupuyu.work/api/app/update-manifest/{{target}}/{{arch}}/{{current_version}}?bundle={{bundle_type}}"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI2NzhEQTg4RUE2NjhDRjQKUldUMGpHYnFpTnA0dGtwdE5YK3dJT0N2Z0tUcHNXNStIcVU2bEpmZ3lpRUo1UEZYTWNaVWhDUEkK"
     },

@@ -228,6 +228,7 @@ interface UpdateAsset {
   mime_type: string;
   size_bytes: number;
   sha256: string;
+  signature: string;
   uploaded_by_user_id: string;
   uploaded_by_email: string;
   uploaded_by_display_name: string;
@@ -1235,6 +1236,7 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
   const [policy, setPolicy] = useState<UpdatePolicy | null>(null);
   const [message, setMessage] = useState("");
   const [uploadingSlot, setUploadingSlot] = useState<string | null>(null);
+  const [assetSignatures, setAssetSignatures] = useState<Record<string, string>>({});
 
   async function loadPolicy() {
     const data = await api<UpdatePolicy>("/api/admin/update-policy");
@@ -1290,6 +1292,7 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
     const form = new FormData();
     form.set("platform", slot.platform);
     form.set("version", version);
+    form.set("signature", (assetSignatures[slot.platform] ?? policy[slot.assetKey]?.signature ?? "").trim());
     form.set("file", file);
 
     setMessage("");
@@ -1378,10 +1381,22 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
                         <span>上传时间：{compactDate(asset.time_created)}</span>
                         <span>下载次数：{formatNumber(asset.download_count)}</span>
                         <span>SHA-256：{asset.sha256.slice(0, 16)}...</span>
+                        <span>应用内更新签名：{asset.signature ? `${asset.signature.slice(0, 18)}...` : "未配置"}</span>
                       </div>
                     ) : (
                       <p className="muted">员工端匹配不到该平台包时会使用默认包。</p>
                     )}
+                    <textarea
+                      className="input textarea"
+                      placeholder="粘贴 Tauri .sig 文件内容；留空则只能打开安装包兜底"
+                      value={assetSignatures[slot.platform] ?? asset?.signature ?? ""}
+                      onChange={(event) =>
+                        setAssetSignatures({
+                          ...assetSignatures,
+                          [slot.platform]: event.target.value,
+                        })
+                      }
+                    />
                     <label className={`button outline file-button ${isUploading ? "disabled" : ""}`}>
                       <input
                         type="file"

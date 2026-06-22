@@ -126,6 +126,7 @@ class AdminUpdateAssetResponse(BaseModel):
     mime_type: str
     size_bytes: int
     sha256: str
+    signature: str
     uploaded_by_user_id: str
     uploaded_by_email: str
     uploaded_by_display_name: str
@@ -327,6 +328,7 @@ def _public_update_asset(asset: CompanyUpdateAsset) -> AdminUpdateAssetResponse:
         mime_type=asset.mime_type,
         size_bytes=asset.size_bytes,
         sha256=asset.sha256,
+        signature=asset.signature,
         uploaded_by_user_id=asset.uploaded_by_user_id,
         uploaded_by_email=asset.uploaded_by_email,
         uploaded_by_display_name=asset.uploaded_by_display_name,
@@ -742,6 +744,7 @@ async def upload_admin_update_asset(
     settings: SettingsDep,
     platform: str = Form(...),
     version: str = Form(...),
+    signature: str = Form(""),
     file: UploadFile = File(...),
 ) -> AdminUpdateAssetResponse:
     user = _require_admin(request)
@@ -782,6 +785,7 @@ async def upload_admin_update_asset(
             mime_type=mime_type,
             size_bytes=size,
             sha256=digest.hexdigest(),
+            signature=signature,
             uploaded_by_user_id=user.id,
             uploaded_by_email=user.email,
             uploaded_by_display_name=user.display_name,
