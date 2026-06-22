@@ -88,7 +88,15 @@ jobs:
         shell: pwsh
         run: |
           Push-Location desktop-tauri
-          npx @tauri-apps/cli build --config '{"build":{"beforeBuildCommand":""},"bundle":{"targets":["nsis"],"createUpdaterArtifacts":false}}'
+          $tauriConfig = @{
+            build = @{ beforeBuildCommand = "" }
+            bundle = @{
+              targets = @("nsis")
+              createUpdaterArtifacts = $false
+            }
+          } | ConvertTo-Json -Compress -Depth 10
+          Set-Content -Path "src-tauri\build.ci-windows.json" -Value $tauriConfig
+          npx @tauri-apps/cli build --config src-tauri\build.ci-windows.json
           Pop-Location
 
       - name: Upload Windows installer
@@ -110,10 +118,6 @@ jobs:
             target: aarch64-apple-darwin
             arch: arm64
             node_platform: Darwin-arm64
-          - runner: macos-26-intel
-            target: x86_64-apple-darwin
-            arch: x64
-            node_platform: Darwin-x86_64
 
     steps:
       - uses: actions/checkout@v4

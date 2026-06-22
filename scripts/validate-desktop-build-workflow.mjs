@@ -12,15 +12,29 @@ const requiredSnippets = [
   ["manual trigger", "workflow_dispatch:"],
   ["Windows runner", "runs-on: windows-latest"],
   ["macOS arm runner", "runner: macos-26"],
-  ["macOS Intel runner", "runner: macos-26-intel"],
   ["Windows installer artifact", "desktop-tauri/src-tauri/target/release/bundle/nsis/*.exe"],
   ["macOS DMG artifact", "desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg"],
   ["Tauri updater artifacts disabled", '"createUpdaterArtifacts":false'],
+  ["Windows config variable", "$tauriConfig = "],
 ];
 
 for (const [label, snippet] of requiredSnippets) {
   assert(
     workflow.includes(snippet),
     `desktop build workflow missing ${label}: ${snippet}`,
+  );
+}
+
+const forbiddenSnippets = [
+  ["macOS Intel runner", "macos-26-intel"],
+  ["macOS x86_64 target", "x86_64-apple-darwin"],
+  ["macOS x64 artifact", "macos-x64-dmg"],
+  ["macOS x64 Node runtime", "Darwin-x86_64"],
+];
+
+for (const [label, snippet] of forbiddenSnippets) {
+  assert(
+    !workflow.includes(snippet),
+    `desktop build workflow should not include ${label}: ${snippet}`,
   );
 }
