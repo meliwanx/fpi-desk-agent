@@ -6,7 +6,8 @@ import { useTranslation } from "react-i18next";
 import Link from "next/link";
 import { useUpdateCheck } from "@/hooks/use-update-check";
 import { readCompanySession } from "@/lib/company-auth";
-import { apiFetch } from "@/lib/api";
+import { apiErrorMessage } from "@/lib/api";
+import { enterpriseApi } from "@/lib/enterprise-api";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -51,18 +52,12 @@ export function SidebarFooter() {
     setFeedbackSubmitting(true);
     setFeedbackMessage("");
     try {
-      const response = await apiFetch("/api/feedback", {
-        method: "POST",
-        body: form,
-        timeoutMs: 60_000,
-      });
-      if (!response.ok) throw new Error(await response.text());
+      await enterpriseApi.postForm("/api/feedback", form, { timeoutMs: 60_000 });
       setFeedbackDescription("");
       setFeedbackImage(null);
       setFeedbackMessage(t("common:feedbackSubmitted"));
     } catch (error) {
-      const message = error instanceof Error ? error.message : t("common:feedbackSubmitFailed");
-      setFeedbackMessage(message || t("common:feedbackSubmitFailed"));
+      setFeedbackMessage(apiErrorMessage(error, t("common:feedbackSubmitFailed")));
     } finally {
       setFeedbackSubmitting(false);
     }

@@ -41,7 +41,10 @@ async function request<T>(
     ...fetchOptions
   } = options ?? {};
   const headers = new Headers(fetchOptions.headers);
-  headers.set("Content-Type", headers.get("Content-Type") || "application/json");
+  const isMultipart = typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
+  if (!isMultipart && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
   headers.set("Accept-Language", headers.get("Accept-Language") || i18n.language || "zh-CN");
 
   const companyToken = includeCompanySession ? getCompanySessionToken() : null;
@@ -86,6 +89,12 @@ export const enterpriseApi = {
     request<T>(path, {
       method: "POST",
       body: data ? JSON.stringify(data) : undefined,
+      ...options,
+    }),
+  postForm: <T>(path: string, data: FormData, options?: EnterpriseRequestInit) =>
+    request<T>(path, {
+      method: "POST",
+      body: data,
       ...options,
     }),
 };
