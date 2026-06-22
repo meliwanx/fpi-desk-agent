@@ -61,6 +61,9 @@ jobs:
           backend\venv\Scripts\python.exe -m pip install --upgrade pip
           backend\venv\Scripts\python.exe -m pip install -r backend\requirements.txt pyinstaller
 
+      - name: Validate release version metadata
+        run: npm run check:release-version
+
       - name: Sync desktop metadata
         run: node scripts/sync-desktop-meta.mjs
 
@@ -156,6 +159,9 @@ jobs:
           python3 -m venv backend/venv
           backend/venv/bin/python -m pip install --upgrade pip
           backend/venv/bin/python -m pip install -r backend/requirements.txt pyinstaller
+
+      - name: Validate release version metadata
+        run: npm run check:release-version
 
       - name: Sync desktop metadata
         run: node scripts/sync-desktop-meta.mjs
