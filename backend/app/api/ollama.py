@@ -67,7 +67,7 @@ def _is_cloud_model_tag(name: str) -> bool:
     """True for Ollama cloud-routed models (e.g. ``glm-5.1:cloud``).
 
     Cloud tags execute on Ollama's hosted infra rather than pulling local
-    weights, so OpenYak's pull/discovery flow doesn't fit them today. Detect
+    weights, so fpi-agent's pull/discovery flow doesn't fit them today. Detect
     them up-front and surface a useful message instead of letting the request
     fail with an opaque manifest error.
     """
@@ -75,7 +75,7 @@ def _is_cloud_model_tag(name: str) -> bool:
 
 
 _CLOUD_BLOCK_MESSAGE = (
-    "{name} is a cloud-hosted Ollama model — not yet supported in OpenYak. "
+    "{name} is a cloud-hosted Ollama model — not yet supported in fpi-agent. "
     "Try a local tag (e.g. qwen3:8b, llama3.2:3b) or use ChatGPT / "
     "OpenRouter in Settings → Providers."
 )

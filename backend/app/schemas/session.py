@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 
 
 class SessionCreate(BaseModel):
@@ -51,6 +51,16 @@ class SessionResponse(BaseModel):
     time_updated: datetime
     time_compacting: datetime | None = None
     time_archived: datetime | None = None
+
+    @field_serializer("time_created", "time_updated", "time_compacting", "time_archived")
+    def _serialize_datetime_utc(self, value: datetime | None) -> str | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        else:
+            value = value.astimezone(timezone.utc)
+        return value.isoformat().replace("+00:00", "Z")
 
     # protected_namespaces=() — allow the ``model_id`` field without Pydantic's
     # "model_" reserved-namespace warning (consistent with the rest of the app).

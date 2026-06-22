@@ -6,9 +6,16 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+export function parseApiDate(date: string | Date): Date {
+  if (date instanceof Date) return date;
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(date);
+  const normalized = date.includes("T") && !hasTimezone ? `${date}Z` : date;
+  return new Date(normalized);
+}
+
 export function formatRelativeTime(date: string | Date): string {
   const now = new Date();
-  const d = new Date(date);
+  const d = parseApiDate(date);
   const diff = now.getTime() - d.getTime();
   const seconds = Math.floor(diff / 1000);
   const minutes = Math.floor(seconds / 60);
@@ -66,7 +73,7 @@ export function groupSessionsByDate<T extends { time_updated: string }>(
   };
 
   for (const session of sessions) {
-    const d = new Date(session.time_updated);
+    const d = parseApiDate(session.time_updated);
     if (d >= today) groups["today"].push(session);
     else if (d >= yesterday) groups["yesterday"].push(session);
     else if (d >= weekAgo) groups["previous7Days"].push(session);

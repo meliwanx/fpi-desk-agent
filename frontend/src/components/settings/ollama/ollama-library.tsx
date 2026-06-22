@@ -545,7 +545,7 @@ function ModelCard({
           const isInstalled = installedNames.has(fullName);
           const isCloud = size.toLowerCase() === "cloud";
           const cloudTooltip =
-            "Cloud-hosted Ollama model — not yet supported in OpenYak. Use a local-weights tag, or pick ChatGPT / OpenRouter in Settings → Providers.";
+            "Cloud-hosted Ollama model — not yet supported in fpi-agent. Use a local-weights tag, or pick ChatGPT / OpenRouter in Settings → Providers.";
           return (
             <button
               key={size}

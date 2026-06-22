@@ -140,7 +140,7 @@ async def uninstall_rapid_mlx(
     settings: SettingsDep,
     delete_models: bool = True,
 ) -> RapidMLXUninstallResponse:
-    """Stop Rapid-MLX, delete cached models, and clear OpenYak's config.
+    """Stop Rapid-MLX, delete cached models, and clear fpi-agent's config.
 
     The brew/pip-managed binary itself is left to the user — the response
     includes the commands they need to run for a full removal.

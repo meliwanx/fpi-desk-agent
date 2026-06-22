@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.api import admin as admin_api
 from app.api import agents as agents_api
+from app.api import app_update as app_update_api
 from app.api import artifacts as artifacts_api
 from app.api import automations as automations_api
 from app.api import workspace_memory as workspace_memory_api
 from app.api import channels as channels_api
+from app.api import company_auth as company_auth_api
 from app.api import ollama as ollama_api
 from app.api import chat as chat_api
 from app.api import config as config_api
@@ -30,7 +33,10 @@ from app.api import usage as usage_api
 
 api_router = APIRouter()
 
+api_router.include_router(admin_api.router, tags=["admin"])
+api_router.include_router(app_update_api.router, tags=["app-update"])
 api_router.include_router(models_api.router, tags=["models"])
+api_router.include_router(company_auth_api.router, tags=["company-auth"])
 api_router.include_router(chat_api.router, tags=["chat"])
 api_router.include_router(agents_api.router, tags=["agents"])
 api_router.include_router(tools_api.router, tags=["tools"])

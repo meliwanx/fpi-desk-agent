@@ -1,7 +1,8 @@
-"""Workspace directory restriction — path validation utilities.
+"""Workspace path helpers.
 
-When a workspace is configured, all file-access tools must operate
-within that directory.  This module provides the validation logic.
+The workspace is the default context and write boundary. Read-only tools may
+access explicit absolute paths outside it; write/edit/patch paths remain
+restricted to the workspace when one is configured.
 """
 
 from __future__ import annotations
@@ -48,6 +49,34 @@ def resolve_and_validate(file_path: str, workspace: str | None) -> str:
         raise WorkspaceViolation(str(resolved), str(ws))
 
     return str(resolved)
+
+
+def resolve_for_read(file_path: str, workspace: str | None) -> str:
+    """Resolve a path for read-only operations.
+
+    Relative paths prefer the workspace, so ordinary `read foo.txt` still means
+    `{workspace}/foo.txt`. Explicit absolute paths are allowed even outside the
+    workspace so the agent can inspect local computer state when the workspace
+    does not contain the requested information.
+
+    Parent-directory escapes such as `../secret.txt` are rejected while a
+    workspace is active. If the caller really needs an outside path, it must
+    provide an absolute path; this keeps accidental path traversal from silently
+    changing scope.
+    """
+    p = Path(file_path)
+    if not workspace:
+        return str(p.resolve())
+
+    if p.is_absolute():
+        return str(p.resolve())
+
+    if any(part == ".." for part in p.parts):
+        ws = Path(workspace).resolve()
+        attempted = (ws / p).resolve()
+        raise WorkspaceViolation(str(attempted), str(ws))
+
+    return str((Path(workspace).resolve() / p).resolve())
 
 
 def get_default_output_dir(workspace: str | None) -> str | None:

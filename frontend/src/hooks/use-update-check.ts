@@ -1,17 +1,32 @@
 "use client";
 
-import { useCallback, useSyncExternalStore } from "react";
-import { IS_DESKTOP } from "@/lib/constants";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { api } from "@/lib/api";
+import { API, IS_DESKTOP } from "@/lib/constants";
 import { desktopAPI } from "@/lib/tauri-api";
 
 const CHECK_INTERVAL = 4 * 60 * 60 * 1000; // 4 hours
 const STARTUP_DELAY = 5000; // 5 seconds
-const DISMISSED_KEY = "openyak-dismissed-update";
+const DISMISSED_KEY = "fpi-agent-dismissed-update";
+
+export interface EnterpriseUpdatePolicy {
+  enabled: boolean;
+  current_version: string;
+  latest_version: string;
+  min_supported_version: string;
+  update_available: boolean;
+  force_update: boolean;
+  release_notes: string;
+  download_url: string;
+  checked_at: string;
+}
 
 interface UpdateState {
   available: boolean;
   version: string | null;
   notes: string | null;
+  forceUpdate: boolean;
+  downloadUrl: string | null;
   downloading: boolean;
   progress: number;
   dismissed: boolean;
@@ -21,13 +36,15 @@ interface UpdateState {
 interface UpdateInfo extends Omit<UpdateState, "dismissed"> {
   downloadAndInstall: () => Promise<void>;
   dismiss: () => void;
-  checkNow: () => Promise<void>;
+  checkNow: () => Promise<EnterpriseUpdatePolicy | null>;
 }
 
 let state: UpdateState = {
   available: false,
   version: null,
   notes: null,
+  forceUpdate: false,
+  downloadUrl: null,
   downloading: false,
   progress: 0,
   dismissed: false,
@@ -35,75 +52,105 @@ let state: UpdateState = {
 };
 
 const listeners = new Set<() => void>();
-let pendingUpdate: unknown = null;
+let pendingUpdate: EnterpriseUpdatePolicy | null = null;
 let initialized = false;
 
 function setState(patch: Partial<UpdateState>) {
   state = { ...state, ...patch };
-  listeners.forEach((l) => l());
+  listeners.forEach((listener) => listener());
 }
 
-function subscribe(cb: () => void) {
-  listeners.add(cb);
+function subscribe(callback: () => void) {
+  listeners.add(callback);
   return () => {
-    listeners.delete(cb);
+    listeners.delete(callback);
   };
 }
 
-export async function checkForUpdates() {
-  if (!IS_DESKTOP) return;
+export async function checkForUpdates(): Promise<EnterpriseUpdatePolicy | null> {
+  if (!IS_DESKTOP) return null;
   try {
-    const { check } = await import("@tauri-apps/plugin-updater");
-    const update = await check();
-    if (!update) return;
-    const dismissedVersion = localStorage.getItem(DISMISSED_KEY);
-    if (dismissedVersion === update.version) return;
-    pendingUpdate = update;
-    setState({
-      version: update.version,
-      notes: update.body ?? null,
-      available: true,
-      dismissed: false,
+    const [{ getVersion }, platform] = await Promise.all([
+      import("@tauri-apps/api/app"),
+      desktopAPI.getPlatform().catch(() => ""),
+    ]);
+    const currentVersion = await getVersion();
+    const query = new URLSearchParams({
+      current_version: currentVersion,
+      platform,
     });
-  } catch (e) {
-    console.warn("Update check failed:", e);
+    const update = await api.get<EnterpriseUpdatePolicy>(
+      `${API.APP.UPDATE_POLICY}?${query.toString()}`,
+      { timeoutMs: 15_000 },
+    );
+    pendingUpdate = update;
+
+    if (!update.enabled || !update.update_available) {
+      setState({
+        available: false,
+        version: update.latest_version || null,
+        notes: update.release_notes || null,
+        forceUpdate: false,
+        downloadUrl: update.download_url || null,
+        downloading: false,
+        progress: 0,
+        dismissed: false,
+        error: null,
+      });
+      return update;
+    }
+
+    const dismissedVersion = localStorage.getItem(DISMISSED_KEY);
+    if (!update.force_update && dismissedVersion === update.latest_version) {
+      setState({
+        available: false,
+        version: update.latest_version,
+        notes: update.release_notes || null,
+        forceUpdate: false,
+        downloadUrl: update.download_url || null,
+        dismissed: true,
+        error: null,
+      });
+      return update;
+    }
+
+    setState({
+      available: true,
+      version: update.latest_version,
+      notes: update.release_notes || null,
+      forceUpdate: update.force_update,
+      downloadUrl: update.download_url || null,
+      dismissed: false,
+      error: null,
+    });
+    return update;
+  } catch (error) {
+    console.warn("Update check failed:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    setState({ error: message, downloading: false });
+    return null;
   }
 }
 
 async function downloadAndInstall() {
-  const update = pendingUpdate as {
-    downloadAndInstall: (cb: (ev: {
-      event: "Started" | "Progress" | "Finished";
-      data: { contentLength?: number; chunkLength?: number };
-    }) => void) => Promise<void>;
-  } | null;
-  if (!update) return;
-  setState({ downloading: true, error: null });
-  let totalLength = 0;
-  let downloaded = 0;
+  const downloadUrl = pendingUpdate?.download_url || state.downloadUrl;
+  if (!downloadUrl) {
+    setState({ error: "未配置下载地址", downloading: false });
+    return;
+  }
+  setState({ downloading: true, error: null, progress: 0 });
   try {
-    await update.downloadAndInstall((event) => {
-      if (event.event === "Started" && event.data.contentLength) {
-        totalLength = event.data.contentLength;
-      } else if (event.event === "Progress") {
-        downloaded += event.data.chunkLength ?? 0;
-        if (totalLength > 0) {
-          setState({ progress: Math.round((downloaded / totalLength) * 100) });
-        }
-      } else if (event.event === "Finished") {
-        setState({ progress: 100 });
-      }
-    });
-    const { relaunch } = await import("@tauri-apps/plugin-process");
-    await relaunch();
-  } catch (e) {
-    console.error("Update install failed:", e);
-    const message = e instanceof Error ? e.message : String(e);
+    await desktopAPI.openExternal(downloadUrl);
+    setState({ downloading: false, progress: 100 });
+  } catch (error) {
+    console.error("Update download open failed:", error);
+    const message = error instanceof Error ? error.message : String(error);
     setState({ error: message, downloading: false });
   }
 }
 
 function dismiss() {
+  if (state.forceUpdate) return;
   if (state.version) localStorage.setItem(DISMISSED_KEY, state.version);
   setState({ dismissed: true, available: false });
 }
@@ -111,21 +158,19 @@ function dismiss() {
 function initOnce() {
   if (initialized || !IS_DESKTOP) return;
   initialized = true;
-  setTimeout(checkForUpdates, STARTUP_DELAY);
-  setInterval(checkForUpdates, CHECK_INTERVAL);
+  setTimeout(() => void checkForUpdates(), STARTUP_DELAY);
+  setInterval(() => void checkForUpdates(), CHECK_INTERVAL);
   desktopAPI.onCheckForUpdates(() => {
     void checkForUpdates();
   });
-}
-
-if (typeof window !== "undefined") {
-  initOnce();
 }
 
 const serverSnapshot: UpdateState = {
   available: false,
   version: null,
   notes: null,
+  forceUpdate: false,
+  downloadUrl: null,
   downloading: false,
   progress: 0,
   dismissed: false,
@@ -133,7 +178,11 @@ const serverSnapshot: UpdateState = {
 };
 
 export function useUpdateCheck(): UpdateInfo {
-  const s = useSyncExternalStore(
+  useEffect(() => {
+    initOnce();
+  }, []);
+
+  const snapshot = useSyncExternalStore(
     subscribe,
     () => state,
     () => serverSnapshot,
@@ -143,12 +192,14 @@ export function useUpdateCheck(): UpdateInfo {
   const boundCheck = useCallback(() => checkForUpdates(), []);
 
   return {
-    available: s.available && !s.dismissed,
-    version: s.version,
-    notes: s.notes,
-    downloading: s.downloading,
-    progress: s.progress,
-    error: s.error,
+    available: snapshot.available && !snapshot.dismissed,
+    version: snapshot.version,
+    notes: snapshot.notes,
+    forceUpdate: snapshot.forceUpdate,
+    downloadUrl: snapshot.downloadUrl,
+    downloading: snapshot.downloading,
+    progress: snapshot.progress,
+    error: snapshot.error,
     downloadAndInstall: boundDownload,
     dismiss: boundDismiss,
     checkNow: boundCheck,

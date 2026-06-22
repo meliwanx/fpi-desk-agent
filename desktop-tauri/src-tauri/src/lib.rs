@@ -1,4 +1,4 @@
-//! OpenYak Desktop — Tauri 2.0 application entry point.
+//! fpi-agent Desktop — Tauri 2.0 application entry point.
 //!
 //! Registers plugins, sets up the backend sidecar, tray, menu,
 //! and all IPC command handlers.
@@ -122,9 +122,9 @@ pub fn run() {
                 if is_running_from_dmg_volume(app) {
                     app.dialog()
                         .message(
-                            "OpenYak is running from the DMG volume.\n\nPlease copy OpenYak.app to Applications and launch it from there.",
+                            "聚光办公助理正在从安装镜像中运行。\n\n请先将 fpi-agent.app 拷贝到“应用程序”文件夹，再从“应用程序”中启动。",
                         )
-                        .title("Install OpenYak to Applications")
+                        .title("请先安装到“应用程序”")
                         .kind(MessageDialogKind::Warning)
                         .blocking_show();
                 }

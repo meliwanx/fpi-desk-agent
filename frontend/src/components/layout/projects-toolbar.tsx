@@ -48,11 +48,11 @@ export function ProjectsToolbar({ projectDirectories = [], variant = "projects" 
     }
   };
 
-  const handleAddProject = async () => {
+  const handlePickDirectory = async (dialogTitle: string) => {
     if (isPickingDirectory) return;
     setIsPickingDirectory(true);
     try {
-      const path = await browseDirectory(t("addProject"));
+      const path = await browseDirectory(dialogTitle);
       if (path) {
         router.push(`/c/new?directory=${encodeURIComponent(path)}`);
       }
@@ -62,6 +62,10 @@ export function ProjectsToolbar({ projectDirectories = [], variant = "projects" 
     } finally {
       setIsPickingDirectory(false);
     }
+  };
+
+  const handleAddProject = () => {
+    void handlePickDirectory(t("addProject"));
   };
 
   const handleNewChat = () => {

@@ -26,6 +26,9 @@ from typing import Any, Iterable
 
 from app.schemas.agent import AgentInfo
 
+_SKILL_ROUTING_BUDGET_CHARS = 8_000
+_SKILL_ROUTING_DESC_CHARS = 180
+
 
 @dataclass(frozen=True)
 class SystemPromptParts:
@@ -173,12 +176,13 @@ def render_skills_section(active_skills: Iterable[Any]) -> str | None:
     better when relevant capabilities are surfaced there in addition to the
     skill tool's own description.
     """
-    skills = list(active_skills)
+    skills = [
+        skill
+        for skill in active_skills
+        if getattr(skill, "allow_implicit_invocation", True)
+    ]
     if not skills:
         return None
-
-    shown = skills[:12]
-    remaining = len(skills) - len(shown)
 
     lines = [
         "# Skill Routing",
@@ -188,16 +192,43 @@ def render_skills_section(active_skills: Iterable[Any]) -> str | None:
         "Currently available skills:",
     ]
 
-    for skill in shown:
-        desc = (skill.description or "").strip()
-        if len(desc) > 90:
-            desc = desc[:87] + "..."
-        lines.append(f"- {skill.name}: {desc}")
+    shown = 0
+    total = len(skills)
+    for skill in skills:
+        desc = _truncate((skill.description or "").strip(), _SKILL_ROUTING_DESC_CHARS)
+        label = _skill_label(skill)
+        line = f"- {label}: {desc}" if desc else f"- {label}"
+        remaining_after = total - shown - 1
+        reserve = (
+            len(f"\n- (and {remaining_after} more available via the `skill` tool)")
+            if remaining_after > 0
+            else 0
+        )
+        if len("\n".join([*lines, line])) + reserve > _SKILL_ROUTING_BUDGET_CHARS:
+            break
+        lines.append(line)
+        shown += 1
 
+    remaining = total - shown
     if remaining > 0:
-        lines.append(f"- (and {remaining} more available via the `skill` tool)")
+        summary = f"- (and {remaining} more available via the `skill` tool)"
+        if len("\n".join([*lines, summary])) <= _SKILL_ROUTING_BUDGET_CHARS:
+            lines.append(summary)
 
     return "\n".join(lines)
+
+
+def _skill_label(skill: Any) -> str:
+    display_name = getattr(skill, "display_name", None)
+    if display_name and display_name != skill.name:
+        return f"{skill.name} ({display_name})"
+    return str(skill.name)
+
+
+def _truncate(value: str, max_chars: int) -> str:
+    if len(value) <= max_chars:
+        return value
+    return value[: max_chars - 3].rstrip() + "..."
 
 
 def active_skills_from_registry() -> list[Any]:
@@ -237,11 +268,14 @@ def _environment_section(
         output_dir = str(Path(workspace) / "openyak_written")
         section += f"""
 
-# Workspace Restriction
-You are restricted to the following workspace directory: {workspace}
-All file operations (read, write, edit, glob, grep) and shell command working directories \
-MUST stay within this directory. Attempting to access paths outside will be blocked.
-Always use paths relative to or inside: {workspace}
+# Workspace Access
+The active workspace is: {workspace}
+Use it as the default context for project files, relative paths, full-text `search`, \
+and generated outputs. If the user asks about local computer state or a file is not \
+found in the workspace, you may use read-only tools (`read`, `glob`, `grep`) or shell \
+commands with explicit absolute paths to inspect other local locations.
+File writes, edits, patches, and generated outputs must stay inside the workspace unless \
+the user explicitly chooses a different workspace in a new chat.
 
 # Default Output Directory
 When creating new files and the user does not specify a location, \
@@ -254,7 +288,11 @@ If the user explicitly specifies a different path (within the workspace), use th
 # File Reference Format
 You are not restricted to a workspace for this session.
 When referencing local files in your response, prefer absolute paths rooted from the working directory: {cwd}
-Do not return relative paths like `src/main.py` when an absolute path is available."""
+Do not return relative paths like `src/main.py` when an absolute path is available.
+
+# Full-Text Search
+Full-text `search` is unavailable until the user selects a workspace folder.
+When no workspace is selected, use `glob`, `grep`, `read`, or shell commands with explicit paths instead."""
 
     if fts_status:
         status = fts_status.get("status", "unknown")

@@ -4,6 +4,9 @@
   },
   "bundle": {
     "targets": ["dmg", "app"],
+    "macOS": {
+      "signingIdentity": null
+    },
     "resources": {
       "../../backend/dist/openyak-backend": "backend",
       "../../backend/resources/nodejs": "nodejs"

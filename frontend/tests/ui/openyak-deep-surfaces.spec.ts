@@ -29,16 +29,16 @@ async function sendPrompt(page: Page, text: string) {
   await promptResponse;
 }
 
-async function seedByokProvider(page: Page) {
+async function seedManagedProvider(page: Page) {
   await page.addInitScript(() => {
     const raw = window.localStorage.getItem("openyak-settings");
     const settings = raw ? JSON.parse(raw) : { state: {}, version: 0 };
     settings.state = {
       ...settings.state,
       hasCompletedOnboarding: true,
-      activeProvider: "byok",
-      selectedModel: "openrouter/anthropic/claude-sonnet-4.5",
-      selectedProviderId: "openrouter",
+      activeProvider: "custom",
+      selectedModel: "gpt-5.5",
+      selectedProviderId: "custom_onlyme",
     };
     window.localStorage.setItem("openyak-settings", JSON.stringify(settings));
   });
@@ -79,6 +79,17 @@ test.describe("OpenYak deep claimed-feature GUI surfaces", () => {
     await expectNoAppCrash(page);
   });
 
+  test("streaming tool activity is expanded in the main conversation", async ({ page }) => {
+    await setupMockedApp(page);
+
+    await page.goto(`/c/new?directory=${encodeURIComponent("/Users/alex/openyak-demo")}`);
+    await sendPrompt(page, "Show tool activity stream");
+
+    await expect(page.getByText("我先检查当前环境。").first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText("检查本机 DNS").first()).toBeVisible();
+    await expectNoAppCrash(page);
+  });
+
   test("assistant action workflow: activity, good/bad feedback, and visible recovery controls", async ({ page }) => {
     await setupMockedApp(page);
 
@@ -102,23 +113,26 @@ test.describe("OpenYak deep claimed-feature GUI surfaces", () => {
 
   test("model selector workflow: search, sort modes, model switch, and send payload stay aligned", async ({ page }) => {
     const state = await setupMockedApp(page);
-    await seedByokProvider(page);
+    await seedManagedProvider(page);
 
     await page.goto("/c/new");
-    await expect(page.getByRole("button", { name: /Claude Sonnet 4\.5/i })).toBeVisible();
-    await page.getByRole("button", { name: /Claude Sonnet 4\.5/i }).click();
+    await expect(page.getByRole("button", { name: /GPT-5\.5/i })).toBeVisible();
+    await page.getByRole("button", { name: /GPT-5\.5/i }).click();
     await expect(page.getByPlaceholder("Search models...")).toBeVisible();
 
     await page.getByRole("button", { name: /^Price$/i }).click();
     await page.getByRole("button", { name: /^Name$/i }).click();
-    await page.getByPlaceholder("Search models...").fill("Acme");
-    await expect(page.getByText("Acme Coder")).toBeVisible();
-    await page.getByText("Acme Coder").click();
-    await expect(page.getByRole("button", { name: /Acme Coder/i })).toBeVisible();
+    await page.getByPlaceholder("Search models...").fill("GPT");
+    const managedModel = page.getByLabel("Free").getByText("GPT-5.5", {
+      exact: true,
+    });
+    await expect(managedModel).toBeVisible();
+    await managedModel.click();
+    await expect(page.getByRole("button", { name: /GPT-5\.5/i })).toBeVisible();
 
-    await sendPrompt(page, "Use the selected custom model from the GUI");
-    expect(JSON.stringify(state.promptBodies[0])).toContain("custom_acme/acme-coder");
-    expect(JSON.stringify(state.promptBodies[0])).toContain("custom_acme");
+    await sendPrompt(page, "Use the selected managed model from the GUI");
+    expect(JSON.stringify(state.promptBodies[0])).toContain("gpt-5.5");
+    expect(JSON.stringify(state.promptBodies[0])).toContain("custom_onlyme");
     await expectNoAppCrash(page);
   });
 

@@ -18,6 +18,11 @@ block_cipher = None
 uvicorn_datas, uvicorn_binaries, uvicorn_hiddenimports = collect_all('uvicorn')
 wcmatch_datas, wcmatch_binaries, wcmatch_hiddenimports = collect_all('wcmatch')
 croniter_datas, croniter_binaries, croniter_hiddenimports = collect_all('croniter')
+agent_sandbox_datas, agent_sandbox_binaries, agent_sandbox_hiddenimports = collect_all('agent_sandbox')
+e2b_code_interpreter_datas, e2b_code_interpreter_binaries, e2b_code_interpreter_hiddenimports = collect_all('e2b_code_interpreter')
+e2b_datas, e2b_binaries, e2b_hiddenimports = collect_all('e2b')
+protobuf_datas, protobuf_binaries, protobuf_hiddenimports = collect_all('google.protobuf')
+anthropic_datas, anthropic_binaries, anthropic_hiddenimports = collect_all('anthropic')
 
 # Resolve paths
 backend_dir = os.path.abspath('.')
@@ -48,6 +53,8 @@ _required_datas = [
     # remote access is effectively broken even though the desktop UI works
     # (Tauri reads the frontend from its own resources).
     (frontend_out, 'frontend_out'),
+    # Vite admin console served at /admin.
+    (os.path.join(app_dir, 'admin_static'), os.path.join('app', 'admin_static')),
 ]
 
 _missing = [src for src, _ in _required_datas if not os.path.exists(src)]
@@ -80,6 +87,10 @@ if not os.path.isfile(_mobile_entry) or not os.path.isdir(_next_dir):
 
 datas = list(_required_datas)
 
+_tencent_sandbox_api_key_cache = os.path.join(backend_dir, 'data', 'tencent_sandbox_api_key')
+if os.path.isfile(_tencent_sandbox_api_key_cache):
+    datas.append((_tencent_sandbox_api_key_cache, '.'))
+
 # Hidden imports — modules that PyInstaller can't detect automatically
 hiddenimports = [
     # FastAPI and dependencies
@@ -103,6 +114,8 @@ hiddenimports = [
     'sqlalchemy',
     'sqlalchemy.ext.asyncio',
     'aiosqlite',
+    'aiomysql',
+    'pymysql',
     'alembic',
 
     # SSE
@@ -110,6 +123,7 @@ hiddenimports = [
 
     # LLM
     'openai',
+    'anthropic',
     'httpx',
     'tiktoken',
     'tiktoken_ext',
@@ -162,6 +176,19 @@ hiddenimports = [
     'wcmatch.fnmatch',
     'wcmatch.pathlib',
     'croniter',
+    'agent_sandbox',
+    'e2b',
+    'e2b_code_interpreter',
+    'tencentcloud.ags.v20250920',
+    'tencentcloud.ags.v20250920.ags_client',
+    'tencentcloud.ags.v20250920.models',
+    'tencentcloud.common',
+    'tencentcloud.common.abstract_client',
+    'tencentcloud.common.abstract_model',
+    'tencentcloud.common.credential',
+    'tencentcloud.common.exception.tencent_cloud_sdk_exception',
+    'tencentcloud.common.profile.client_profile',
+    'tencentcloud.common.profile.http_profile',
 
     # App modules
     'app.main',
@@ -170,6 +197,7 @@ hiddenimports = [
     'app.api',
     'app.api.router',
     'app.api.chat',
+    'app.api.company_auth',
     'app.api.sessions',
     'app.api.messages',
     'app.api.models',
@@ -187,6 +215,10 @@ hiddenimports = [
     'app.session.system_prompt',
     'app.session.title',
     'app.session.retry',
+    'app.auth.company_middleware',
+    'app.company_auth.security',
+    'app.company_auth.store',
+    'app.sandbox.manager',
     'app.streaming.events',
     'app.streaming.manager',
     'app.models.base',
@@ -221,14 +253,44 @@ hiddenimports = [
     'app.skill.registry',
     'app.storage.database',
     'app.schemas',
+    'app.schemas.company_auth',
 ]
 
 a = Analysis(
     ['run.py'],
     pathex=[backend_dir],
-    binaries=uvicorn_binaries + wcmatch_binaries + croniter_binaries,
-    datas=datas + uvicorn_datas + wcmatch_datas + croniter_datas,
-    hiddenimports=hiddenimports + uvicorn_hiddenimports + wcmatch_hiddenimports + croniter_hiddenimports,
+    binaries=(
+        uvicorn_binaries
+        + wcmatch_binaries
+        + croniter_binaries
+        + agent_sandbox_binaries
+        + e2b_code_interpreter_binaries
+        + e2b_binaries
+        + protobuf_binaries
+        + anthropic_binaries
+    ),
+    datas=(
+        datas
+        + uvicorn_datas
+        + wcmatch_datas
+        + croniter_datas
+        + agent_sandbox_datas
+        + e2b_code_interpreter_datas
+        + e2b_datas
+        + protobuf_datas
+        + anthropic_datas
+    ),
+    hiddenimports=(
+        hiddenimports
+        + uvicorn_hiddenimports
+        + wcmatch_hiddenimports
+        + croniter_hiddenimports
+        + agent_sandbox_hiddenimports
+        + e2b_code_interpreter_hiddenimports
+        + e2b_hiddenimports
+        + protobuf_hiddenimports
+        + anthropic_hiddenimports
+    ),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -317,7 +379,6 @@ a = Analysis(
         # ── gRPC / Proto ─────────────────────────────────────────────
         'grpc',
         'grpcio',
-        'google.protobuf',
 
         # ── Heavy optional libs ──────────────────────────────────────
         'gradio',

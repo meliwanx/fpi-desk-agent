@@ -32,7 +32,14 @@ class InvalidTool(ToolDefinition):
         }
 
     async def execute(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
-        name = args.get("name", "unknown")
+        raw_name = args.get("name")
+        name = raw_name.strip() if isinstance(raw_name, str) else ""
+        display_name = name or "未命名工具"
         return ToolResult(
-            error=f"Tool '{name}' is not available. Check the tool name and try again.",
+            output=(
+                f"工具 `{display_name}` 不可用。\n\n"
+                "请改用当前系统提示中列出的可用工具名称。如果只是普通回复，不要调用工具，直接回答用户。"
+            ),
+            title="工具不可用",
+            metadata={"reason": "unknown_tool", "name": display_name},
         )

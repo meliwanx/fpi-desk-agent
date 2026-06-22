@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from app.dependencies import set_skill_registry
+from app.skill.model import SkillInfo
 from app.skill.registry import SkillRegistry
 from app.agent.agent import AgentRegistry
 from app.session.system_prompt import (
@@ -45,6 +46,9 @@ class TestSystemPrompt:
         parts = assemble(build, **_resolve_io(), **_PINNED)
         prompt = parts.as_plain_text()
         assert "software engineering" in prompt.lower() or "tool" in prompt.lower()
+        assert "聚光办公助理" in prompt
+        assert "Yakyak" not in prompt
+        assert "OpenYak agent assistant" not in prompt
 
     def test_includes_environment(self):
         ar = AgentRegistry()
@@ -54,6 +58,13 @@ class TestSystemPrompt:
         assert "Working directory" in prompt
         assert "Platform" in prompt
         assert "date" in prompt
+
+    def test_no_workspace_disables_full_text_search_guidance(self):
+        ar = AgentRegistry()
+        build = ar.get("build")
+        parts = assemble(build, workspace=None, fts_status=None, **_resolve_io(), **_PINNED)
+        prompt = parts.as_plain_text()
+        assert "Full-text `search` is unavailable until the user selects a workspace folder." in prompt
 
     def test_plan_agent_prompt(self):
         ar = AgentRegistry()
@@ -87,7 +98,7 @@ class TestSystemPrompt:
         build = ar.get("build")
         parts = assemble(build, **_resolve_io(), **_PINNED)
         # Agent base prompt is in cached section
-        assert "Yakyak" in parts.cached or "tool" in parts.cached.lower()
+        assert "聚光办公助理" in parts.cached
         # Environment info is in dynamic section
         assert "Working directory" in parts.dynamic
 
@@ -122,3 +133,41 @@ class TestSystemPrompt:
 
         assert "Skill Routing" in parts.dynamic
         assert "sheet-helper" in parts.dynamic
+
+    def test_skill_routing_skips_non_implicit_skills(self):
+        section = render_skills_section([
+            SkillInfo(
+                name="manual-only",
+                description="Only load when explicitly requested.",
+                location="/tmp/manual/SKILL.md",
+                content="manual",
+                allow_implicit_invocation=False,
+            ),
+            SkillInfo(
+                name="auto-skill",
+                description="Can be routed automatically.",
+                location="/tmp/auto/SKILL.md",
+                content="auto",
+            ),
+        ])
+
+        assert section is not None
+        assert "auto-skill" in section
+        assert "manual-only" not in section
+
+    def test_skill_routing_respects_context_budget(self):
+        skills = [
+            SkillInfo(
+                name=f"skill-{i:03d}",
+                description="x" * 500,
+                location=f"/tmp/skill-{i}/SKILL.md",
+                content="body",
+            )
+            for i in range(200)
+        ]
+
+        section = render_skills_section(skills)
+
+        assert section is not None
+        assert len(section) <= 8_000
+        assert "more available via the `skill` tool" in section

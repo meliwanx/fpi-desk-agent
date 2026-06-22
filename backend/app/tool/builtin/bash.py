@@ -11,6 +11,7 @@ import os
 import subprocess
 from typing import Any
 
+from app.sandbox.manager import SandboxUnavailable, get_sandbox_manager
 from app.tool.base import ToolDefinition, ToolResult
 from app.tool.context import ToolContext
 from app.tool.subprocess_compat import (
@@ -35,8 +36,10 @@ class BashTool(ToolDefinition):
     @property
     def description(self) -> str:
         return (
-            "Execute a shell command. Returns stdout and stderr. "
-            "Commands run in the project directory. "
+            "Execute a local shell command. Returns stdout and stderr. "
+            "Commands run on this computer. They default to the workspace but "
+            "may inspect explicit absolute local paths; the configured local "
+            "sandbox limits writes when available. "
             "Timeout defaults to 120 seconds (max 600)."
         )
 
@@ -84,6 +87,37 @@ class BashTool(ToolDefinition):
                 # If we can't create it, fall back to workspace or None
                 cwd = ctx.workspace or None
 
+        manager = get_sandbox_manager()
+        if manager.is_enabled():
+            try:
+                sandbox_result = await manager.run_shell(
+                    session_id=ctx.session_id,
+                    command=command,
+                    cwd=cwd or ctx.workspace or os.getcwd(),
+                    workspace=ctx.workspace,
+                    timeout=timeout,
+                )
+                metadata = {
+                    "exit_code": sandbox_result.exit_code,
+                    "sandbox": {"used": True, **sandbox_result.metadata},
+                }
+                return ToolResult(
+                    output=sandbox_result.output,
+                    title=command[:80],
+                    metadata=metadata,
+                    error=(
+                        f"Command failed with exit code {sandbox_result.exit_code}"
+                        if sandbox_result.exit_code != 0
+                        else None
+                    ),
+                )
+            except SandboxUnavailable as exc:
+                if manager.is_required():
+                    return ToolResult(
+                        error=f"Sandbox unavailable: {exc}",
+                        metadata={"sandbox": {"used": False, "required": True, "error": str(exc)}},
+                    )
+
         extra_kwargs = get_subprocess_kwargs()
         shell_prefix = find_shell()
 
@@ -129,6 +163,6 @@ class BashTool(ToolDefinition):
         return ToolResult(
             output=output,
             title=command[:80],
-            metadata={"exit_code": exit_code},
+            metadata={"exit_code": exit_code, "sandbox": {"used": False}},
             error=f"Command failed with exit code {exit_code}" if exit_code != 0 else None,
         )

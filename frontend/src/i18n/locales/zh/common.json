@@ -1,5 +1,6 @@
 {
   "toggleSidebar": "切换侧边栏",
+  "primaryNavigation": "主要导航",
   "newChat": "新对话",
   "openSidebar": "打开侧边栏",
   "settings": "设置",
@@ -56,6 +57,7 @@
   "searchResults": "结果",
   "collapseAll": "全部折叠",
   "expandAll": "全部展开",
+  "selectWorkspace": "选择工作区",
   "addProject": "新建项目",
   "addProjectFailed": "无法选择项目目录",
   "filterSortOrganize": "筛选、排序与组织对话",
@@ -70,7 +72,7 @@
   "minutesAgo": "{{count}} 分钟前",
   "hoursAgo": "{{count}} 小时前",
   "daysAgo": "{{count}} 天前",
-  "poweredBy": "由 OpenRouter 提供支持 · OpenYak v0.1",
+  "poweredBy": "由 OpenRouter 提供支持 · fpi-agent v0.1",
   "sortBy": "排序",
   "name": "名称",
   "price": "价格",

@@ -9,6 +9,24 @@ import faulthandler
 import os
 import sys
 import traceback
+from pathlib import Path
+
+
+def _configure_bundled_node(resource_dir: str | None) -> None:
+    """Make bundled Node.js discoverable for subprocesses in desktop builds."""
+    if not resource_dir:
+        return
+
+    node_root = Path(resource_dir) / "nodejs"
+    node_bin = node_root if os.name == "nt" else node_root / "bin"
+    if not node_bin.exists():
+        return
+
+    current_path = os.environ.get("PATH", "")
+    path_parts = [part for part in current_path.split(os.pathsep) if part]
+    node_bin_text = str(node_bin)
+    if node_bin_text not in path_parts:
+        os.environ["PATH"] = os.pathsep.join([node_bin_text, *path_parts])
 
 
 def _install_crash_reporter() -> None:
@@ -66,6 +84,7 @@ def main() -> None:
     # Store resource dir as env var so the app can find bundled assets (e.g. Node.js)
     if args.resource_dir:
         os.environ["OPENYAK_RESOURCE_DIR"] = args.resource_dir
+        _configure_bundled_node(args.resource_dir)
 
     import uvicorn
     from app.main import create_app

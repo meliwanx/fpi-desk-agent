@@ -11,16 +11,18 @@ from typing import AsyncGenerator
 import httpx
 
 from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.health import router as health_router
 from app.api.openai_compat import router as openai_compat_router
 from app.api.router import api_router
 from app.auth.csrf import CsrfProtectionMiddleware
+from app.auth.company_middleware import CompanyAuthMiddleware
 from app.auth.middleware import AuthMiddleware
 from app.auth.private_network import PrivateNetworkAccessMiddleware
 from app.auth.token import ensure_session_token
-from app.config import Settings
+from app.config import Settings, get_company_auth_database_url
 from app.errors import register_error_handlers
 from app.dependencies import (
     get_index_manager,
@@ -29,6 +31,7 @@ from app.dependencies import (
     set_connector_registry,
     set_index_manager,
     set_plugin_manager,
+    set_company_auth_store,
     set_provider_registry,
     set_session_factory,
     set_settings,
@@ -107,6 +110,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     set_session_factory(session_factory)
 
     # Ensure all models are registered with Base.metadata before create_all
+    from app.models import audit as _audit_models  # noqa: F401 — registers audit models
     from app.memory import workspace_memory_model as _ws_memory_models  # noqa: F401 — registers WorkspaceMemory
 
     async with engine.begin() as conn:
@@ -116,6 +120,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     app.state.engine = engine
     app.state.session_factory = session_factory
+
+    # Company-user auth lives in a separate remote database so local chat data
+    # can stay in the existing desktop SQLite store.
+    company_auth_store = None
+    if settings.company_auth_enabled:
+        from app.company_auth.store import CompanyAuthStore
+
+        company_auth_store = CompanyAuthStore(
+            get_company_auth_database_url(settings),
+            table_prefix=settings.company_auth_table_prefix,
+            session_days=settings.company_auth_session_days,
+            echo=settings.debug,
+        )
+        await company_auth_store.startup()
+        await company_auth_store.ensure_bootstrap_admin(
+            email=settings.company_auth_bootstrap_email,
+            display_name=settings.company_auth_bootstrap_display_name,
+            password=settings.company_auth_bootstrap_password,
+            bootstrap_file=Path(settings.company_auth_bootstrap_file),
+        )
+        app.state.company_auth_store = company_auth_store
+        set_company_auth_store(company_auth_store)
+        logger.info("Company auth enabled for %s", settings.company_auth_bootstrap_email)
+    else:
+        app.state.company_auth_store = None
+        set_company_auth_store(None)
 
     # Provider registry
     registry = ProviderRegistry()
@@ -320,6 +350,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.warning("Model refresh failed after provider registration: %s", e)
 
+    if company_auth_store is not None:
+        try:
+            from app.company_auth.model_policy_sync import sync_company_model_policy
+
+            policy = await company_auth_store.get_model_policy()
+            synced = await sync_company_model_policy(registry, policy)
+            if synced:
+                logger.info("Registered company-managed model providers: %s", ", ".join(sorted(synced)))
+        except Exception as e:
+            logger.warning("Failed to sync company model policy: %s", e)
+
     app.state.provider_registry = registry
     set_provider_registry(registry)
 
@@ -521,6 +562,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if ollama_mgr and ollama_mgr.is_running:
         await ollama_mgr.stop()
 
+    company_auth_store = getattr(app.state, "company_auth_store", None)
+    if company_auth_store is not None:
+        await company_auth_store.dispose()
+
+    from app.sandbox.manager import reset_sandbox_manager
+
+    reset_sandbox_manager()
+
     await engine.dispose()
 
 
@@ -622,6 +671,18 @@ def _find_frontend_dir() -> Path | None:
     return None
 
 
+def _find_admin_dir() -> Path | None:
+    """Locate the built Vite admin console directory."""
+    candidates = [
+        Path(__file__).parent / "admin_static",
+        Path(__file__).parent.parent / "admin_static",
+    ]
+    for p in candidates:
+        if p.is_dir() and (p / "index.html").exists():
+            return p
+    return None
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build and return the FastAPI application."""
     if settings is None:
@@ -685,6 +746,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # privileged endpoint regardless of which interface the request
     # arrived on.
     app.add_middleware(AuthMiddleware)
+    app.add_middleware(CompanyAuthMiddleware)
 
     # DomainError → JSONResponse. Registered before routers so handlers
     # raised from any subsequently mounted endpoint are mapped consistently.
@@ -694,6 +756,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health_router)
     app.include_router(api_router, prefix="/api")
     app.include_router(openai_compat_router, tags=["openai-compat"])
+
+    admin_dir = _find_admin_dir()
+    if admin_dir:
+        from starlette.responses import FileResponse
+        from starlette.staticfiles import StaticFiles
+
+        assets_dir = admin_dir / "assets"
+        if assets_dir.is_dir():
+            app.mount("/admin/assets", StaticFiles(directory=str(assets_dir)), name="admin-assets")
+
+        @app.get("/admin")
+        async def admin_console() -> FileResponse:
+            return FileResponse(str(admin_dir / "index.html"))
+    else:
+        @app.get("/admin", response_class=HTMLResponse)
+        async def admin_console_fallback() -> HTMLResponse:
+            from app.admin_page import admin_console_html
+
+            return HTMLResponse(admin_console_html())
 
     # Serve frontend static files for remote access (phone browser).
     # In desktop mode, Tauri serves the frontend — this is only needed

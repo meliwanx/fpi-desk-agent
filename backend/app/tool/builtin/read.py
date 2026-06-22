@@ -12,7 +12,7 @@ from typing import Any
 from app.tool.base import ToolDefinition, ToolResult
 from app.tool.context import ToolContext
 from app.tool.extractors import extract_document, is_supported_binary
-from app.tool.workspace import WorkspaceViolation, resolve_and_validate
+from app.tool.workspace import WorkspaceViolation, resolve_for_read
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,8 @@ class ReadTool(ToolDefinition):
         return (
             "Read a file from the filesystem. Supports offset/limit for paging "
             "through large files. Can also list directory contents. "
+            "Relative paths resolve inside the active workspace by default; "
+            "explicit absolute paths can inspect local files elsewhere on this computer. "
             "Natively handles ALL file types including PDF, DOCX, XLSX, PPTX, "
             "and images (PNG, JPG, etc.) — no skill or plugin needed, just call read directly. "
             "Use 'pages' to read specific pages of a PDF or a named sheet in XLSX. "
@@ -97,7 +99,7 @@ class ReadTool(ToolDefinition):
         For actual analysis the agent should use code_execute with pandas.
         """
         try:
-            resolved = resolve_and_validate(file_path, ctx.workspace)
+            resolved = resolve_for_read(file_path, ctx.workspace)
         except WorkspaceViolation as e:
             return ToolResult(error=str(e))
 
@@ -237,12 +239,11 @@ class ReadTool(ToolDefinition):
         import base64
         import mimetypes
 
-        # Resolve path — try workspace-relative first, then absolute
+        # Resolve path — workspace-relative by default, explicit absolute paths allowed
         try:
-            resolved = resolve_and_validate(file_path, ctx.workspace)
-        except WorkspaceViolation:
-            # Attachments may live outside the workspace — allow if file exists
-            resolved = str(Path(file_path).resolve())
+            resolved = resolve_for_read(file_path, ctx.workspace)
+        except WorkspaceViolation as e:
+            return ToolResult(error=str(e))
 
         if not os.path.exists(resolved):
             return ToolResult(error=f"Image not found: {file_path}")
@@ -278,7 +279,7 @@ class ReadTool(ToolDefinition):
 
         # Workspace restriction check
         try:
-            file_path = resolve_and_validate(file_path, ctx.workspace)
+            file_path = resolve_for_read(file_path, ctx.workspace)
         except WorkspaceViolation as e:
             return ToolResult(error=str(e))
 

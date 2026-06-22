@@ -357,12 +357,12 @@ def _success_html(email: str) -> str:
     display = f" as <strong>{email}</strong>" if email else ""
     return f"""<!DOCTYPE html>
 <html>
-<head><title>OpenYak — Authentication Successful</title></head>
+<head><title>fpi-agent — Authentication Successful</title></head>
 <body style="font-family: -apple-system, system-ui, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #0a0a0a; color: #e0e0e0;">
   <div style="text-align: center; max-width: 400px; padding: 2rem;">
     <div style="font-size: 3rem; margin-bottom: 1rem;">&#10003;</div>
     <h1 style="font-size: 1.25rem; margin-bottom: 0.5rem;">Authentication Successful</h1>
-    <p style="color: #888; font-size: 0.875rem;">Signed in{display}. ChatGPT subscription models are now available in OpenYak.</p>
+    <p style="color: #888; font-size: 0.875rem;">Signed in{display}. ChatGPT subscription models are now available in fpi-agent.</p>
     <p style="color: #666; font-size: 0.75rem; margin-top: 1.5rem;">You can close this tab.</p>
   </div>
 </body>
@@ -372,7 +372,7 @@ def _success_html(email: str) -> str:
 def _error_html(message: str) -> str:
     return f"""<!DOCTYPE html>
 <html>
-<head><title>OpenYak — Authentication Failed</title></head>
+<head><title>fpi-agent — Authentication Failed</title></head>
 <body style="font-family: -apple-system, system-ui, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #0a0a0a; color: #e0e0e0;">
   <div style="text-align: center; max-width: 400px; padding: 2rem;">
     <div style="font-size: 3rem; margin-bottom: 1rem;">&#10007;</div>

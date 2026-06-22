@@ -104,6 +104,7 @@ export interface OpenYakMockOptions {
 export interface OpenYakSeedOptions {
   hasCompletedOnboarding?: boolean;
   savedPermissions?: Array<{ tool: string; allow: boolean; timestamp: number }>;
+  hasCompanySession?: boolean;
   force?: boolean;
 }
 
@@ -200,6 +201,21 @@ const createdSession = {
 };
 
 const models = [
+  {
+    id: "gpt-5.5",
+    name: "GPT-5.5",
+    provider_id: "custom_onlyme",
+    capabilities: {
+      function_calling: true,
+      vision: true,
+      reasoning: true,
+      json_output: true,
+      max_context: 256000,
+      max_output: 16384,
+    },
+    pricing: { prompt: 0, completion: 0 },
+    metadata: {},
+  },
   {
     id: "openrouter/anthropic/claude-sonnet-4.5",
     name: "Claude Sonnet 4.5",
@@ -1098,9 +1114,10 @@ export async function seedOpenYakStorage(
   const overwrite =
     options.force === true ||
     options.hasCompletedOnboarding !== undefined ||
-    options.savedPermissions !== undefined;
+    options.savedPermissions !== undefined ||
+    options.hasCompanySession !== undefined;
   await page.addInitScript(
-    ({ settings, overwrite: shouldOverwrite }) => {
+    ({ settings, overwrite: shouldOverwrite, hasCompanySession }) => {
       const setValue = (key: string, value: string) => {
         if (shouldOverwrite || !window.localStorage.getItem(key)) {
           window.localStorage.setItem(key, value);
@@ -1109,13 +1126,34 @@ export async function seedOpenYakStorage(
 
       setValue("openyak-settings", JSON.stringify(settings));
       setValue("openyak-language", "en");
+      if (hasCompanySession) {
+        setValue(
+          "fpi-company-session",
+          JSON.stringify({
+            token: "test-company-session",
+            expiresAt: "2099-01-01T00:00:00.000Z",
+            user: {
+              id: "user-admin",
+              email: "admin@fpi.local",
+              display_name: "FPI Admin",
+              role: "admin",
+            },
+          }),
+        );
+      } else if (shouldOverwrite) {
+        window.localStorage.removeItem("fpi-company-session");
+      }
       setValue(
         "openyak_remote_config",
         JSON.stringify({ url: window.location.origin, token: "remote-token" }),
       );
       setValue("openyak_remote_provider", "openrouter");
     },
-    { settings: seededSettings(options), overwrite },
+    {
+      settings: seededSettings(options),
+      overwrite,
+      hasCompanySession: options.hasCompanySession ?? true,
+    },
   );
 }
 
@@ -1564,6 +1602,24 @@ function sseStreamBody(streamId: string) {
     ].join("\n");
   }
 
+  if (streamId === "stream-tool-activity") {
+    return [
+      sseEvent(1, "reasoning-delta", {
+        text: "我先检查当前环境。",
+      }),
+      sseEvent(2, "tool-call", {
+        call_id: "tool-local-dns",
+        tool: "bash",
+        arguments: {
+          command: "scutil --dns | sed -n '1,20p'",
+          cwd: "/Users/alex/openyak-demo",
+        },
+        title: "检查本机 DNS",
+      }),
+      "",
+    ].join("\n");
+  }
+
   if (streamId.startsWith("stream-edit-")) {
     const sessionId = streamId.slice("stream-edit-".length);
     return [
@@ -1700,6 +1756,38 @@ export async function mockOpenYakApi(
       }
       return fulfillJson(route, { status: "ok" });
     }
+    if (path === "/api/company-auth/session") {
+      if (request.headers()["x-fpi-session"] !== "test-company-session") {
+        return route.fulfill({
+          status: 401,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: "Company login required" }),
+        });
+      }
+      return fulfillJson(route, {
+        user: {
+          id: "user-admin",
+          email: "admin@fpi.local",
+          display_name: "FPI Admin",
+          role: "admin",
+        },
+      });
+    }
+    if (path === "/api/company-auth/login") {
+      return fulfillJson(route, {
+        token: "test-company-session",
+        expires_at: "2099-01-01T00:00:00.000Z",
+        user: {
+          id: "user-admin",
+          email: "admin@fpi.local",
+          display_name: "FPI Admin",
+          role: "admin",
+        },
+      });
+    }
+    if (path === "/api/company-auth/logout") {
+      return route.fulfill({ status: 204, body: "" });
+    }
     if (path === "/api/models") return fulfillJson(route, models);
     if (path === "/api/agents")
       return fulfillJson(route, [{ name: "build" }, { name: "plan" }]);
@@ -1745,6 +1833,16 @@ export async function mockOpenYakApi(
     }
     if (path === "/api/config/providers") {
       return fulfillJson(route, [
+        {
+          id: "custom_onlyme",
+          name: "OnlyMe GPT-5.5",
+          is_configured: true,
+          enabled: true,
+          masked_key: "sk-fa3...fb8e",
+          base_url: "https://sub2api.onlymeok.com/v1",
+          model_count: 1,
+          status: "connected",
+        },
         {
           id: "openrouter",
           name: "OpenRouter",
@@ -2082,6 +2180,7 @@ export async function mockOpenYakApi(
       if (/question/i.test(text)) streamId = "stream-question";
       if (/plan review/i.test(text)) streamId = "stream-plan";
       if (/slow stream|stop generation/i.test(text)) streamId = "stream-slow";
+      if (/tool activity/i.test(text)) streamId = "stream-tool-activity";
       return fulfillJson(route, {
         stream_id: streamId,
         session_id: "session-new",

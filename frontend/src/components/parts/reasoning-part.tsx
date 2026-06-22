@@ -23,10 +23,18 @@ interface ReasoningPartProps {
 
 export function ReasoningPart({ texts, toolParts = [], isStreaming, onDurationChange }: ReasoningPartProps) {
   const { t } = useTranslation("chat");
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(Boolean(isStreaming));
   const [elapsed, setElapsed] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (isStreaming) {
+      setIsOpen(true);
+    } else {
+      setIsOpen(false);
+    }
+  }, [isStreaming]);
 
   // Live timer — ticks every second while streaming
   useEffect(() => {

@@ -10,12 +10,13 @@ from app.tool.builtin.read import ReadTool
 from app.tool.context import ToolContext
 
 
-def _make_ctx() -> ToolContext:
+def _make_ctx(workspace: str | None = None) -> ToolContext:
     return ToolContext(
         session_id="test-session",
         message_id="test-msg",
         agent=AgentInfo(name="test", description="", mode="primary"),
         call_id="test-call",
+        workspace=workspace,
     )
 
 
@@ -61,6 +62,18 @@ class TestReadTool:
         assert result.success
         assert "a.txt" in result.output
         assert "b.txt" in result.output
+
+    @pytest.mark.asyncio
+    async def test_absolute_path_outside_workspace_is_readable(self, tool: ReadTool, tmp_path: Path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        outside = tmp_path / "outside.txt"
+        outside.write_text("outside content\n", encoding="utf-8")
+
+        result = await tool.execute({"file_path": str(outside)}, _make_ctx(str(workspace)))
+
+        assert result.success
+        assert "outside content" in result.output
 
     @pytest.mark.asyncio
     async def test_line_numbers_format(self, tool: ReadTool, tmp_path: Path):

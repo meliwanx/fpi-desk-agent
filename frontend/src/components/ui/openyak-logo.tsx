@@ -10,7 +10,7 @@ export function OpenYakLogo({ size = 20, className }: OpenYakLogoProps) {
       src="/favicon.svg"
       width={size}
       height={size}
-      alt="OpenYak"
+      alt="fpi-agent"
       className={className}
       style={{ width: size, height: size }}
     />

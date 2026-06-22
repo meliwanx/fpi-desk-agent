@@ -1,5 +1,6 @@
 {
   "toggleSidebar": "Toggle sidebar",
+  "primaryNavigation": "Primary navigation",
   "newChat": "New chat",
   "openSidebar": "Open sidebar",
   "settings": "Settings",
@@ -57,6 +58,7 @@
   "searchResults": "Results",
   "collapseAll": "Collapse all",
   "expandAll": "Expand all",
+  "selectWorkspace": "Choose workspace",
   "addProject": "Add new project",
   "addProjectFailed": "Failed to select project directory",
   "filterSortOrganize": "Filter, sort, and organize chats",
@@ -71,7 +73,7 @@
   "minutesAgo": "{{count}}m ago",
   "hoursAgo": "{{count}}h ago",
   "daysAgo": "{{count}}d ago",
-  "poweredBy": "Powered by OpenRouter · OpenYak v0.1",
+  "poweredBy": "Powered by OpenRouter · fpi-agent v0.1",
   "sortBy": "Sort",
   "name": "Name",
   "price": "Price",

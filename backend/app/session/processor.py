@@ -111,6 +111,17 @@ def _normalize_step_finish_reason(reason: str | None) -> StepFinishReason:
     return "error"
 
 
+def _repair_streamed_tool_call(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a repaired tool call, or None when the model omitted the tool name."""
+    tool_name, tool_args = _repair_tool_call_payload(
+        data.get("name", ""),
+        data.get("arguments", {}),
+    )
+    if not tool_name.strip():
+        return None
+    return {**data, "name": tool_name, "arguments": tool_args}
+
+
 # --- Daily web_search usage tracking (single-user desktop app) ---
 
 class SearchQuotaTracker:
@@ -572,6 +583,15 @@ class SessionProcessor:
                             job.publish(SSEEvent(REASONING_DELTA, {"text": text}))
 
                         case "tool-call":
+                            repaired_tool_call = _repair_streamed_tool_call(chunk.data)
+                            if repaired_tool_call is None:
+                                logger.warning(
+                                    "Ignoring unnamed tool call from model: id=%s args_type=%s",
+                                    chunk.data.get("id"),
+                                    type(chunk.data.get("arguments")).__name__,
+                                )
+                                continue
+                            chunk.data = repaired_tool_call
                             self._has_tool_calls = True
                             self._tool_calls_in_step.append(chunk.data)
                             if not self._exec_blocked:

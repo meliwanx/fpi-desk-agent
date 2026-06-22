@@ -11,7 +11,8 @@ import { useProviderModels } from "@/hooks/use-provider-models";
 import { useSettingsStore } from "@/stores/settings-store";
 import { MobileDirectoryBrowser } from "@/components/mobile/directory-browser";
 
-const VISION_MODEL_REQUIRED_MESSAGE = "The selected model does not support images. Choose a vision model and try again.";
+const VISION_MODEL_REQUIRED_MESSAGE = "当前模型无法识别图片，请切换到支持视觉的模型后再发送。";
+const WORKSPACE_REQUIRED_MESSAGE = "请先选择一个工作区文件夹";
 
 /**
  * Mobile new task page.
@@ -68,6 +69,10 @@ export default function MobileNewTaskPage() {
 
   const handleSubmit = useCallback(async () => {
     if (!text.trim() || sending) return;
+    if (!workspaceDirectory) {
+      toast.error(WORKSPACE_REQUIRED_MESSAGE);
+      return;
+    }
     const selectedModelInfo = models.find((model) => model.id === selectedModel);
     if (files.some((file) => file.type.startsWith("image/")) && selectedModelInfo?.capabilities.vision !== true) {
       toast.error(VISION_MODEL_REQUIRED_MESSAGE);
@@ -116,7 +121,7 @@ export default function MobileNewTaskPage() {
       router.push(`/m/task/_?sessionId=${encodeURIComponent(response.session_id)}&stream_id=${response.stream_id}`);
     } catch (err) {
       console.error("Failed to send task:", err);
-      toast.error("Failed to send task. Check your connection.");
+      toast.error("发送失败，请检查连接。");
       setSending(false);
     }
   }, [text, sending, files, models, selectedModel, workspaceDirectory, router]);
@@ -132,7 +137,7 @@ export default function MobileNewTaskPage() {
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <h1 className="text-lg font-semibold tracking-tight">New Task</h1>
+        <h1 className="text-lg font-semibold tracking-tight">新对话</h1>
       </header>
 
       {/* Main content — push input to bottom like a chat app */}
@@ -150,9 +155,9 @@ export default function MobileNewTaskPage() {
             className="w-full appearance-none pl-3 pr-7 py-2 rounded-full bg-[var(--surface-secondary)] text-[16px] font-medium border border-[var(--border-default)] text-[var(--text-primary)] disabled:opacity-50 focus:outline-none focus:border-[var(--border-heavy)]"
           >
             {loadingModels ? (
-              <option>Loading...</option>
+              <option>加载中…</option>
             ) : models.length === 0 ? (
-              <option>No models — check Settings</option>
+              <option>暂无模型，请检查设置</option>
             ) : (
               models.map((m) => (
                 <option key={m.id} value={m.id}>{m.name}</option>
@@ -171,7 +176,7 @@ export default function MobileNewTaskPage() {
           <span className={`flex-1 text-left text-[15px] truncate ${workspaceDirectory ? "text-[var(--text-primary)] font-medium" : "text-[var(--text-tertiary)]"}`}>
             {workspaceDirectory
               ? workspaceDirectory.replace(/^\/Users\/[^/]+/, "~").replace(/^\/home\/[^/]+/, "~")
-              : "No workspace (full access)"}
+              : WORKSPACE_REQUIRED_MESSAGE}
           </span>
           {workspaceDirectory && (
             <button
@@ -220,7 +225,7 @@ export default function MobileNewTaskPage() {
               ref={textareaRef}
               value={text}
               onChange={handleTextChange}
-              placeholder="What should OpenYak do?"
+              placeholder="描述你想处理的工作"
               rows={1}
               className="w-full resize-none bg-transparent text-[16px] leading-relaxed outline-none placeholder:text-[var(--text-tertiary)] min-h-[28px] max-h-[200px]"
               autoFocus
@@ -247,7 +252,7 @@ export default function MobileNewTaskPage() {
 
             <button
               onClick={handleSubmit}
-              disabled={!text.trim() || sending}
+              disabled={!text.trim() || sending || !workspaceDirectory}
               className="h-8 w-8 flex items-center justify-center rounded-full bg-[var(--text-primary)] text-[var(--surface-primary)] disabled:opacity-30 active:scale-[0.9] transition-all"
             >
               {sending ? (
@@ -260,7 +265,7 @@ export default function MobileNewTaskPage() {
         </div>
 
         <p className="mt-2.5 text-center text-[11px] text-[var(--text-tertiary)]">
-          Tasks execute on your desktop computer
+          任务会在你的桌面电脑上执行
         </p>
       </div>
     </div>

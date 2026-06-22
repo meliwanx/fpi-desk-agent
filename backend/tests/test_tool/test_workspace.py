@@ -10,6 +10,7 @@ import pytest
 from app.tool.workspace import (
     WorkspaceViolation,
     resolve_and_validate,
+    resolve_for_read,
     resolve_for_write,
     validate_cwd,
 )
@@ -45,6 +46,28 @@ class TestResolveAndValidate:
         link.symlink_to(target)
         with pytest.raises(WorkspaceViolation):
             resolve_and_validate(str(link / "outside.txt"), str(tmp_path))
+
+
+class TestResolveForRead:
+    def test_relative_path_prefers_workspace(self, tmp_path: Path):
+        workspace_file = tmp_path / "foo.txt"
+        workspace_file.touch()
+
+        result = resolve_for_read("foo.txt", str(tmp_path))
+
+        assert result == str(workspace_file.resolve())
+
+    def test_absolute_path_outside_workspace_is_allowed(self, tmp_path: Path):
+        outside = tmp_path.parent / f"{tmp_path.name}-outside.txt"
+        outside.write_text("outside", encoding="utf-8")
+
+        result = resolve_for_read(str(outside), str(tmp_path))
+
+        assert result == str(outside.resolve())
+
+    def test_relative_escape_requires_explicit_absolute_path(self, tmp_path: Path):
+        with pytest.raises(WorkspaceViolation):
+            resolve_for_read("../outside.txt", str(tmp_path))
 
 
 class TestResolveForWrite:

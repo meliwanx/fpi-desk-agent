@@ -60,10 +60,15 @@ def _load_catalog() -> tuple[list[dict[str, Any]], int]:
     return skills, int(data.get("generated_at") or 0)
 
 
-def _skill_source(skill_name: str, location: str) -> str:
+def _skill_source(skill) -> str:
     """Determine the source of a skill: 'plugin', 'bundled', or 'project'."""
-    if ":" in skill_name:
+    if ":" in skill.name:
         return "plugin"
+    # Keep the API's historical source enum stable for the frontend while
+    # exposing the richer Codex-style scope separately.
+    if getattr(skill, "scope", None) == "system":
+        return "bundled"
+    location = skill.location
     if "/data/skills/" in location or "\\data\\skills\\" in location:
         return "bundled"
     return "project"
@@ -74,8 +79,15 @@ def _skill_to_dict(skill, registry: SkillRegistry) -> dict[str, Any]:
     return {
         "name": skill.name,
         "description": skill.description,
+        "display_name": getattr(skill, "display_name", None),
+        "short_description": getattr(skill, "short_description", None),
         "location": skill.location,
-        "source": _skill_source(skill.name, skill.location),
+        "source": _skill_source(skill),
+        "scope": getattr(skill, "scope", None),
+        "source_path": getattr(skill, "source", None),
+        "allow_implicit_invocation": getattr(skill, "allow_implicit_invocation", True),
+        "tool_dependencies": getattr(skill, "tool_dependencies", []),
+        "metadata_path": getattr(skill, "metadata_path", None),
         "enabled": not registry.is_disabled(skill.name),
     }
 
@@ -95,8 +107,15 @@ async def get_skill(registry: SkillRegistryDep, skill_name: str) -> dict[str, An
     return {
         "name": skill.name,
         "description": skill.description,
+        "display_name": getattr(skill, "display_name", None),
+        "short_description": getattr(skill, "short_description", None),
         "location": skill.location,
         "content": skill.content,
+        "scope": getattr(skill, "scope", None),
+        "source_path": getattr(skill, "source", None),
+        "allow_implicit_invocation": getattr(skill, "allow_implicit_invocation", True),
+        "tool_dependencies": getattr(skill, "tool_dependencies", []),
+        "metadata_path": getattr(skill, "metadata_path", None),
     }
 
 

@@ -1,0 +1,614 @@
+"""Admin and audit API tests."""
+
+from __future__ import annotations
+
+import pytest
+
+from app.company_auth.store import CompanyModelEntry, CompanyModelPolicy, CompanyUser
+from app.models.audit import (
+    AuditAdminAction,
+    AuditFile,
+    AuditMessage,
+    AuditPart,
+    AuditRiskFinding,
+    AuditSession,
+    AuditToolCall,
+    AuditUsage,
+)
+
+pytestmark = pytest.mark.asyncio
+
+
+class _FakeCompanyStore:
+    def __init__(self) -> None:
+        self.users: list[CompanyUser] = []
+        self.model_policy = CompanyModelPolicy(
+            default_provider_id="custom_onlyme",
+            default_model_id="gpt-5.5",
+            models=[
+                CompanyModelEntry(
+                    provider_id="custom_onlyme",
+                    id="gpt-5.5",
+                    name="GPT-5.5",
+                    protocol="openai_compatible",
+                    base_url="https://sub2api.onlymeok.com/v1",
+                    api_key="sk-default",
+                )
+            ],
+        )
+        self.update_policy = {
+            "enabled": False,
+            "latest_version": "",
+            "min_supported_version": "",
+            "force_update": False,
+            "release_notes": "",
+            "macos_download_url": "",
+            "windows_download_url": "",
+            "linux_download_url": "",
+            "default_download_url": "",
+        }
+
+    async def list_users(self) -> list[CompanyUser]:
+        return self.users
+
+    async def create_user(self, *, email: str, display_name: str, password: str, role: str) -> CompanyUser:
+        user = CompanyUser(
+            id=f"user-{len(self.users) + 1}",
+            email=email,
+            display_name=display_name,
+            role=role,
+            is_active=True,
+        )
+        self.users.append(user)
+        return user
+
+    async def get_model_policy(self) -> CompanyModelPolicy:
+        return self.model_policy
+
+    async def update_model_policy(
+        self,
+        *,
+        default_provider_id: str,
+        default_model_id: str,
+        models: list[dict],
+    ) -> CompanyModelPolicy:
+        self.model_policy = CompanyModelPolicy(
+            default_provider_id=default_provider_id,
+            default_model_id=default_model_id,
+            models=[
+                CompanyModelEntry(
+                    provider_id=str(model["provider_id"]),
+                    id=str(model["id"]),
+                    name=str(model.get("name") or model["id"]),
+                    protocol=str(model.get("protocol") or "openai_compatible"),
+                    base_url=str(model.get("base_url") or ""),
+                    api_key=str(model.get("api_key") or "sk-existing"),
+                )
+                for model in models
+            ],
+        )
+        return self.model_policy
+
+    async def get_update_policy(self):
+        return self.update_policy
+
+    async def update_update_policy(self, **values):
+        self.update_policy = values
+        return self.update_policy
+
+
+async def test_admin_can_create_and_list_company_users(app_client):
+    app_client.app.state.company_auth_store = _FakeCompanyStore()
+    app_client.app.middleware_stack = None
+
+    async def inject_admin(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="admin-1",
+            email="admin",
+            display_name="Admin",
+            role="admin",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_admin)
+
+    created = await app_client.post(
+        "/api/admin/users",
+        json={
+            "email": "employee@example.com",
+            "display_name": "Employee One",
+            "password": "EmployeePassword123!",
+            "role": "user",
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["email"] == "employee@example.com"
+
+    listed = await app_client.get("/api/admin/users")
+    assert listed.status_code == 200
+    assert listed.json() == [
+        {
+            "id": "user-1",
+            "email": "employee@example.com",
+            "display_name": "Employee One",
+            "role": "user",
+            "is_active": True,
+        }
+    ]
+
+
+async def test_admin_can_update_company_model_policy(app_client):
+    app_client.app.state.company_auth_store = _FakeCompanyStore()
+    app_client.app.middleware_stack = None
+
+    async def inject_admin(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="admin-1",
+            email="admin",
+            display_name="Admin",
+            role="admin",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_admin)
+
+    updated = await app_client.put(
+        "/api/admin/model-policy",
+        json={
+            "default_provider_id": "custom_backup",
+            "default_model_id": "gpt-5.4",
+            "models": [
+                {
+                    "provider_id": "custom_onlyme",
+                    "id": "gpt-5.5",
+                    "name": "GPT-5.5",
+                    "protocol": "openai_compatible",
+                    "base_url": "https://sub2api.onlymeok.com/v1",
+                    "api_key": "sk-onlyme",
+                },
+                {
+                    "provider_id": "custom_backup",
+                    "id": "gpt-5.4",
+                    "name": "GPT-5.4",
+                    "protocol": "openai_compatible",
+                    "base_url": "https://backup.example.com/v1",
+                    "api_key": "sk-backup",
+                },
+            ],
+        },
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["default_provider_id"] == "custom_backup"
+    assert [model["id"] for model in updated.json()["models"]] == ["gpt-5.5", "gpt-5.4"]
+    assert updated.json()["models"][1]["protocol"] == "openai_compatible"
+    assert updated.json()["models"][1]["base_url"] == "https://backup.example.com/v1"
+    assert updated.json()["models"][1]["masked_key"] == "sk-b...ckup"
+    assert "api_key" not in updated.json()["models"][1]
+
+    loaded = await app_client.get("/api/admin/model-policy")
+    assert loaded.status_code == 200
+    assert loaded.json()["default_model_id"] == "gpt-5.4"
+    assert loaded.json()["models"][0]["masked_key"] == "sk-o...lyme"
+
+
+async def test_admin_can_update_company_app_update_policy(app_client):
+    app_client.app.state.company_auth_store = _FakeCompanyStore()
+    app_client.app.middleware_stack = None
+
+    async def inject_admin(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="admin-1",
+            email="admin",
+            display_name="Admin",
+            role="admin",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_admin)
+
+    updated = await app_client.put(
+        "/api/admin/update-policy",
+        json={
+            "enabled": True,
+            "latest_version": "1.4.0",
+            "min_supported_version": "1.2.0",
+            "force_update": True,
+            "release_notes": "新增企业更新策略",
+            "macos_download_url": "https://example.com/fpi-agent-1.4.0.dmg",
+            "windows_download_url": "https://example.com/fpi-agent-1.4.0.exe",
+            "linux_download_url": "",
+            "default_download_url": "https://example.com/fpi-agent-1.4.0.zip",
+        },
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["enabled"] is True
+    assert updated.json()["latest_version"] == "1.4.0"
+    assert updated.json()["force_update"] is True
+
+    loaded = await app_client.get("/api/admin/update-policy")
+    assert loaded.status_code == 200
+    assert loaded.json()["macos_download_url"].endswith(".dmg")
+
+
+async def test_employee_update_policy_marks_force_update_for_unsupported_version(app_client):
+    class FakeCompanyStore(_FakeCompanyStore):
+        async def get_update_policy(self):
+            return {
+                "enabled": True,
+                "latest_version": "1.4.0",
+                "min_supported_version": "1.3.0",
+                "force_update": False,
+                "release_notes": "必须升级到 1.4.0",
+                "macos_download_url": "https://example.com/fpi-agent-1.4.0.dmg",
+                "windows_download_url": "https://example.com/fpi-agent-1.4.0.exe",
+                "linux_download_url": "",
+                "default_download_url": "",
+            }
+
+    app_client.app.state.company_auth_store = FakeCompanyStore()
+    app_client.app.middleware_stack = None
+
+    async def inject_employee(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="employee-1",
+            email="10001",
+            display_name="员工一",
+            role="user",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_employee)
+
+    response = await app_client.get(
+        "/api/app/update-policy?current_version=1.2.9&platform=macos&arch=aarch64"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["update_available"] is True
+    assert payload["force_update"] is True
+    assert payload["download_url"].endswith(".dmg")
+
+
+async def test_employee_update_policy_allows_current_version(app_client):
+    class FakeCompanyStore(_FakeCompanyStore):
+        async def get_update_policy(self):
+            return {
+                "enabled": True,
+                "latest_version": "1.4.0",
+                "min_supported_version": "1.2.0",
+                "force_update": True,
+                "release_notes": "新版",
+                "macos_download_url": "https://example.com/fpi-agent-1.4.0.dmg",
+                "windows_download_url": "https://example.com/fpi-agent-1.4.0.exe",
+                "linux_download_url": "",
+                "default_download_url": "",
+            }
+
+    app_client.app.state.company_auth_store = FakeCompanyStore()
+    app_client.app.middleware_stack = None
+
+    async def inject_employee(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="employee-1",
+            email="10001",
+            display_name="员工一",
+            role="user",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_employee)
+
+    response = await app_client.get(
+        "/api/app/update-policy?current_version=1.4.0&platform=windows&arch=x64"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["update_available"] is False
+    assert payload["force_update"] is False
+    assert payload["download_url"].endswith(".exe")
+
+
+async def test_audit_ingest_and_admin_query(app_client, session_factory, tmp_path):
+    app_client.app.state.settings.audit_file_storage_dir = str(tmp_path / "audit_uploads")
+    app_client.app.middleware_stack = None
+
+    async def inject_company_user(request, call_next):
+        role = request.headers.get("x-test-company-role", "user")
+        if role == "admin":
+            request.state.company_user = CompanyUser(
+                id="admin-1",
+                email="admin",
+                display_name="Admin",
+                role="admin",
+                is_active=True,
+            )
+        else:
+            request.state.company_user = CompanyUser(
+                id="employee-1",
+                email="employee@example.com",
+                display_name="Employee One",
+                role="user",
+                is_active=True,
+            )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_company_user)
+
+    ingest = await app_client.post(
+        "/api/audit/ingest",
+        json={
+            "sessions": [
+                {
+                    "id": "local-session-1",
+                    "title": "Quarterly report",
+                    "workspace": "/Users/employee/work/acme",
+                    "model_id": "gpt-5.5",
+                    "provider_id": "custom_onlyme",
+                }
+            ],
+            "messages": [
+                {
+                    "id": "local-message-1",
+                    "session_id": "local-session-1",
+                    "role": "user",
+                    "data": {"role": "user", "agent": "build"},
+                }
+            ],
+            "parts": [
+                {
+                    "id": "local-part-1",
+                    "message_id": "local-message-1",
+                    "session_id": "local-session-1",
+                    "data": {"type": "text", "text": "请分析这个销售表"},
+                },
+                {
+                    "id": "local-part-2",
+                    "message_id": "local-message-1",
+                    "session_id": "local-session-1",
+                    "data": {
+                        "type": "file",
+                        "name": "sales.xlsx",
+                        "path": "/Users/employee/Desktop/sales.xlsx",
+                        "source": "referenced",
+                        "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        "size": 1024,
+                    },
+                },
+            ],
+        },
+    )
+    assert ingest.status_code == 200
+    assert ingest.json() == {"sessions": 1, "messages": 1, "parts": 2}
+
+    async with session_factory() as db:
+        sessions = list((await db.execute(AuditSession.__table__.select())).mappings())
+        messages = list((await db.execute(AuditMessage.__table__.select())).mappings())
+        parts = list((await db.execute(AuditPart.__table__.select())).mappings())
+        files = list((await db.execute(AuditFile.__table__.select())).mappings())
+
+    assert sessions[0]["user_email"] == "employee@example.com"
+    assert sessions[0]["workspace"] == "/Users/employee/work/acme"
+    assert messages[0]["role"] == "user"
+    assert {part["part_type"] for part in parts} == {"text", "file"}
+    assert files[0]["local_part_id"] == "local-part-2"
+    assert files[0]["content_uploaded"] is False
+
+    upload = await app_client.post(
+        "/api/audit/files/upload",
+        data={"part_id": "local-part-2"},
+        files={"file": ("sales.xlsx", b"sales-data", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert upload.status_code == 200
+    assert upload.json()["uploaded"] is True
+
+    audit_sessions = await app_client.get(
+        "/api/admin/audit/sessions",
+        headers={"X-Test-Company-Role": "admin"},
+    )
+    assert audit_sessions.status_code == 200
+    body = audit_sessions.json()
+    assert body["items"][0]["user_email"] == "employee@example.com"
+    assert body["items"][0]["title"] == "Quarterly report"
+
+    transcript = await app_client.get(
+        "/api/admin/audit/sessions/local-session-1/messages",
+        headers={"X-Test-Company-Role": "admin"},
+    )
+    assert transcript.status_code == 200
+    transcript_body = transcript.json()
+    assert transcript_body["messages"][0]["parts"][0]["data"]["text"] == "请分析这个销售表"
+    file_part = next(part for part in transcript_body["messages"][0]["parts"] if part["type"] == "file")
+    assert file_part["file"]["content_uploaded"] is True
+    assert file_part["file"]["download_url"] == "/api/admin/audit/files/local-part-2/download"
+
+    download = await app_client.get(
+        "/api/admin/audit/files/local-part-2/download",
+        headers={"X-Test-Company-Role": "admin"},
+    )
+    assert download.status_code == 200
+    assert download.content == b"sales-data"
+
+
+async def test_enterprise_audit_tracks_usage_tools_risks_and_admin_actions(
+    app_client,
+    session_factory,
+    tmp_path,
+):
+    app_client.app.state.settings.audit_file_storage_dir = str(tmp_path / "audit_uploads")
+    app_client.app.middleware_stack = None
+
+    async def inject_company_user(request, call_next):
+        role = request.headers.get("x-test-company-role", "user")
+        if role == "admin":
+            request.state.company_user = CompanyUser(
+                id="admin-1",
+                email="admin",
+                display_name="Admin",
+                role="admin",
+                is_active=True,
+            )
+        else:
+            request.state.company_user = CompanyUser(
+                id="employee-1",
+                email="employee@example.com",
+                display_name="Employee One",
+                role="user",
+                is_active=True,
+            )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_company_user)
+
+    ingest = await app_client.post(
+        "/api/audit/ingest",
+        json={
+            "sessions": [
+                {
+                    "id": "local-session-observe",
+                    "title": "查 VPN 配置",
+                    "workspace": "/Users/employee/work/ops",
+                    "model_id": "gpt-5.5",
+                    "provider_id": "custom_onlyme",
+                    "source_client_id": "mac-client-1",
+                }
+            ],
+            "messages": [
+                {
+                    "id": "local-message-user",
+                    "session_id": "local-session-observe",
+                    "role": "user",
+                    "data": {"role": "user"},
+                },
+                {
+                    "id": "local-message-assistant",
+                    "session_id": "local-session-observe",
+                    "role": "assistant",
+                    "data": {"role": "assistant"},
+                },
+            ],
+            "parts": [
+                {
+                    "id": "local-part-secret-text",
+                    "message_id": "local-message-user",
+                    "session_id": "local-session-observe",
+                    "data": {
+                        "type": "text",
+                        "text": "VPN 订阅链接 https://gaosu.click/iqiyi/abcdef 以及 key sk-test-secret",
+                    },
+                },
+                {
+                    "id": "local-part-tool",
+                    "message_id": "local-message-assistant",
+                    "session_id": "local-session-observe",
+                    "data": {
+                        "type": "tool",
+                        "tool": "read",
+                        "call_id": "call-read-1",
+                        "state": {
+                            "status": "completed",
+                            "input": {"file_path": "/Users/employee/.config/clash/profiles.yaml"},
+                            "output": "proxy subscription: https://gaosu.click/iqiyi/abcdef",
+                            "title": "profiles.yaml",
+                        },
+                    },
+                },
+                {
+                    "id": "local-part-usage",
+                    "message_id": "local-message-assistant",
+                    "session_id": "local-session-observe",
+                    "data": {
+                        "type": "step-finish",
+                        "reason": "stop",
+                        "tokens": {
+                            "input": 1000,
+                            "output": 200,
+                            "reasoning": 30,
+                            "cache_read": 40,
+                            "cache_write": 5,
+                            "total": 1275,
+                        },
+                        "cost": 0.0123,
+                    },
+                },
+                {
+                    "id": "local-part-file",
+                    "message_id": "local-message-user",
+                    "session_id": "local-session-observe",
+                    "data": {
+                        "type": "file",
+                        "name": "vpn.txt",
+                        "path": str(tmp_path / "vpn.txt"),
+                        "source": "uploaded",
+                        "mime_type": "text/plain",
+                        "size": 12,
+                    },
+                },
+            ],
+        },
+    )
+    assert ingest.status_code == 200
+
+    async with session_factory() as db:
+        usage_rows = list((await db.execute(AuditUsage.__table__.select())).mappings())
+        tool_rows = list((await db.execute(AuditToolCall.__table__.select())).mappings())
+        risk_rows = list((await db.execute(AuditRiskFinding.__table__.select())).mappings())
+
+    assert usage_rows[0]["input_tokens"] == 1000
+    assert usage_rows[0]["total_tokens"] == 1275
+    assert usage_rows[0]["cost"] == 0.0123
+    assert tool_rows[0]["tool_name"] == "read"
+    assert tool_rows[0]["status"] == "completed"
+    assert "profiles.yaml" in tool_rows[0]["output_preview"]
+    assert {row["kind"] for row in risk_rows} >= {"api_key", "vpn_subscription_url"}
+
+    summary = await app_client.get(
+        "/api/admin/audit/summary",
+        headers={"X-Test-Company-Role": "admin"},
+    )
+    assert summary.status_code == 200
+    assert summary.json()["usage"]["total_tokens"] == 1275
+    assert summary.json()["tool_calls"]["total"] == 1
+    assert summary.json()["risks"]["open"] >= 2
+
+    risks = await app_client.get(
+        "/api/admin/audit/risks?severity=high",
+        headers={"X-Test-Company-Role": "admin"},
+    )
+    assert risks.status_code == 200
+    assert risks.json()["items"][0]["session_id"] == "local-session-observe"
+
+    tool_calls = await app_client.get(
+        "/api/admin/audit/tool-calls?tool=read",
+        headers={"X-Test-Company-Role": "admin"},
+    )
+    assert tool_calls.status_code == 200
+    assert tool_calls.json()["items"][0]["call_id"] == "call-read-1"
+
+    (tmp_path / "vpn.txt").write_text("vpn evidence", encoding="utf-8")
+    upload = await app_client.post(
+        "/api/audit/files/upload",
+        data={"part_id": "local-part-file"},
+        files={"file": ("vpn.txt", b"vpn evidence", "text/plain")},
+    )
+    assert upload.status_code == 200
+    download = await app_client.get(
+        "/api/admin/audit/files/local-part-file/download",
+        headers={"X-Test-Company-Role": "admin"},
+    )
+    assert download.status_code == 200
+    assert download.content == b"vpn evidence"
+
+    async with session_factory() as db:
+        actions = list((await db.execute(AuditAdminAction.__table__.select())).mappings())
+    assert actions[0]["actor_display_name"] == "Admin"
+    assert actions[0]["action"] == "audit.file.download"
+    assert actions[0]["target_id"] == "local-part-file"

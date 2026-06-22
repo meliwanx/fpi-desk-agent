@@ -15,6 +15,7 @@ dependencies = [
     # Database
     "sqlalchemy[asyncio]>=2.0.36",
     "aiosqlite>=0.20.0",
+    "aiomysql>=0.3.0",
     "alembic>=1.14.0",
 
     # LLM client
@@ -30,6 +31,10 @@ dependencies = [
     "pyyaml>=6.0",
     "croniter>=2.0.0",
     "wcmatch>=10.0",
+    "mcp>=1.25.0",
+    "agent-sandbox==0.0.30",
+    "e2b-code-interpreter>=2.8.1",
+    "tencentcloud-sdk-python>=3.1.119",
 
     # Web content extraction
     "readabilipy>=0.2.0",

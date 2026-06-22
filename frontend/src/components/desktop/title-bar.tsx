@@ -14,7 +14,7 @@ function OpenYakLogo() {
       src="/favicon.svg"
       width={18}
       height={18}
-      alt="OpenYak"
+      alt="fpi-agent"
       className="shrink-0"
       unoptimized
     />
@@ -72,7 +72,7 @@ export function TitleBar() {
       <div className="flex items-center gap-2 pl-3 h-full shrink-0">
         <OpenYakLogo />
         <span className="text-xs font-medium text-[var(--text-secondary)] tracking-wide">
-          OpenYak
+          fpi-agent
         </span>
       </div>
 

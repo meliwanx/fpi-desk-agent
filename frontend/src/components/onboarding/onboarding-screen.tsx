@@ -32,20 +32,19 @@ export function OnboardingScreen() {
           <AnimatedOpenYakLogo size={80} />
 
           <h1 className="mt-8 text-2xl font-semibold text-[var(--text-primary)] tracking-tight">
-            Welcome to OpenYak
+            欢迎使用聚光办公助理
           </h1>
           <p className="mt-2 max-w-xs text-sm text-[var(--text-secondary)]">
-            Your local-first agent workbench. Start with a local endpoint,
-            Rapid-MLX, or Ollama, then add a BYOK provider when you want one.
+            已为企业办公场景配置默认模型。登录后即可开始处理文档、表格和本地文件。
           </p>
 
           <div className="mt-10 w-full space-y-3">
             <Button className="w-full" onClick={openProviderSetup}>
-              Set Up Provider
+              进入设置
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
             <Button variant="outline" className="w-full" onClick={startNow}>
-              Continue
+              直接开始
             </Button>
           </div>
         </div>

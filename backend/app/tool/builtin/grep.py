@@ -11,7 +11,7 @@ from typing import Any
 from app.tool.base import ToolDefinition, ToolResult
 from app.tool.builtin.glob_utils import wc_glob_files
 from app.tool.context import ToolContext
-from app.tool.workspace import WorkspaceViolation, resolve_and_validate
+from app.tool.workspace import WorkspaceViolation, resolve_for_read
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,8 @@ class GrepTool(ToolDefinition):
         return (
             "Search file contents using regex patterns. "
             "Supports file type filtering and context lines. "
+            "Defaults to the active workspace; use an explicit absolute path "
+            "to search another local file or folder read-only. "
             "Returns matching lines with file paths and line numbers."
         )
 
@@ -84,9 +86,10 @@ class GrepTool(ToolDefinition):
         if ctx.workspace and search_path == ".":
             search_path = ctx.workspace
 
-        # Workspace restriction check on search path
+        # Resolve search path. Defaults stay in the workspace; explicit
+        # absolute paths may inspect the local computer outside it.
         try:
-            search_path = resolve_and_validate(search_path, ctx.workspace)
+            search_path = resolve_for_read(search_path, ctx.workspace)
         except WorkspaceViolation as e:
             return ToolResult(error=str(e))
 

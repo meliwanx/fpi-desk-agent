@@ -140,6 +140,29 @@ def _origin_allowed(
     return False
 
 
+def _request_origin(scope, headers: dict[bytes, bytes]) -> str | None:
+    raw_host = headers.get(b"host", b"").decode("latin-1", errors="replace").strip()
+    if not raw_host:
+        return None
+    scheme = str(scope.get("scheme") or "http").lower()
+    parsed = _parse_origin(f"{scheme}://{raw_host}")
+    if parsed is None:
+        return None
+    return _canonical_origin(*parsed)
+
+
+def _is_same_request_origin(
+    source: str,
+    scope,
+    headers: dict[bytes, bytes],
+) -> bool:
+    parsed = _parse_origin(source)
+    if parsed is None:
+        return False
+    request_origin = _request_origin(scope, headers)
+    return request_origin is not None and _canonical_origin(*parsed) == request_origin
+
+
 def _source_origin(headers: dict[bytes, bytes]) -> str | None:
     """Return the canonical origin string for the request, or None if absent.
 
@@ -232,7 +255,7 @@ class CsrfProtectionMiddleware:
                 await _reject(send, scope, "null origin is not allowed", source=source)
                 return
             runtime_origins = _runtime_origins(scope)
-            if not _origin_allowed(source, self._extra, runtime_origins):
+            if not _is_same_request_origin(source, scope, headers) and not _origin_allowed(source, self._extra, runtime_origins):
                 await _reject(
                     send, scope,
                     "Cross-site request blocked: unrecognized Origin",

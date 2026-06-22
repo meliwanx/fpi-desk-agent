@@ -18,6 +18,7 @@ import {
   SSE_MAX_RETRIES,
 } from "./constants";
 import { getRemoteToken } from "./remote-connection";
+import { getCompanySessionToken } from "./company-auth";
 import type { SSEEventData } from "@/types/streaming";
 
 export type SSEEventHandler = (data: SSEEventData, id: number) => void;
@@ -49,6 +50,7 @@ export interface SSEClientOptions {
 export class SSEClient {
   private eventSource: EventSource | null = null;
   private abortController: AbortController | null = null;
+  private transport: "eventsource" | "fetch" | null = null;
   private handlers = new Map<string, SSEEventHandler[]>();
   private lastEventId = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -104,23 +106,38 @@ export class SSEClient {
     }
     this.abortController?.abort();
     this.abortController = null;
+    this.transport = null;
   }
 
   /** Check if the connection is still alive. If dead, trigger reconnect.
    *  Used after desktop wake/visibility restoration. */
   checkHealth(): void {
     if (this.closed) return;
-    if (
-      !this.eventSource ||
-      this.eventSource.readyState === EventSource.CLOSED
-    ) {
-      // Connection is dead — force reconnect
+
+    if (this.transport === "fetch") {
+      if (this.hasActiveFetch()) {
+        const staleMs = Date.now() - this.lastEventTime;
+        if (staleMs > SSE_HEARTBEAT_TIMEOUT) {
+          this.abortController?.abort();
+          this.abortController = null;
+          this.transport = null;
+          this.scheduleReconnect();
+        } else {
+          this.resetHeartbeat();
+        }
+        return;
+      }
       this.doConnect();
-    } else {
-      // Connection may look open but be stale. Reset heartbeat timer
-      // so that if no event arrives soon, we'll reconnect.
-      this.resetHeartbeat();
+      return;
     }
+
+    if (this.eventSource && this.eventSource.readyState !== EventSource.CLOSED) {
+      this.resetHeartbeat();
+      return;
+    }
+
+    // Connection is dead — force reconnect.
+    this.doConnect();
   }
 
   /** Pause reconnection attempts (e.g., backend is restarting). */
@@ -133,6 +150,7 @@ export class SSEClient {
     }
     this.abortController?.abort();
     this.abortController = null;
+    this.transport = null;
   }
 
   /** Resume and immediately attempt to reconnect. */
@@ -153,28 +171,44 @@ export class SSEClient {
     }
     this.abortController?.abort();
     this.abortController = null;
+    this.transport = null;
 
     // Resolve URL dynamically — picks up new backend port after restart
     const baseUrl = this.options.urlProvider?.() ?? this.options.url;
-    // Build query params: last_event_id for reconnection, token for auth.
-    // EventSource cannot attach custom headers, so we smuggle the bearer
-    // token through the query string. The backend accepts either ?token=
-    // or Authorization: Bearer, but we prefer the header everywhere it
-    // can be used (i.e. every non-EventSource request).
+    // Build query params for reconnection. Native EventSource cannot attach
+    // headers, but the enterprise build also requires X-FPI-Session. When a
+    // company session exists, use the fetch streaming path so auth stays in
+    // headers instead of leaking into URL logs.
     const params = new URLSearchParams();
     if (this.lastEventId > 0) params.set("last_event_id", String(this.lastEventId));
     const remoteToken = getRemoteToken();
     const localToken = !remoteToken ? getBackendTokenSync() : null;
-    const queryToken = remoteToken ?? localToken;
-    if (queryToken) params.set("token", queryToken);
+    const companyToken = getCompanySessionToken();
+    const authHeaders: Record<string, string> = {};
+    if (remoteToken) {
+      authHeaders.Authorization = `Bearer ${remoteToken}`;
+    } else if (localToken) {
+      authHeaders.Authorization = `Bearer ${localToken}`;
+    }
+    if (companyToken) {
+      authHeaders["X-FPI-Session"] = companyToken;
+    }
+
+    const useFetchStream = Boolean(remoteToken || companyToken);
+    if (!useFetchStream) {
+      const queryToken = localToken;
+      if (queryToken) params.set("token", queryToken);
+    }
     const qs = params.toString();
     const url = qs ? `${baseUrl}?${qs}` : baseUrl;
 
     // Cloudflare Quick Tunnels buffer GET SSE responses until the connection
     // closes, breaking real-time streaming. POST SSE works correctly.
-    // Use fetch+ReadableStream for remote (POST), EventSource for local (GET).
-    if (remoteToken) {
-      this.doConnectFetch(url);
+    // Use fetch+ReadableStream for remote and enterprise desktop streams
+    // because both need request headers; EventSource remains the simple local
+    // path when no company login header is required.
+    if (useFetchStream) {
+      this.doConnectFetch(url, authHeaders);
     } else {
       this.doConnectEventSource(url);
     }
@@ -208,15 +242,16 @@ export class SSEClient {
    * Connect via fetch POST + ReadableStream.
    * Used for remote/tunnel connections where GET SSE is buffered.
    */
-  private doConnectFetch(url: string): void {
+  private doConnectFetch(url: string, headers: Record<string, string> = {}): void {
     const controller = new AbortController();
     this.abortController = controller;
+    this.transport = "fetch";
 
     this.options.onStatusChange?.("connecting");
 
     fetch(url, {
       method: "POST",
-      headers: { "Accept": "text/event-stream" },
+      headers: { "Accept": "text/event-stream", ...headers },
       signal: controller.signal,
     })
       .then(async (res) => {
@@ -228,6 +263,7 @@ export class SSEClient {
         this.lastEventTime = Date.now();
         this.resetHeartbeat();
         this.options.onStatusChange?.("connected");
+        this.options.onOpen?.();
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -270,11 +306,15 @@ export class SSEClient {
 
         // Stream ended normally
         if (!this.closed) {
+          this.abortController = null;
+          this.transport = null;
           this.scheduleReconnect();
         }
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
+        this.abortController = null;
+        this.transport = null;
         this.options.onError?.(err);
         if (!this.closed) {
           this.scheduleReconnect();
@@ -285,6 +325,7 @@ export class SSEClient {
   /** Connect via native EventSource (GET). Used for local/desktop connections. */
   private doConnectEventSource(url: string): void {
     const es = new EventSource(url);
+    this.transport = "eventsource";
 
     for (const eventType of this.handlers.keys()) {
       es.addEventListener(eventType, (e: Event) => {
@@ -324,8 +365,16 @@ export class SSEClient {
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
     this.heartbeatTimer = setTimeout(() => {
       // No heartbeat received — server may be dead
-      if (this.eventSource && !this.closed) {
+      if (this.closed) return;
+      if (this.eventSource) {
         this.eventSource.close();
+        this.eventSource = null;
+        this.transport = null;
+        this.scheduleReconnect();
+      } else if (this.hasActiveFetch()) {
+        this.abortController?.abort();
+        this.abortController = null;
+        this.transport = null;
         this.scheduleReconnect();
       }
     }, SSE_HEARTBEAT_TIMEOUT);
@@ -369,15 +418,23 @@ export class SSEClient {
   private startStaleCheck(): void {
     if (this.staleCheckInterval) clearInterval(this.staleCheckInterval);
     this.staleCheckInterval = setInterval(() => {
-      if (this.closed || !this.eventSource) return;
+      if (this.closed) return;
+      if (!this.eventSource && !this.hasActiveFetch()) return;
       const staleMs = Date.now() - this.lastEventTime;
       if (staleMs > SSE_HEARTBEAT_TIMEOUT) {
         // Connection is stale — force reconnect
-        this.eventSource.close();
+        this.eventSource?.close();
         this.eventSource = null;
+        this.abortController?.abort();
+        this.abortController = null;
+        this.transport = null;
         this.scheduleReconnect();
       }
     }, 15_000);
+  }
+
+  private hasActiveFetch(): boolean {
+    return this.abortController !== null && !this.abortController.signal.aborted;
   }
 
   private clearTimers(): void {

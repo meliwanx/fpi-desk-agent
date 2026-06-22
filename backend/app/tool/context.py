@@ -26,7 +26,7 @@ class ToolContext:
     agent: AgentInfo
     call_id: str
     abort_event: asyncio.Event = field(default_factory=asyncio.Event)
-    workspace: str | None = None  # workspace directory restriction
+    workspace: str | None = None  # default context and write boundary
     index_manager: Any | None = None  # FTS IndexManager; None when FTS disabled
     messages: list[dict[str, Any]] = field(default_factory=list)
     """Full LLM-formatted message history as of this tool call (read-only).

@@ -7,35 +7,35 @@ use tauri::{
 
 pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     // File menu
-    let new_chat = MenuItem::with_id(app, "menu_new_chat", "New Chat", true, Some("CmdOrCtrl+N"))?;
+    let new_chat = MenuItem::with_id(app, "menu_new_chat", "新建对话", true, Some("CmdOrCtrl+N"))?;
     let settings =
-        MenuItem::with_id(app, "menu_settings", "Settings", true, Some("CmdOrCtrl+,"))?;
+        MenuItem::with_id(app, "menu_settings", "设置", true, Some("CmdOrCtrl+,"))?;
     let file_menu = Submenu::with_items(
         app,
-        "File",
+        "文件",
         true,
         &[
             &new_chat,
             &PredefinedMenuItem::separator(app)?,
             &settings,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::quit(app, Some("Quit"))?,
+            &PredefinedMenuItem::quit(app, Some("退出"))?,
         ],
     )?;
 
     // Edit menu
     let edit_menu = Submenu::with_items(
         app,
-        "Edit",
+        "编辑",
         true,
         &[
-            &PredefinedMenuItem::undo(app, None)?,
-            &PredefinedMenuItem::redo(app, None)?,
+            &PredefinedMenuItem::undo(app, Some("撤销"))?,
+            &PredefinedMenuItem::redo(app, Some("重做"))?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::cut(app, None)?,
-            &PredefinedMenuItem::copy(app, None)?,
-            &PredefinedMenuItem::paste(app, None)?,
-            &PredefinedMenuItem::select_all(app, None)?,
+            &PredefinedMenuItem::cut(app, Some("剪切"))?,
+            &PredefinedMenuItem::copy(app, Some("复制"))?,
+            &PredefinedMenuItem::paste(app, Some("粘贴"))?,
+            &PredefinedMenuItem::select_all(app, Some("全选"))?,
         ],
     )?;
 
@@ -43,21 +43,21 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let toggle_sidebar = MenuItem::with_id(
         app,
         "menu_toggle_sidebar",
-        "Toggle Sidebar",
+        "显示/隐藏侧边栏",
         true,
         Some("CmdOrCtrl+Shift+S"),
     )?;
-    let reload = MenuItem::with_id(app, "menu_reload", "Reload", true, Some("CmdOrCtrl+R"))?;
+    let reload = MenuItem::with_id(app, "menu_reload", "重新加载", true, Some("CmdOrCtrl+R"))?;
     let dev_tools = MenuItem::with_id(
         app,
         "menu_dev_tools",
-        "Developer Tools",
+        "开发者工具",
         true,
         Some("CmdOrCtrl+Shift+I"),
     )?;
     let view_menu = Submenu::with_items(
         app,
-        "View",
+        "视图",
         true,
         &[
             &toggle_sidebar,
@@ -68,12 +68,12 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     )?;
 
     // Window menu
-    let minimize = PredefinedMenuItem::minimize(app, None)?;
-    let zoom = PredefinedMenuItem::maximize(app, None)?;
-    let fullscreen = PredefinedMenuItem::fullscreen(app, None)?;
+    let minimize = PredefinedMenuItem::minimize(app, Some("最小化"))?;
+    let zoom = PredefinedMenuItem::maximize(app, Some("最大化"))?;
+    let fullscreen = PredefinedMenuItem::fullscreen(app, Some("全屏"))?;
     let window_menu = Submenu::with_items(
         app,
-        "Window",
+        "窗口",
         true,
         &[
             &minimize,
@@ -87,14 +87,14 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let check_updates = MenuItem::with_id(
         app,
         "menu_check_updates",
-        "Check for Updates...",
+        "检查更新…",
         true,
         None::<&str>,
     )?;
-    let about = PredefinedMenuItem::about(app, Some("About OpenYak"), None)?;
+    let about = PredefinedMenuItem::about(app, Some("关于聚光办公助理"), None)?;
     let help_menu = Submenu::with_items(
         app,
-        "Help",
+        "帮助",
         true,
         &[
             &check_updates,

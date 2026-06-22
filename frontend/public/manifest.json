@@ -1,7 +1,7 @@
 {
-  "name": "OpenYak Remote",
-  "short_name": "OpenYak",
-  "description": "Remote control for your local-first OpenYak desktop agent",
+  "name": "fpi-agent Remote",
+  "short_name": "fpi-agent",
+  "description": "Remote control for your local-first fpi-agent desktop agent",
   "start_url": "/m",
   "display": "standalone",
   "background_color": "#09090b",

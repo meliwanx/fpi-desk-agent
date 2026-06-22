@@ -13,6 +13,10 @@ function backendApiDestination(): string {
 
 const nextConfig: NextConfig = {
   devIndicators: false,
+  env: {
+    NEXT_PUBLIC_DESKTOP_BUILD:
+      process.env.NEXT_PUBLIC_DESKTOP_BUILD ?? (isDesktopBuild ? "true" : "false"),
+  },
 
   turbopack: {
     root: path.resolve(__dirname),

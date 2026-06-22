@@ -148,9 +148,9 @@ class TestEnvironmentDeterminism:
 
 
 class TestWorkspaceVsNoWorkspace:
-    def test_workspace_set_emits_restriction(self) -> None:
+    def test_workspace_set_emits_access_guidance(self) -> None:
         parts = assemble(_agent(), workspace="/srv/yak", **_PINNED)
-        assert "# Workspace Restriction" in parts.dynamic
+        assert "# Workspace Access" in parts.dynamic
         assert "/srv/yak" in parts.dynamic
         assert "openyak_written" in parts.dynamic
         assert "# File Reference Format" not in parts.dynamic
@@ -160,7 +160,7 @@ class TestWorkspaceVsNoWorkspace:
         parts = assemble(_agent(), workspace=None, **pinned)
         assert "# File Reference Format" in parts.dynamic
         assert "/home/u" in parts.dynamic
-        assert "# Workspace Restriction" not in parts.dynamic
+        assert "# Workspace Access" not in parts.dynamic
 
 
 class TestFtsStatusBranches:
@@ -184,11 +184,15 @@ class TestFtsStatusBranches:
 
     def test_unknown_status_no_section(self) -> None:
         parts = assemble(_agent(), fts_status={"status": "unknown"}, **_PINNED)
-        assert "# Full-Text Search" not in parts.dynamic
+        assert "Full-text `search` is unavailable until the user selects a workspace folder." in parts.dynamic
+        assert "indexed" not in parts.dynamic
+        assert "indexing in progress" not in parts.dynamic
 
     def test_no_status_dict_no_section(self) -> None:
         parts = assemble(_agent(), fts_status=None, **_PINNED)
-        assert "# Full-Text Search" not in parts.dynamic
+        assert "Full-text `search` is unavailable until the user selects a workspace folder." in parts.dynamic
+        assert "indexed" not in parts.dynamic
+        assert "indexing in progress" not in parts.dynamic
 
 
 class TestCachedBlocksFormat:
@@ -268,12 +272,10 @@ class TestRenderSkillsSectionHelper:
         # Truncated form: 87 chars + "..." per the source.
         assert "x" * 87 + "..." in result
 
-    def test_caps_at_twelve_with_remainder_hint(self) -> None:
+    def test_lists_small_skill_sets_without_fixed_twelve_cap(self) -> None:
         skills = [self._FakeSkill(f"s{i:02d}", f"desc {i}") for i in range(15)]
         result = render_skills_section(skills)
         assert result is not None
-        # First twelve listed.
-        for i in range(12):
+        for i in range(15):
             assert f"s{i:02d}" in result
-        # Remainder hint.
-        assert "and 3 more" in result
+        assert "more available via the `skill` tool" not in result

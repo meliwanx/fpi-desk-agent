@@ -27,7 +27,9 @@ class SearchTool(ToolDefinition):
     @property
     def description(self) -> str:
         return (
-            "Full-text search across all workspace files. "
+            "Full-text search across indexed workspace files only. "
+            "Only use this when a workspace folder is selected and indexed; "
+            "if no workspace is set or workspace results are insufficient, use glob/grep/read with explicit paths. "
             "Finds relevant files and passages by keyword. "
             "Returns ranked results with file paths and context snippets. "
             "Use this for broad discovery; use grep for exact pattern matching."
@@ -59,16 +61,24 @@ class SearchTool(ToolDefinition):
         }
 
     async def execute(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+        workspace = ctx.workspace
+        if not workspace:
+            return ToolResult(
+                output=(
+                    "未设置工作区，无法使用工作区全文检索。\n\n"
+                    "请先让用户在输入框下方选择一个文件夹作为工作区；如果用户选择“整个电脑”，"
+                    "不要使用 `search`，请改用 `glob`、`grep`、`read` 或带明确路径的命令来查找文件。"
+                ),
+                title="未设置工作区",
+                metadata={"reason": "workspace_required"},
+            )
+
         index_manager = getattr(ctx, "index_manager", None)
         if index_manager is None:
             return ToolResult(
                 error="Search tool requires FTS indexing to be enabled. "
                       "Set OPENYAK_FTS_ENABLED=true and select a workspace."
             )
-
-        workspace = ctx.workspace
-        if not workspace:
-            return ToolResult(error="No workspace set for this session.")
 
         query = args["query"]
         search_path = args.get("path")

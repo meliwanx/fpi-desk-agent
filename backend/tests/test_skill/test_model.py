@@ -114,3 +114,72 @@ class TestParseSkillFile:
         )
         # 123 is an int, not a string
         assert parse_skill_file(skill_file) is None
+
+    def test_parse_codex_openai_metadata(self, tmp_path: Path):
+        skill_dir = tmp_path / "sheet-helper"
+        skill_dir.mkdir()
+        skill_file = skill_dir / "SKILL.md"
+        skill_file.write_text(
+            "---\nname: sheet-helper\ndescription: Helps with spreadsheets.\n---\n\n# Use sheets",
+            encoding="utf-8",
+        )
+        metadata_dir = skill_dir / "agents"
+        metadata_dir.mkdir()
+        (metadata_dir / "openai.yaml").write_text(
+            """
+interface:
+  display_name: Sheet Helper
+  short_description: Spreadsheet workflows
+  icon_small: icons/small.png
+  icon_large: icons/large.png
+  brand_color: "#1455cc"
+  default_prompt: Review the workbook.
+policy:
+  allow_implicit_invocation: false
+dependencies:
+  tools:
+    - id: spreadsheets
+      reason: Read workbook files
+    - name: shell
+""".strip(),
+            encoding="utf-8",
+        )
+
+        skill = parse_skill_file(skill_file, scope="user", source="~/.agents/skills")
+
+        assert skill is not None
+        assert skill.display_name == "Sheet Helper"
+        assert skill.short_description == "Spreadsheet workflows"
+        assert skill.icon_small == "icons/small.png"
+        assert skill.icon_large == "icons/large.png"
+        assert skill.brand_color == "#1455cc"
+        assert skill.default_prompt == "Review the workbook."
+        assert skill.allow_implicit_invocation is False
+        assert skill.scope == "user"
+        assert skill.source == "~/.agents/skills"
+        assert skill.metadata_path == str((metadata_dir / "openai.yaml").resolve())
+        assert skill.tool_dependencies == [
+            {"id": "spreadsheets", "reason": "Read workbook files"},
+            {"name": "shell"},
+        ]
+
+    def test_invalid_openai_metadata_is_ignored(self, tmp_path: Path):
+        skill_dir = tmp_path / "plain"
+        skill_dir.mkdir()
+        skill_file = skill_dir / "SKILL.md"
+        skill_file.write_text(
+            "---\nname: plain\ndescription: Plain skill.\n---\nContent",
+            encoding="utf-8",
+        )
+        metadata_dir = skill_dir / "agents"
+        metadata_dir.mkdir()
+        (metadata_dir / "openai.yaml").write_text(
+            "interface: [not: valid: yaml", encoding="utf-8"
+        )
+
+        skill = parse_skill_file(skill_file)
+
+        assert skill is not None
+        assert skill.allow_implicit_invocation is True
+        assert skill.display_name is None
+        assert skill.tool_dependencies == []

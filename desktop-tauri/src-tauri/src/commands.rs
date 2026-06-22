@@ -136,7 +136,7 @@ pub async fn download_and_save(
     Ok(true)
 }
 
-/// Replace the tray's Recent Chats list with the given sessions (top first).
+/// Replace the tray's recent chat list with the given sessions (top first).
 #[tauri::command]
 pub fn update_tray_recents(
     app: AppHandle,

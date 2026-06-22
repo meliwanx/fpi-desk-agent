@@ -21,7 +21,7 @@ import type { ModelInfo } from "@/types/model";
 
 const MODEL_DOES_NOT_SUPPORT_IMAGES = "MODEL_DOES_NOT_SUPPORT_IMAGES";
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]);
-const VISION_MODEL_REQUIRED_MESSAGE = "The selected model does not support images. Choose a vision model and try again.";
+const VISION_MODEL_REQUIRED_MESSAGE = "当前模型无法识别图片，请切换到支持视觉的模型后再发送。";
 
 function isImageAttachment(attachment: FileAttachment): boolean {
   if (attachment.mime_type?.startsWith("image/")) return true;

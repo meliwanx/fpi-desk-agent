@@ -143,6 +143,15 @@ def _remove_env_key(key: str) -> None:
     _ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _ensure_provider_config_unlocked(settings: Any) -> None:
+    """Block runtime provider edits in the managed company build."""
+    if getattr(settings, "provider_configuration_locked", False):
+        raise HTTPException(
+            status_code=403,
+            detail="Provider configuration is managed by the company",
+        )
+
+
 class LocalProviderStatus(BaseModel):
     """Status for the locally-configured OpenAI-compatible endpoint."""
 
@@ -198,8 +207,13 @@ async def get_api_key_status(registry: ProviderRegistryDep) -> ApiKeyStatus:
 
 
 @router.post("/config/api-key", response_model=ApiKeyStatus)
-async def update_api_key(registry: ProviderRegistryDep, body: ApiKeyUpdate) -> ApiKeyStatus:
+async def update_api_key(
+    settings: SettingsDep,
+    registry: ProviderRegistryDep,
+    body: ApiKeyUpdate,
+) -> ApiKeyStatus:
     """Update the OpenRouter API key, validate it, and re-initialize the provider."""
+    _ensure_provider_config_unlocked(settings)
     api_key = body.api_key.strip()
     if not api_key:
         raise HTTPException(status_code=400, detail="API key cannot be empty")
@@ -245,6 +259,7 @@ async def update_api_key(registry: ProviderRegistryDep, body: ApiKeyUpdate) -> A
 @router.delete("/config/api-key", response_model=ApiKeyStatus)
 async def delete_api_key(settings: SettingsDep, registry: ProviderRegistryDep) -> ApiKeyStatus:
     """Delete the stored OpenRouter API key."""
+    _ensure_provider_config_unlocked(settings)
     settings.openrouter_api_key = ""
     _remove_env_key("OPENYAK_OPENROUTER_API_KEY")
 
@@ -290,6 +305,7 @@ async def connect_ollama(
     settings: SettingsDep, registry: ProviderRegistryDep, body: OllamaConnect,
 ) -> OllamaStatus:
     """Connect to an Ollama instance: validate, register provider, persist."""
+    _ensure_provider_config_unlocked(settings)
     from app.provider.ollama import OllamaProvider
 
     base_url = body.base_url.strip().rstrip("/")
@@ -326,6 +342,7 @@ async def connect_ollama(
 @router.delete("/config/ollama", response_model=OllamaStatus)
 async def disconnect_ollama(settings: SettingsDep, registry: ProviderRegistryDep) -> OllamaStatus:
     """Disconnect Ollama: remove provider and clear config."""
+    _ensure_provider_config_unlocked(settings)
     settings.ollama_base_url = ""
     _remove_env_key("OPENYAK_OLLAMA_BASE_URL")
 
@@ -445,6 +462,7 @@ async def set_provider_key(
     provider_id: str, body: ProviderKeyUpdate, settings: SettingsDep, registry: ProviderRegistryDep,
 ) -> ProviderInfo:
     """Set/update API key for a provider. Validates, registers, and persists."""
+    _ensure_provider_config_unlocked(settings)
     pdef = PROVIDER_CATALOG.get(provider_id)
     if not pdef:
         raise HTTPException(404, f"Unknown provider: {provider_id}")
@@ -517,6 +535,7 @@ async def delete_provider_key(
     provider_id: str, settings: SettingsDep, registry: ProviderRegistryDep,
 ) -> ProviderInfo:
     """Remove API key for a provider."""
+    _ensure_provider_config_unlocked(settings)
     pdef = PROVIDER_CATALOG.get(provider_id)
     if not pdef:
         raise HTTPException(404, f"Unknown provider: {provider_id}")
@@ -548,6 +567,7 @@ async def toggle_provider(
     provider_id: str, settings: SettingsDep, registry: ProviderRegistryDep,
 ) -> ProviderInfo:
     """Enable or disable a provider. Disabled providers keep their key but aren't used."""
+    _ensure_provider_config_unlocked(settings)
     pdef = PROVIDER_CATALOG.get(provider_id)
     if not pdef:
         raise HTTPException(404, f"Unknown provider: {provider_id}")
@@ -606,6 +626,7 @@ async def create_custom_endpoint(
     body: CustomEndpointCreate, settings: SettingsDep, registry: ProviderRegistryDep
 ) -> ProviderInfo:
     """Create a new custom endpoint."""
+    _ensure_provider_config_unlocked(settings)
     slug = body.slug
     base_url = body.base_url
     api_key = body.api_key.strip() if body.api_key else ""
@@ -671,6 +692,7 @@ async def create_custom_endpoint(
 async def delete_custom_endpoint(
     endpoint_id: str, settings: SettingsDep, registry: ProviderRegistryDep
 ) -> ProviderInfo:
+    _ensure_provider_config_unlocked(settings)
     async with _custom_endpoints_lock:
         endpoints = get_custom_endpoints(settings)
         found = None
@@ -700,6 +722,7 @@ async def update_custom_endpoint(
     registry: ProviderRegistryDep,
 ) -> ProviderInfo:
     """Update a custom endpoint (partial update). Slug is immutable."""
+    _ensure_provider_config_unlocked(settings)
     models: list = []
     test_provider = None
 
@@ -831,6 +854,7 @@ async def set_local_provider(
     settings: SettingsDep, registry: ProviderRegistryDep, body: LocalProviderUpdate,
 ) -> LocalProviderStatus:
     """Register a locally-hosted OpenAI-compatible endpoint."""
+    _ensure_provider_config_unlocked(settings)
     base_url = _normalize_local_base_url(body.base_url)
     try:
         test_provider = create_local_provider(base_url)
@@ -864,6 +888,7 @@ async def set_local_provider(
 @router.delete("/config/local", response_model=LocalProviderStatus)
 async def delete_local_provider(settings: SettingsDep, registry: ProviderRegistryDep) -> LocalProviderStatus:
     """Remove the local endpoint configuration."""
+    _ensure_provider_config_unlocked(settings)
     settings.local_base_url = ""
     _remove_env_key(LOCAL_BASE_URL_ENV)
 

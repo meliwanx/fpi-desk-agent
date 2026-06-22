@@ -1,42 +1,65 @@
 "use client";
 
 import { useMemo } from "react";
+import { useModelPolicy } from "@/hooks/use-model-policy";
 import { useModels } from "@/hooks/use-models";
 import { useSettingsStore } from "@/stores/settings-store";
-import { isByokProviderId, isCustomEndpointProviderId } from "@/lib/providers";
+import { isByokProviderId, isCustomEndpointProviderId, providerBucket } from "@/lib/providers";
 
 export function useProviderModels() {
   const { data: allModels, isLoading, isError, error } = useModels();
+  const { data: modelPolicy } = useModelPolicy();
   const activeProvider = useSettingsStore((s) => s.activeProvider);
 
-  const data = useMemo(() => {
-    if (!allModels) return [];
-    if (!activeProvider) return [];
+  const providerResult = useMemo(() => {
+    if (!allModels) return { data: [], effectiveProvider: null };
 
-    if (activeProvider === "byok") {
+    const modelsForBucket = (bucket: typeof activeProvider) => {
+      if (!bucket) return [];
+      if (bucket === "byok") {
       // "byok" mode: show models from all BYOK providers
       // (everything except subscription, Ollama, and custom/local endpoints)
-      return allModels.filter((m) => isByokProviderId(m.provider_id));
+        return allModels.filter((m) => isByokProviderId(m.provider_id));
+      }
+
+      if (bucket === "custom") {
+        return allModels.filter((m) => isCustomEndpointProviderId(m.provider_id));
+      }
+
+      if (bucket === "chatgpt") {
+        return allModels.filter((m) => m.provider_id === "openai-subscription");
+      }
+
+      if (bucket === "ollama") {
+        return allModels.filter((m) => m.provider_id === "ollama");
+      }
+
+      if (bucket === "rapid-mlx") {
+        return allModels.filter((m) => m.provider_id === "rapid-mlx");
+      }
+
+      return [];
+    };
+
+    const defaultBucket = modelPolicy?.default_provider_id
+      ? providerBucket(modelPolicy.default_provider_id)
+      : null;
+    const activeModels = modelsForBucket(activeProvider);
+    if (activeModels.length > 0) {
+      return { data: activeModels, effectiveProvider: activeProvider };
     }
+    return {
+      data: modelsForBucket(defaultBucket),
+      effectiveProvider: defaultBucket,
+    };
+  }, [allModels, activeProvider, modelPolicy?.default_provider_id]);
 
-    if (activeProvider === "custom") {
-      return allModels.filter((m) => isCustomEndpointProviderId(m.provider_id));
-    }
-
-    if (activeProvider === "chatgpt") {
-      return allModels.filter((m) => m.provider_id === "openai-subscription");
-    }
-
-    if (activeProvider === "ollama") {
-      return allModels.filter((m) => m.provider_id === "ollama");
-    }
-
-    if (activeProvider === "rapid-mlx") {
-      return allModels.filter((m) => m.provider_id === "rapid-mlx");
-    }
-
-    return [];
-  }, [allModels, activeProvider]);
-
-  return { data, allModels, isLoading, isError, error, activeProvider };
+  return {
+    data: providerResult.data,
+    allModels,
+    isLoading,
+    isError,
+    error,
+    activeProvider: providerResult.effectiveProvider,
+  };
 }

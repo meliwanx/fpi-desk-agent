@@ -8,7 +8,7 @@ from typing import Any
 from app.tool.base import ToolDefinition, ToolResult
 from app.tool.builtin.glob_utils import wc_glob_files
 from app.tool.context import ToolContext
-from app.tool.workspace import WorkspaceViolation, resolve_and_validate
+from app.tool.workspace import WorkspaceViolation, resolve_for_read
 
 
 class GlobTool(ToolDefinition):
@@ -26,6 +26,8 @@ class GlobTool(ToolDefinition):
         return (
             "Find files matching a glob pattern. "
             "Supports patterns like '**/*.py', 'src/**/*.ts', etc. "
+            "Defaults to the active workspace; use an explicit absolute path "
+            "to search another local folder read-only. "
             "Returns matching file paths sorted by modification time."
         )
 
@@ -53,9 +55,10 @@ class GlobTool(ToolDefinition):
         if ctx.workspace and search_dir == ".":
             search_dir = ctx.workspace
 
-        # Workspace restriction check on search directory
+        # Resolve search directory. Defaults stay in the workspace; explicit
+        # absolute paths may inspect the local computer outside it.
         try:
-            search_dir = resolve_and_validate(search_dir, ctx.workspace)
+            search_dir = resolve_for_read(search_dir, ctx.workspace)
         except WorkspaceViolation as e:
             return ToolResult(error=str(e))
 
@@ -70,11 +73,6 @@ class GlobTool(ToolDefinition):
 
         # Filter to files only, sort by mtime (newest first)
         files = [m for m in matches if m.is_file()]
-
-        # Defense in depth: filter out results that escape workspace
-        if ctx.workspace:
-            ws = Path(ctx.workspace).resolve()
-            files = [f for f in files if _is_within(f, ws)]
 
         files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
 
@@ -97,12 +95,3 @@ class GlobTool(ToolDefinition):
             title=f"{len(files)} files matching {pattern}",
             metadata={"count": len(files), "truncated": truncated, "source": "filesystem"},
         )
-
-
-def _is_within(path: Path, parent: Path) -> bool:
-    """Check if *path* is a descendant of *parent*."""
-    try:
-        path.resolve().relative_to(parent)
-        return True
-    except ValueError:
-        return False

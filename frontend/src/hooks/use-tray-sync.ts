@@ -9,8 +9,8 @@ import { useSidebarStore } from "@/stores/sidebar-store";
 const TRAY_RECENT_LIMIT = 6;
 
 /**
- * Keeps the desktop tray's Recent Chats list in sync with the sidebar's
- * sessions query, and routes the tray's "Search Chats…" item to the
+ * Keeps the desktop tray's recent chat list in sync with the sidebar's
+ * sessions query, and routes the tray search item to the
  * command palette. Web mode is a no-op.
  */
 export function useTraySync() {

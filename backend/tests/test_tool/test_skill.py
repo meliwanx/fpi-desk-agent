@@ -120,3 +120,42 @@ class TestSkillToolExecute:
         assert result.success
         assert "<skill_files>" in result.output
         assert "reference.md" in result.output
+
+    @pytest.mark.asyncio
+    async def test_execute_includes_codex_metadata(self, tmp_path: Path):
+        skills_dir = tmp_path / ".agents" / "skills" / "metadata-skill"
+        skills_dir.mkdir(parents=True)
+        (skills_dir / "SKILL.md").write_text(
+            "---\nname: metadata-skill\ndescription: Has metadata.\n---\n\nMain content.",
+            encoding="utf-8",
+        )
+        metadata_dir = skills_dir / "agents"
+        metadata_dir.mkdir()
+        (metadata_dir / "openai.yaml").write_text(
+            """
+interface:
+  display_name: Metadata Skill
+policy:
+  allow_implicit_invocation: false
+dependencies:
+  tools:
+    - id: spreadsheet
+      reason: Read spreadsheet files
+""".strip(),
+            encoding="utf-8",
+        )
+
+        registry = SkillRegistry()
+        registry.scan(project_dir=str(tmp_path))
+
+        tool = SkillTool(skill_registry=registry)
+        result = await tool.execute({"name": "metadata-skill"}, _make_ctx())
+
+        assert result.success
+        assert "<skill_metadata>" in result.output
+        assert "<scope>repo</scope>" in result.output
+        assert "<display_name>Metadata Skill</display_name>" in result.output
+        assert "<allow_implicit_invocation>false</allow_implicit_invocation>" in result.output
+        assert '"id": "spreadsheet"' in result.output
+        assert result.metadata["scope"] == "repo"
+        assert result.metadata["allow_implicit_invocation"] is False

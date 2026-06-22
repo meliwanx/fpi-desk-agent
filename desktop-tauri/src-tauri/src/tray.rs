@@ -32,7 +32,7 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
 
     let builder = TrayIconBuilder::with_id(TRAY_ID)
         .icon(tray_icon)
-        .tooltip("OpenYak")
+        .tooltip("fpi-agent")
         .menu(&menu);
 
     #[cfg(target_os = "macos")]
@@ -68,23 +68,23 @@ pub fn set_tray_recents(app: &AppHandle, recents: &[TrayRecent]) -> tauri::Resul
 }
 
 fn build_menu(app: &AppHandle, recents: &[TrayRecent]) -> tauri::Result<Menu<tauri::Wry>> {
-    let new_chat = MenuItem::with_id(app, "new_chat", "New Chat", true, None::<&str>)?;
+    let new_chat = MenuItem::with_id(app, "new_chat", "新建对话", true, None::<&str>)?;
     let search_chats =
-        MenuItem::with_id(app, "search_chats", "Search Chats…", true, None::<&str>)?;
+        MenuItem::with_id(app, "search_chats", "搜索对话…", true, None::<&str>)?;
 
     let recent_submenu = build_recent_submenu(app, recents)?;
 
     let show_window =
-        MenuItem::with_id(app, "show_window", "Open OpenYak", true, None::<&str>)?;
-    let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
+        MenuItem::with_id(app, "show_window", "打开聚光办公助理", true, None::<&str>)?;
+    let settings = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
     let check_updates = MenuItem::with_id(
         app,
         "check_updates",
-        "Check for Updates…",
+        "检查更新…",
         true,
         None::<&str>,
     )?;
-    let quit = MenuItem::with_id(app, "quit", "Quit OpenYak", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "退出聚光办公助理", true, None::<&str>)?;
 
     Menu::with_items(
         app,
@@ -109,8 +109,8 @@ fn build_recent_submenu(
 ) -> tauri::Result<Submenu<tauri::Wry>> {
     if recents.is_empty() {
         let empty =
-            MenuItem::with_id(app, "recent_empty", "No recent chats", false, None::<&str>)?;
-        return Submenu::with_items(app, "Recent Chats", true, &[&empty]);
+            MenuItem::with_id(app, "recent_empty", "暂无最近对话", false, None::<&str>)?;
+        return Submenu::with_items(app, "最近对话", true, &[&empty]);
     }
 
     let mut items: Vec<Box<dyn tauri::menu::IsMenuItem<tauri::Wry>>> = Vec::new();
@@ -123,18 +123,18 @@ fn build_recent_submenu(
     items.push(Box::new(MenuItem::with_id(
         app,
         "recent_show_all",
-        "Show All Chats",
+        "显示全部对话",
         true,
         None::<&str>,
     )?));
 
     let refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
         items.iter().map(|b| b.as_ref()).collect();
-    Submenu::with_items(app, "Recent Chats", true, &refs)
+    Submenu::with_items(app, "最近对话", true, &refs)
 }
 
 fn format_title(raw: Option<&str>) -> String {
-    let title = raw.map(str::trim).filter(|s| !s.is_empty()).unwrap_or("Untitled chat");
+    let title = raw.map(str::trim).filter(|s| !s.is_empty()).unwrap_or("未命名对话");
     if title.chars().count() <= MAX_TITLE_CHARS {
         return title.to_string();
     }

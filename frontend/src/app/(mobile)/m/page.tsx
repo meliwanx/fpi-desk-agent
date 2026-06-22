@@ -10,6 +10,7 @@ import { isRemoteMode, autoConnectFromUrl } from "@/lib/remote-connection";
 import { useRemoteHealth, type RemoteHealthStatus } from "@/hooks/use-remote-health";
 import { PullToRefresh } from "@/components/mobile/pull-to-refresh";
 import type { SessionResponse } from "@/types/session";
+import { parseApiDate } from "@/lib/utils";
 
 /** Small colored dot indicating remote connection health. */
 function ConnectionDot({ status }: { status: RemoteHealthStatus }) {
@@ -36,7 +37,7 @@ function getTaskRoute(sessionId: string): string {
 /** Format relative time like "2m ago", "3h ago", "yesterday" */
 function timeAgo(dateStr: string): string {
   const now = Date.now();
-  const then = new Date(dateStr).getTime();
+  const then = parseApiDate(dateStr).getTime();
   const diff = now - then;
   const mins = Math.floor(diff / 60_000);
   if (mins < 1) return "just now";
@@ -46,7 +47,7 @@ function timeAgo(dateStr: string): string {
   const days = Math.floor(hrs / 24);
   if (days === 1) return "yesterday";
   if (days < 7) return `${days}d ago`;
-  return new Date(dateStr).toLocaleDateString();
+  return parseApiDate(dateStr).toLocaleDateString();
 }
 
 export default function MobileTaskListPage() {
@@ -99,7 +100,7 @@ export default function MobileTaskListPage() {
       {/* Header */}
       <header className="flex items-center justify-between px-5 pt-[max(env(safe-area-inset-top),12px)] pb-3">
         <div className="flex items-center gap-2">
-          <h1 className="text-xl font-semibold tracking-tight">OpenYak</h1>
+          <h1 className="text-xl font-semibold tracking-tight">fpi-agent</h1>
           <ConnectionDot status={healthStatus} />
         </div>
         <div className="flex items-center gap-1.5">

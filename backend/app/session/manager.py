@@ -32,6 +32,61 @@ from app.utils.id import generate_ulid
 logger = logging.getLogger(__name__)
 
 
+def _normalize_directory_for_compare(directory: str | None) -> str | None:
+    if directory is None:
+        return None
+    normalized = directory.strip()
+    if not normalized:
+        return None
+    return normalized.replace("\\", "/").rstrip("/") or normalized
+
+
+def _schedule_audit_session(session: Session) -> None:
+    from app.audit.client import schedule_audit_ingest
+
+    schedule_audit_ingest({
+        "sessions": [
+            {
+                "id": session.id,
+                "title": session.title,
+                "workspace": session.directory,
+                "model_id": session.model_id,
+                "provider_id": session.provider_id,
+            }
+        ]
+    })
+
+
+def _schedule_audit_message(message: Message) -> None:
+    from app.audit.client import schedule_audit_ingest
+
+    schedule_audit_ingest({
+        "messages": [
+            {
+                "id": message.id,
+                "session_id": message.session_id,
+                "role": (message.data or {}).get("role", ""),
+                "data": message.data or {},
+            }
+        ]
+    })
+
+
+def _schedule_audit_part(part: Part) -> None:
+    from app.audit.client import schedule_audit_ingest
+
+    schedule_audit_ingest({
+        "parts": [
+            {
+                "id": part.id,
+                "message_id": part.message_id,
+                "session_id": part.session_id,
+                "data": part.data or {},
+            }
+        ]
+    })
+
+
 async def create_session(
     db: AsyncSession,
     *,
@@ -49,7 +104,9 @@ async def create_session(
         directory=directory,
         title=title,
     )
-    return await create(db, session)
+    created = await create(db, session)
+    _schedule_audit_session(created)
+    return created
 
 
 async def get_session(db: AsyncSession, session_id: str) -> Session | None:
@@ -186,7 +243,9 @@ async def create_message(
         session_id=session_id,
         data=data,
     )
-    return await create(db, msg)
+    created = await create(db, msg)
+    _schedule_audit_message(created)
+    return created
 
 
 async def create_part(
@@ -208,7 +267,9 @@ async def create_part(
         session_id=session_id,
         data=data,
     )
-    return await create(db, part)
+    created = await create(db, part)
+    _schedule_audit_part(created)
+    return created
 
 
 async def update_part_data(
@@ -226,6 +287,7 @@ async def update_part_data(
     if part:
         # Reassign the entire dict to trigger SQLAlchemy's JSON mutation tracking
         part.data = data
+        _schedule_audit_part(part)
     return part
 
 
@@ -309,6 +371,7 @@ async def update_message_text(
     for part in parts:
         if part.data and part.data.get("type") == "text":
             part.data = {"type": "text", "text": new_text}
+            _schedule_audit_part(part)
             await db.flush()
             return
 
@@ -852,6 +915,12 @@ async def update_session(
     if body.title is not None:
         session.title = body.title
     if body.directory is not None:
+        current_dir = _normalize_directory_for_compare(session.directory)
+        requested_dir = _normalize_directory_for_compare(body.directory)
+        if current_dir != requested_dir:
+            raise Conflict(
+                "Session workspace cannot be changed. Start a new chat to use a different workspace."
+            )
         session.directory = body.directory
         _trigger_index(body.directory, session_id)
     if "time_archived" in body.model_fields_set:

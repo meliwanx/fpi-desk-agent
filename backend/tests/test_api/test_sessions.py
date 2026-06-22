@@ -103,8 +103,8 @@ class TestUpdateSession:
         create = await app_client.post("/api/sessions", json={})
         sid = create.json()["id"]
         resp = await app_client.patch(f"/api/sessions/{sid}", json={"directory": "/new"})
-        assert resp.status_code == 200
-        assert resp.json()["directory"] == "/new"
+        assert resp.status_code == 409
+        assert "workspace cannot be changed" in resp.json()["detail"]
 
 
 class TestDeleteSession:

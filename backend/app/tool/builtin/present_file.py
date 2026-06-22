@@ -7,7 +7,7 @@ from typing import Any
 
 from app.tool.base import ToolDefinition, ToolResult
 from app.tool.context import ToolContext
-from app.tool.workspace import WorkspaceViolation, resolve_and_validate
+from app.tool.workspace import WorkspaceViolation, resolve_for_read
 
 
 class PresentFileTool(ToolDefinition):
@@ -48,7 +48,7 @@ class PresentFileTool(ToolDefinition):
     async def execute(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         file_path = args["file_path"]
         try:
-            resolved = resolve_and_validate(file_path, ctx.workspace)
+            resolved = resolve_for_read(file_path, ctx.workspace)
         except WorkspaceViolation as e:
             return ToolResult(error=str(e))
 

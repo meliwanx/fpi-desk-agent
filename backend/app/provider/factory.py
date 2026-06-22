@@ -64,7 +64,11 @@ def create_provider(
 
     if pdef.kind == "native_anthropic":
         from app.provider.anthropic_provider import AnthropicDesktopProvider
-        return AnthropicDesktopProvider(api_key=api_key)
+        return AnthropicDesktopProvider(
+            api_key=api_key,
+            provider_id=provider_id,
+            models_override=models_override,
+        )
 
     if pdef.kind == "native_gemini":
         from app.provider.gemini_provider import GeminiDesktopProvider

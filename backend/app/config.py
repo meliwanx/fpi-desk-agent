@@ -3,11 +3,35 @@
 from __future__ import annotations
 
 import json
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote_plus
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def internal_default_custom_endpoints_json() -> str:
+    """Default internal OpenAI-compatible endpoint for the company build."""
+    api_key = os.environ.get("OPENYAK_INTERNAL_DEFAULT_API_KEY", "").strip()
+    if not api_key:
+        return "[]"
+    base_url = os.environ.get("OPENYAK_INTERNAL_DEFAULT_BASE_URL", "https://sub2api.onlymeok.com/v1").strip()
+    model_id = os.environ.get("OPENYAK_INTERNAL_DEFAULT_MODEL", "gpt-5.5").strip() or "gpt-5.5"
+    model_name = os.environ.get("OPENYAK_INTERNAL_DEFAULT_MODEL_NAME", "GPT-5.5").strip() or model_id
+    return json.dumps([
+        {
+            "id": "custom_onlyme",
+            "slug": "onlyme",
+            "name": "OnlyMe GPT-5.5",
+            "base_url": base_url,
+            "api_key": api_key,
+            "enabled": True,
+            "models": [{"id": model_id, "name": model_name}],
+            "headers": {},
+        }
+    ])
 
 
 class Settings(BaseSettings):
@@ -43,11 +67,12 @@ class Settings(BaseSettings):
     zhipu_api_key: str = ""         # OPENYAK_ZHIPU_API_KEY (智谱 GLM)
     siliconflow_api_key: str = ""   # OPENYAK_SILICONFLOW_API_KEY (硅基流动)
     xiaomi_api_key: str = ""        # OPENYAK_XIAOMI_API_KEY (MiMo)
-    custom_endpoints: str = "[]"    # OPENYAK_CUSTOM_ENDPOINTS
+    custom_endpoints: str = internal_default_custom_endpoints_json()  # OPENYAK_CUSTOM_ENDPOINTS
 
     # Comma-separated list of provider IDs to disable (e.g. "groq,deepseek")
     # Disabled providers are not registered even if their API key is set.
     disabled_providers: str = ""  # OPENYAK_DISABLED_PROVIDERS
+    provider_configuration_locked: bool = True
 
     # --- Optional hosted proxy for managed tools such as web search ---
     proxy_url: str = ""
@@ -56,6 +81,29 @@ class Settings(BaseSettings):
 
     # --- Database ---
     database_url: str = "sqlite+aiosqlite:///./data/openyak.db"
+
+    # --- Company login (business-user auth, separate from local bearer token) ---
+    company_auth_enabled: bool = False
+    company_auth_database_url: str = ""
+    company_auth_mysql_host: str = ""
+    company_auth_mysql_port: int = 3306
+    company_auth_mysql_user: str = ""
+    company_auth_mysql_password: str = ""
+    company_auth_mysql_database: str = ""
+    company_auth_table_prefix: str = "fpi_desk"
+    company_auth_bootstrap_email: str = "admin"
+    company_auth_bootstrap_display_name: str = "Admin"
+    company_auth_bootstrap_password: str = ""
+    company_auth_bootstrap_file: str = "company_auth_bootstrap.json"
+    company_auth_session_days: int = 30
+
+    # --- Enterprise audit sync ---
+    audit_sync_enabled: bool = False
+    audit_server_url: str = ""
+    audit_sync_timeout: float = 10.0
+    audit_file_upload_enabled: bool = True
+    audit_file_upload_max_bytes: int = 200 * 1024 * 1024
+    audit_file_storage_dir: str = "data/audit_uploads"
 
     # --- Server ---
     host: str = "0.0.0.0"
@@ -66,6 +114,7 @@ class Settings(BaseSettings):
     # weakening backend auth. Ignored unless allow_dev_session_token=True.
     allow_dev_session_token: bool = False
     dev_session_token: str = ""
+    local_api_auth_enabled: bool = True
 
     # --- Project ---
     project_dir: str = "."
@@ -74,6 +123,33 @@ class Settings(BaseSettings):
     daily_search_limit: int = 20  # Max free web_search calls per day (Free/BYOK)
     web_search_context_size: str = "low"  # "low" | "medium" | "high" — native search breadth (OpenAI subscription)
     max_native_searches_per_step: int = 5  # cap on native web searches per agent step
+
+    # --- Sandbox execution ---
+    # "required" refuses shell/code execution unless the configured sandbox can
+    # be started. "auto" uses the sandbox when available and falls back to host
+    # execution when unavailable. "off" restores direct host execution.
+    sandbox_mode: str = "auto"  # required | auto | off
+    sandbox_provider: str = "local"  # local | docker | tencent
+    sandbox_image: str = "enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest"
+    sandbox_container_prefix: str = "fpi-desk-sandbox"
+    sandbox_port_start: int = 28080
+    sandbox_data_dir: str = "data/sandboxes"
+    sandbox_client_timeout: int = 600
+    tencent_sandbox_domain: str = "ap-guangzhou.tencentags.com"
+    tencent_sandbox_template: str = "code-2qj6gcgh6oa"
+    tencent_sandbox_lifetime: int = 3600
+    tencent_sandbox_api_key: str = ""
+    tencent_sandbox_validate_api_key: bool = False
+    tencent_sandbox_api_key_cache_path: str = "tencent_sandbox_api_key"
+    tencent_sandbox_auto_create_api_key: bool = True
+    tencent_sandbox_key_name: str = "fpi-desk-agent"
+    tencent_sandbox_region: str = "ap-beijing"
+    tencent_sandbox_max_concurrent: int = 2
+    tencent_sandbox_acquire_timeout: int = 120
+    tencent_sandbox_create_retries: int = 2
+    tencent_sandbox_retry_backoff: float = 1.0
+    tencent_secret_id: str = ""
+    tencent_secret_key: str = ""
 
     # --- Compaction ---
     compaction_auto: bool = True
@@ -189,6 +265,27 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def get_company_auth_database_url(settings: Settings) -> str:
+    """Return the SQLAlchemy URL used by the company-auth store."""
+    if settings.company_auth_database_url.strip():
+        return settings.company_auth_database_url.strip()
+    if not (
+        settings.company_auth_mysql_host
+        and settings.company_auth_mysql_user
+        and settings.company_auth_mysql_database
+    ):
+        return ""
+    user = quote_plus(settings.company_auth_mysql_user)
+    password = quote_plus(settings.company_auth_mysql_password)
+    host = settings.company_auth_mysql_host
+    port = settings.company_auth_mysql_port
+    database = settings.company_auth_mysql_database
+    return (
+        f"mysql+aiomysql://{user}:{password}@{host}:{port}/{database}"
+        "?charset=utf8mb4"
+    )
 
 def get_custom_endpoints(settings: Settings) -> list[dict[str, Any]]:
     """Read + normalize the persisted custom endpoint list.

@@ -27,6 +27,7 @@ from app.provider.registry import ProviderRegistry
 from app.skill.registry import SkillRegistry
 from app.streaming.manager import StreamManager
 from app.tool.registry import ToolRegistry
+from app.company_auth.store import CompanyAuthStore
 
 # ---------------------------------------------------------------------------
 # Database session
@@ -58,6 +59,26 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 SessionFactoryDep = Annotated[async_sessionmaker[AsyncSession], Depends(get_session_factory)]
 DbDep = Annotated[AsyncSession, Depends(get_db)]
+
+# ---------------------------------------------------------------------------
+# Company auth store
+# ---------------------------------------------------------------------------
+
+_company_auth_store: CompanyAuthStore | None = None
+
+
+def set_company_auth_store(store: CompanyAuthStore | None) -> None:
+    global _company_auth_store
+    _company_auth_store = store
+
+
+def get_company_auth_store() -> CompanyAuthStore:
+    if _company_auth_store is None:
+        raise RuntimeError("Company auth not initialized")
+    return _company_auth_store
+
+
+CompanyAuthStoreDep = Annotated[CompanyAuthStore, Depends(get_company_auth_store)]
 
 # ---------------------------------------------------------------------------
 # Settings

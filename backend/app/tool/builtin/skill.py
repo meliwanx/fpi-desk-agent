@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 from typing import Any
+from xml.sax.saxutils import escape
 
 from app.tool.base import ToolDefinition, ToolResult
 from app.tool.context import ToolContext
@@ -30,7 +32,7 @@ class SkillTool(ToolDefinition):
 
     # Maximum number of skills to list in the tool description.
     # Beyond this limit, remaining skills are noted as "(and N more)".
-    _MAX_LISTED_SKILLS = 40
+    _MAX_DESCRIPTION_CHARS = 12_000
     # Maximum characters per skill description before truncation.
     _MAX_DESC_CHARS = 120
 
@@ -55,16 +57,26 @@ class SkillTool(ToolDefinition):
         if not active:
             return base + "\n\nNo skills are currently available."
 
-        shown = active[: self._MAX_LISTED_SKILLS]
-        remaining = len(active) - len(shown)
-
         lines = [base, ""]
-        for skill in shown:
-            desc = skill.description or ""
-            if len(desc) > self._MAX_DESC_CHARS:
-                desc = desc[: self._MAX_DESC_CHARS - 3] + "..."
-            lines.append(f"- {skill.name}: {desc}")
+        shown = 0
+        total = len(active)
+        for skill in active:
+            desc = _truncate(skill.description or "", self._MAX_DESC_CHARS)
+            implicit = getattr(skill, "allow_implicit_invocation", True)
+            suffix = "" if implicit else " [explicit only]"
+            line = f"- {skill.name}{suffix}: {desc}"
+            remaining_after = total - shown - 1
+            reserve = (
+                len(f"\n  (and {remaining_after} more — invoke by name to check availability)")
+                if remaining_after > 0
+                else 0
+            )
+            if len("\n".join([*lines, line])) + reserve > self._MAX_DESCRIPTION_CHARS:
+                break
+            lines.append(line)
+            shown += 1
 
+        remaining = total - shown
         if remaining > 0:
             lines.append(f"  (and {remaining} more — invoke by name to check availability)")
         return "\n".join(lines)
@@ -110,9 +122,11 @@ class SkillTool(ToolDefinition):
             "Relative paths in this skill (e.g., scripts/, reference/) "
             "are relative to this base directory."
         )
+        metadata_block = _metadata_block(skill)
 
         output = (
             f'<skill_content name="{skill.name}">\n'
+            f"{metadata_block}\n\n"
             f"# Skill: {skill.name}\n\n"
             f"{skill.content.strip()}\n"
             f"{base_dir_hint}\n"
@@ -124,7 +138,14 @@ class SkillTool(ToolDefinition):
         return ToolResult(
             output=output,
             title=f"Loaded skill: {skill.name}",
-            metadata={"name": skill.name, "dir": str(skill_dir)},
+            metadata={
+                "name": skill.name,
+                "dir": str(skill_dir),
+                "scope": getattr(skill, "scope", None),
+                "source": getattr(skill, "source", None),
+                "allow_implicit_invocation": getattr(skill, "allow_implicit_invocation", True),
+                "tool_dependencies": getattr(skill, "tool_dependencies", []),
+            },
         )
 
 
@@ -146,3 +167,40 @@ def _list_bundled_files(directory: Path, *, limit: int = 10) -> list[str]:
             if len(result) >= limit:
                 return result
     return result
+
+
+def _metadata_block(skill: Any) -> str:
+    tool_deps = json.dumps(
+        getattr(skill, "tool_dependencies", []) or [],
+        ensure_ascii=False,
+        indent=2,
+    )
+    fields = [
+        ("name", skill.name),
+        ("display_name", getattr(skill, "display_name", None)),
+        ("description", skill.description),
+        ("scope", getattr(skill, "scope", None)),
+        ("source", getattr(skill, "source", None)),
+        ("metadata_path", getattr(skill, "metadata_path", None)),
+        (
+            "allow_implicit_invocation",
+            str(getattr(skill, "allow_implicit_invocation", True)).lower(),
+        ),
+    ]
+
+    lines = ["<skill_metadata>"]
+    for tag, value in fields:
+        if value is None:
+            continue
+        lines.append(f"<{tag}>{escape(str(value))}</{tag}>")
+    lines.append("<tool_dependencies>")
+    lines.append(escape(tool_deps))
+    lines.append("</tool_dependencies>")
+    lines.append("</skill_metadata>")
+    return "\n".join(lines)
+
+
+def _truncate(value: str, max_chars: int) -> str:
+    if len(value) <= max_chars:
+        return value
+    return value[: max_chars - 3].rstrip() + "..."

@@ -100,7 +100,7 @@ test.describe("OpenYak complete GUI workflows", () => {
     await expectNoAppCrash(page);
   });
 
-  test("provider setup journey: configure providers, switch model surface, send with selected provider", async ({
+  test("provider setup journey: managed provider is fixed and drives chat payload", async ({
     page,
   }) => {
     const state = await setupMockedApp(page);
@@ -109,18 +109,16 @@ test.describe("OpenYak complete GUI workflows", () => {
     await expect(
       page.getByRole("heading", { name: "Providers" }),
     ).toBeVisible();
-
-    await page.getByRole("button", { name: /Own API Key/i }).click();
-    await page.getByPlaceholder("sk-or-...").fill("sk-or-workflow");
-    const ownKeySave = page.waitForResponse(
-      (res) =>
-        res.url().includes("/api/config/providers/openrouter/key") &&
-        res.request().method() === "POST" &&
-        res.status() === 200,
-    );
-    await page.getByRole("button", { name: "Save" }).first().click();
-    await ownKeySave;
-    expect(JSON.stringify(state.providerSaves)).toContain("sk-or-workflow");
+    await expect(page.getByText("OnlyMe GPT-5.5")).toBeVisible();
+    await expect(
+      page.getByText("https://sub2api.onlymeok.com/v1"),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Own API Key/i }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: /Custom Endpoint/i }),
+    ).toHaveCount(0);
 
     await expect
       .poll(() =>
@@ -130,47 +128,18 @@ test.describe("OpenYak complete GUI workflows", () => {
               ?.state?.activeProvider,
         ),
       )
-      .toBe("byok");
+      .toBe("custom");
 
     await page.goto("/c/new");
     await expect(
-      page.getByRole("button", { name: /Claude Sonnet 4\.5/i }),
+      page.getByRole("button", { name: /GPT-5\.5/i }),
     ).toBeVisible();
 
     await sendPrompt(page, "Create a UI preflight checklist");
     await expect(page).toHaveURL(/\/c\/session-new$/);
-    expect(JSON.stringify(state.promptBodies[0])).toContain(
-      "openrouter/anthropic/claude-sonnet-4.5",
-    );
-    expect(JSON.stringify(state.promptBodies[0])).toContain("openrouter");
-
-    await page.goto("/settings?tab=providers");
-
-    await page.getByRole("button", { name: /Custom Endpoint/i }).click();
-    await expect(page.getByText("Local endpoint")).toBeVisible();
-    await expect(
-      page.getByText("http://localhost:11434/v1", { exact: true }),
-    ).toBeVisible();
-    await page
-      .getByPlaceholder("Endpoint Name (e.g. My Local Model)")
-      .fill("Workflow Endpoint");
-    await page
-      .getByPlaceholder(
-        "http://localhost:1234/v1 or https://api.example.com/v1",
-      )
-      .fill("http://localhost:1234/v1");
-    const customSave = page.waitForResponse(
-      (res) =>
-        res.url().includes("/api/config/custom") &&
-        res.request().method() === "POST" &&
-        res.status() === 200,
-    );
-    await page.getByRole("button", { name: "Add Endpoint" }).click();
-    await customSave;
-    expect(JSON.stringify(state.providerSaves)).toContain("Workflow Endpoint");
-    expect(JSON.stringify(state.providerSaves)).toContain(
-      "http://localhost:1234/v1",
-    );
+    expect(JSON.stringify(state.promptBodies[0])).toContain("gpt-5.5");
+    expect(JSON.stringify(state.promptBodies[0])).toContain("custom_onlyme");
+    expect(state.providerSaves).toHaveLength(0);
     await expectNoAppCrash(page);
   });
 

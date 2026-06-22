@@ -40,6 +40,7 @@ Thumbs.db
 # === Claude local config ===
 .claude/
 CLAUDE.md
+AGENT.md
 cowork/
 .dev/
 .harness/
@@ -69,6 +70,7 @@ dist*/
 build*/
 *.egg
 out/
+backend/app/admin_static/
 desktop/release/
 desktop-tauri/src-tauri/target/
 desktop-tauri/src-tauri/gen/schemas/

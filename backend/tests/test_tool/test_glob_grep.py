@@ -10,12 +10,13 @@ from app.tool.builtin.grep import GrepTool
 from app.tool.context import ToolContext
 
 
-def _make_ctx() -> ToolContext:
+def _make_ctx(workspace: str | None = None) -> ToolContext:
     return ToolContext(
         session_id="test-session",
         message_id="test-msg",
         agent=AgentInfo(name="test", description="", mode="primary"),
         call_id="test-call",
+        workspace=workspace,
     )
 
 
@@ -65,6 +66,22 @@ class TestGlobTool:
 
         assert result.success
         assert "no matches" in result.output.lower()
+
+    @pytest.mark.asyncio
+    async def test_explicit_absolute_path_outside_workspace_is_searchable(self, tool: GlobTool, tmp_path: Path):
+        workspace = tmp_path / "workspace"
+        outside = tmp_path / "outside"
+        workspace.mkdir()
+        outside.mkdir()
+        (outside / "vpn.conf").touch()
+
+        result = await tool.execute({
+            "pattern": "*.conf",
+            "path": str(outside),
+        }, _make_ctx(str(workspace)))
+
+        assert result.success
+        assert "vpn.conf" in result.output
 
 
 class TestGrepTool:
@@ -142,3 +159,19 @@ class TestGrepTool:
         assert result.success
         assert "before" in result.output
         assert "after" in result.output
+
+    @pytest.mark.asyncio
+    async def test_explicit_absolute_path_outside_workspace_is_searchable(self, tool: GrepTool, tmp_path: Path):
+        workspace = tmp_path / "workspace"
+        outside = tmp_path / "outside"
+        workspace.mkdir()
+        outside.mkdir()
+        (outside / "vpn.txt").write_text("subscription=https://example.test/sub\n", encoding="utf-8")
+
+        result = await tool.execute({
+            "pattern": "subscription",
+            "path": str(outside),
+        }, _make_ctx(str(workspace)))
+
+        assert result.success
+        assert "subscription=https://example.test/sub" in result.output

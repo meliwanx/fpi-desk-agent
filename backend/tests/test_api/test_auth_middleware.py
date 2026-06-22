@@ -233,6 +233,49 @@ class TestDenyByDefault:
             r = await c.get("/m/settings")
             assert r.status_code == 200
 
+    @pytest.mark.asyncio
+    async def test_admin_static_bundle_public(self):
+        """The enterprise admin shell is a browser app. Its JS/CSS bundle
+        must load before the administrator can submit company credentials."""
+        app = _make_app(_settings())
+
+        @app.get("/admin/assets/index.js")
+        async def admin_bundle():
+            return {"ok": True}
+
+        async with await _client(app) as c:
+            r = await c.get("/admin/assets/index.js")
+        assert r.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_company_auth_bootstrap_public(self):
+        """Company login endpoints must be reachable from /admin and the
+        desktop login page without a local bearer token."""
+        app = _make_app(_settings())
+
+        @app.post("/api/company-auth/login")
+        async def company_login():
+            return {"ok": True}
+
+        async with await _client(app) as c:
+            r = await c.post("/api/company-auth/login", json={})
+        assert r.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_admin_api_bypasses_local_bearer_gate(self):
+        """The deployed browser admin console cannot know the local bearer
+        token. /api/admin/* skips this layer and is protected downstream by
+        company-auth session plus admin-role checks."""
+        app = _make_app(_settings())
+
+        @app.get("/api/admin/audit/summary")
+        async def admin_summary():
+            return {"ok": True}
+
+        async with await _client(app) as c:
+            r = await c.get("/api/admin/audit/summary")
+        assert r.status_code == 200
+
 
 class TestMandatoryAuth:
     """Every /api/* route must reject anonymous requests, including
@@ -370,5 +413,3 @@ class TestFailClosed:
                 headers={"authorization": f"Bearer {_SESSION_TOKEN}"},
             )
         assert r.status_code == 503
-
-

@@ -7,6 +7,7 @@ import {
   resolveApiUrl,
 } from "./constants";
 import { getRemoteConfig } from "./remote-connection";
+import { getCompanySessionToken } from "./company-auth";
 import i18n from "@/i18n/config";
 
 class ApiError extends Error {
@@ -42,15 +43,21 @@ async function resolveRequestUrl(url: string): Promise<string> {
 }
 
 async function buildAuthHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {};
+  const companyToken = getCompanySessionToken();
+  if (companyToken) headers["X-FPI-Session"] = companyToken;
+
   const remoteConfig = getRemoteConfig();
   if (remoteConfig) {
-    return { Authorization: `Bearer ${remoteConfig.token}` };
+    headers.Authorization = `Bearer ${remoteConfig.token}`;
+    return headers;
   }
   if (IS_DESKTOP) {
     const token = await getBackendToken();
-    return { Authorization: `Bearer ${token}` };
+    headers.Authorization = `Bearer ${token}`;
+    return headers;
   }
-  return {};
+  return headers;
 }
 
 export async function apiFetch(
@@ -133,6 +140,10 @@ async function request<T>(
   // dev mode the Next.js proxy handles credential-less same-origin
   // calls, so no header is needed.
   const authHeaders: Record<string, string> = {};
+  const companyToken = getCompanySessionToken();
+  if (companyToken) {
+    authHeaders["X-FPI-Session"] = companyToken;
+  }
   if (remoteConfig) {
     authHeaders["Authorization"] = `Bearer ${remoteConfig.token}`;
   } else if (IS_DESKTOP) {

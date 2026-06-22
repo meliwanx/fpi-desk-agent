@@ -8,11 +8,59 @@ import { Button } from "@/components/ui/button";
 
 export function UpdateBanner() {
   const { t } = useTranslation("settings");
-  const { available, version, downloading, progress, error, downloadAndInstall, dismiss } = useUpdateCheck();
+  const {
+    available,
+    version,
+    notes,
+    forceUpdate,
+    downloading,
+    progress,
+    error,
+    downloadAndInstall,
+    dismiss,
+  } = useUpdateCheck();
 
   return (
     <AnimatePresence>
-      {available && (
+      {available && forceUpdate && (
+        <motion.div
+          className="fixed inset-0 z-[1000] grid place-items-center bg-black/35 px-6 backdrop-blur-sm"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        >
+          <div className="w-full max-w-[460px] rounded-2xl border border-[var(--border-default)] bg-[var(--surface-primary)] p-6 shadow-[var(--shadow-lg)]">
+            <div className="mb-4 flex items-center gap-2 text-[var(--brand-primary)]">
+              <Download className="h-4 w-4" />
+              <span className="text-ui-caption font-semibold">{t("updateRequired")}</span>
+            </div>
+            <h2 className="text-ui-title-sm font-semibold text-[var(--text-primary)]">
+              {t("updateRequiredTitle", { version })}
+            </h2>
+            {notes && (
+              <p className="mt-3 whitespace-pre-wrap text-ui-caption leading-6 text-[var(--text-secondary)]">
+                {notes}
+              </p>
+            )}
+            {error && (
+              <p className="mt-3 break-all text-ui-caption text-[var(--color-destructive)]">
+                {t("updateFailed")}: {error}
+              </p>
+            )}
+            <Button
+              className="mt-5 w-full"
+              onClick={downloadAndInstall}
+              disabled={downloading}
+            >
+              {downloading ? t("updateOpening") : t("updateDownload")}
+            </Button>
+            <p className="mt-3 text-center text-ui-3xs text-[var(--text-tertiary)]">
+              {t("updateRequiredDesc")}
+            </p>
+          </div>
+        </motion.div>
+      )}
+      {available && !forceUpdate && (
         <motion.div
           initial={{ height: 0, opacity: 0 }}
           animate={{ height: "auto", opacity: 1 }}

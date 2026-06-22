@@ -79,7 +79,7 @@ async def google_auth_start(request: Request) -> dict[str, Any]:
     settings = request.app.state.settings
 
     if not settings.google_client_id:
-        return {"success": False, "error": "Google OAuth not configured (missing OPENYAK_GOOGLE_CLIENT_ID)"}
+        return {"success": False, "error": "Google OAuth not configured (missing Google client ID)"}
 
     host = settings.host if settings.host != "0.0.0.0" else "localhost"
     redirect_uri = f"http://{host}:{settings.port}/api/google/callback"

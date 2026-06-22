@@ -2,13 +2,10 @@
 
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
-import { FolderOpen, X } from "lucide-react";
+import { FolderOpen } from "lucide-react";
 import { Loader2 } from "lucide-react";
 import { useSettingsStore } from "@/stores/settings-store";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
-import { API, queryKeys } from "@/lib/constants";
 import { browseDirectory } from "@/lib/upload";
 import { isRemoteMode } from "@/lib/remote-connection";
 import { MobileDirectoryBrowser } from "@/components/mobile/directory-browser";
@@ -31,9 +28,9 @@ function getDisplayName(path: string | null | undefined): string | null {
 
 export function WorkspaceToggle({ sessionId, directory, isIndexing }: WorkspaceToggleProps) {
   const { t } = useTranslation("chat");
-  const queryClient = useQueryClient();
   const [browsingDirs, setBrowsingDirs] = useState(false);
   const remote = isRemoteMode();
+  const isLocked = !!sessionId;
 
   // For new chats (no sessionId), use global settings store
   const globalWorkspace = useSettingsStore((s) => s.workspaceDirectory);
@@ -44,18 +41,21 @@ export function WorkspaceToggle({ sessionId, directory, isIndexing }: WorkspaceT
   const displayName = getDisplayName(currentPath);
   const pillLabel = displayName ?? t("workspaceNone");
 
-  // Handle directory selection from either native picker (desktop) or mobile browser
+  // Existing sessions keep their original workspace. New chats can pick a folder
+  // before the first message creates the session.
   const applySelectedPath = useCallback(async (path: string) => {
-    if (sessionId) {
-      await api.patch(API.SESSIONS.DETAIL(sessionId), { directory: path });
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions.detail(sessionId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions.all });
-    } else {
-      setGlobalWorkspace(path);
+    if (isLocked) {
+      toast.info(t("workspaceLocked"));
+      return;
     }
-  }, [sessionId, queryClient, setGlobalWorkspace]);
+    setGlobalWorkspace(path);
+  }, [isLocked, setGlobalWorkspace, t]);
 
   const handleBrowse = useCallback(async () => {
+    if (isLocked) {
+      toast.info(t("workspaceLocked"));
+      return;
+    }
     if (remote) {
       // Remote mode: use directory browser instead of native OS dialog
       setBrowsingDirs(true);
@@ -68,51 +68,29 @@ export function WorkspaceToggle({ sessionId, directory, isIndexing }: WorkspaceT
       }
     } catch (err) {
       console.error("Failed to browse directory:", err);
-      toast.error("Failed to open folder picker");
+      toast.error(t("workspaceBrowseFailed"));
     }
-  }, [remote, t, applySelectedPath]);
-
-  const handleClear = useCallback(async () => {
-    if (sessionId) {
-      await api.patch(API.SESSIONS.DETAIL(sessionId), { directory: "." });
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions.detail(sessionId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions.all });
-    } else {
-      setGlobalWorkspace(null);
-    }
-  }, [sessionId, queryClient, setGlobalWorkspace]);
+  }, [isLocked, remote, t, applySelectedPath]);
 
   return (
     <>
       {displayName ? (
-        <div
-          className="inline-flex items-center rounded-full bg-[var(--surface-tertiary)] text-[var(--text-primary)] max-w-[220px]"
+        <button
+          type="button"
+          onClick={handleBrowse}
+          className="inline-flex max-w-[220px] items-center gap-1.5 rounded-full bg-[var(--surface-tertiary)] py-1.5 pl-3 pr-3 text-[13px] text-[var(--text-primary)]"
           title={currentPath ?? undefined}
         >
-          <button
-            type="button"
-            onClick={handleBrowse}
-            className="inline-flex items-center gap-1.5 pl-3 pr-1 py-1.5 text-[13px] min-w-0"
-          >
-            {isIndexing ? (
-              <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-            ) : (
-              <FolderOpen className="h-4 w-4 shrink-0" />
-            )}
-            <span className="truncate">{pillLabel}</span>
-            {isIndexing && (
-              <span className="text-[11px] text-[var(--text-tertiary)] shrink-0">Indexing…</span>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={handleClear}
-            aria-label={t("workspaceClear")}
-            className="flex items-center justify-center pr-2 pl-1 py-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
+          {isIndexing ? (
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+          ) : (
+            <FolderOpen className="h-4 w-4 shrink-0" />
+          )}
+          <span className="truncate">{pillLabel}</span>
+          {isIndexing && (
+            <span className="shrink-0 text-[11px] text-[var(--text-tertiary)]">{t("workspaceIndexing")}</span>
+          )}
+        </button>
       ) : (
         <button
           type="button"

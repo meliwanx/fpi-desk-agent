@@ -65,11 +65,16 @@ class TestPresentFileTool:
         assert result.error == f"Cannot present a directory: {tmp_path}"
 
     @pytest.mark.asyncio
-    async def test_workspace_violation(self, tool: PresentFileTool, tmp_path: Path):
+    async def test_absolute_path_outside_workspace_can_be_presented(self, tool: PresentFileTool, tmp_path: Path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        outside = tmp_path / "outside.md"
+        outside.write_text("# Outside\n", encoding="utf-8")
+
         result = await tool.execute(
-            {"file_path": "/etc/passwd"},
-            ctx(str(tmp_path)),
+            {"file_path": str(outside)},
+            ctx(str(workspace)),
         )
 
-        assert not result.success
-        assert "outside the workspace directory" in (result.error or "")
+        assert result.success
+        assert result.metadata["file_path"] == str(outside.resolve())

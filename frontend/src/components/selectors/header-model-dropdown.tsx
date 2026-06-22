@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import { AlertCircle, Check, ChevronDown, Loader2 } from "lucide-react";
+import { useModelPolicy } from "@/hooks/use-model-policy";
 import { useProviderModels } from "@/hooks/use-provider-models";
 import { useModelArenaMap, type ArenaScore } from "@/hooks/use-arena-scores";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -28,6 +29,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { usdToCentsPerM, formatUsdPerM } from "@/lib/pricing";
+import { providerBucket } from "@/lib/providers";
 import type { ModelInfo } from "@/types/model";
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -142,9 +144,10 @@ export function HeaderModelDropdown() {
     isError,
     activeProvider,
   } = useProviderModels();
+  const { data: modelPolicy } = useModelPolicy();
   const hasArena = ARENA_PROVIDERS.has(activeProvider);
   const [sortBy, setSortBy] = useState<SortMode>(hasArena ? "popular" : "name");
-  const { selectedModel, selectedProviderId, setSelectedModel } =
+  const { selectedModel, selectedProviderId, setSelectedModel, setActiveProvider } =
     useSettingsStore();
   const sortButtons = hasArena ? SORT_BUTTONS_FULL : SORT_BUTTONS_SIMPLE;
   // Reset sort mode when switching between providers with/without arena data
@@ -170,18 +173,16 @@ export function HeaderModelDropdown() {
         (m) => m.id === selectedModel && m.provider_id === selectedProviderId,
       );
     if (!modelExists) {
-      let chosen: ModelInfo;
-      if (activeProvider === "chatgpt") {
-        // Prefer the newest flagship (5.5), fall back to 5.4 if the user's
-        // subscription tier hasn't rolled it out yet, then to whatever the
-        // backend did return.
-        const preferred =
-          visibleModels.find((m) => m.id === "openai-subscription/gpt-5.5") ??
-          visibleModels.find((m) => m.id === "openai-subscription/gpt-5.4");
-        chosen = preferred ?? visibleModels[0];
-      } else {
-        chosen = visibleModels[0];
-      }
+      const policyDefault =
+        modelPolicy?.default_model_id && modelPolicy?.default_provider_id
+          ? visibleModels.find(
+              (m) =>
+                m.id === modelPolicy.default_model_id &&
+                m.provider_id === modelPolicy.default_provider_id,
+            )
+          : null;
+      const chosen = policyDefault ?? visibleModels[0];
+      setActiveProvider(providerBucket(chosen.provider_id));
       setSelectedModel(chosen.id, chosen.provider_id);
     }
   }, [
@@ -189,7 +190,10 @@ export function HeaderModelDropdown() {
     selectedModel,
     selectedProviderId,
     setSelectedModel,
+    setActiveProvider,
     activeProvider,
+    modelPolicy?.default_model_id,
+    modelPolicy?.default_provider_id,
   ]);
 
   const { freeModels, paidModels } = useMemo(() => {

@@ -301,7 +301,7 @@ export default function MobileSettingsPage() {
                   type="password"
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
-                  placeholder="openyak_rt_..."
+                  placeholder="请输入远程访问令牌"
                   className="flex-1 bg-transparent text-[16px] outline-none placeholder:text-[var(--text-tertiary)]"
                 />
               </div>
@@ -370,11 +370,11 @@ export default function MobileSettingsPage() {
 
         {/* Instructions */}
         <div className="rounded-2xl bg-[var(--surface-secondary)] border border-[var(--border-default)] p-4 space-y-2.5">
-          <p className="text-[13px] font-medium">How to connect</p>
+          <p className="text-[13px] font-medium">如何连接</p>
           <ol className="text-[12px] text-[var(--text-secondary)] space-y-1.5 list-decimal list-inside">
-            <li>Open OpenYak on your desktop</li>
-            <li>Go to Settings &rarr; Remote Access</li>
-            <li>Enable and scan the QR code</li>
+            <li>在电脑上打开聚光办公助理</li>
+            <li>进入设置里的远程访问</li>
+            <li>开启后扫描二维码</li>
           </ol>
         </div>
       </div>

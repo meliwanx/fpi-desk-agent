@@ -17,6 +17,8 @@ def convert_skill(raw: PluginSkillRaw, plugin: PluginMeta) -> SkillInfo:
         description=raw.description,
         location=str(raw.path),
         content=raw.content,
+        scope="plugin",
+        source=f"plugin:{plugin.name}",
     )
 
 

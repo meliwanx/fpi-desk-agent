@@ -22,6 +22,35 @@ def _create_skill(base_dir: Path, name: str, desc: str) -> Path:
 
 
 class TestSkillRegistry:
+    def test_scan_codex_user_and_repo_agents_skills(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        home = tmp_path / "home"
+        monkeypatch.setattr(Path, "home", lambda: home)
+
+        _create_skill(home / ".agents" / "skills", "user-skill", "From user")
+
+        repo = tmp_path / "repo"
+        (repo / ".git").mkdir(parents=True)
+        project = repo / "apps" / "desk"
+        _create_skill(repo / ".agents" / "skills", "shared", "From repo root")
+        _create_skill(project / ".agents" / "skills", "shared", "From current project")
+
+        registry = SkillRegistry()
+        registry.scan(project_dir=str(project))
+
+        user_skill = registry.get("user-skill")
+        shared = registry.get("shared")
+
+        assert user_skill is not None
+        assert user_skill.scope == "user"
+        assert user_skill.source == str((home / ".agents" / "skills").resolve())
+
+        assert shared is not None
+        assert shared.description == "From current project"
+        assert shared.scope == "repo"
+        assert shared.source == str((project / ".agents" / "skills").resolve())
+
     def test_scan_project_skills(self, tmp_path: Path):
         skills_dir = tmp_path / ".openyak" / "skills"
         _create_skill(skills_dir, "my-skill", "A project skill.")
@@ -59,7 +88,9 @@ class TestSkillRegistry:
         registry = SkillRegistry(bundled_dir=bundled)
         registry.scan()
 
-        assert registry.get("bundled-skill") is not None
+        skill = registry.get("bundled-skill")
+        assert skill is not None
+        assert skill.scope == "system"
 
     def test_project_overrides_bundled(self, tmp_path: Path):
         bundled = tmp_path / "bundled"

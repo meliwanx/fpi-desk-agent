@@ -9,6 +9,7 @@ import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { Toaster } from "sonner";
 import { getBackendUrl, IS_DESKTOP } from "@/lib/constants";
 import { AppearanceInjector } from "@/components/layout/appearance-injector";
+import { CompanyLoginGate } from "@/components/auth/company-login-gate";
 import { getClientLanguagePreference } from "@/i18n/config";
 import { useTranslation } from "react-i18next";
 
@@ -71,9 +72,11 @@ export function AppProviders({ children }: { children: ReactNode }) {
       <ThemeProvider>
         <QueryProvider>
           <LanguageSync onReady={handleLanguageReady} />
-          <AppearanceInjector />
-          <StreamRegistryHydration />
-          <ErrorBoundary>{children}</ErrorBoundary>
+          <CompanyLoginGate>
+            <AppearanceInjector />
+            <StreamRegistryHydration />
+            <ErrorBoundary>{children}</ErrorBoundary>
+          </CompanyLoginGate>
           <Toaster
             position="top-right"
             richColors

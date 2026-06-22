@@ -1,0 +1,720 @@
+"""Async persistence for company users and login sessions."""
+
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    MetaData,
+    String,
+    Table,
+    Text,
+    and_,
+    insert,
+    select,
+    update,
+)
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+
+from app.company_auth.security import (
+    generate_session_token,
+    generate_temporary_password,
+    hash_password,
+    hash_token,
+    verify_password,
+)
+from app.config import internal_default_custom_endpoints_json
+from app.utils.id import generate_ulid
+
+
+@dataclass(frozen=True)
+class CompanyUser:
+    id: str
+    email: str
+    display_name: str
+    role: str
+    is_active: bool
+
+
+@dataclass(frozen=True)
+class CompanySession:
+    token: str
+    expires_at: datetime
+
+
+@dataclass(frozen=True)
+class CompanyModelEntry:
+    provider_id: str
+    id: str
+    name: str
+    protocol: str = "openai_compatible"
+    base_url: str = ""
+    api_key: str = ""
+
+
+@dataclass(frozen=True)
+class CompanyModelPolicy:
+    default_provider_id: str
+    default_model_id: str
+    models: list[CompanyModelEntry]
+
+
+@dataclass(frozen=True)
+class CompanyUpdatePolicy:
+    enabled: bool = False
+    latest_version: str = ""
+    min_supported_version: str = ""
+    force_update: bool = False
+    release_notes: str = ""
+    macos_download_url: str = ""
+    windows_download_url: str = ""
+    linux_download_url: str = ""
+    default_download_url: str = ""
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _normalise_model_protocol(value: str | None) -> str:
+    raw = (value or "openai_compatible").strip().lower().replace("-", "_")
+    aliases = {
+        "openai": "openai_compatible",
+        "openai_compat": "openai_compatible",
+        "openai_compatible": "openai_compatible",
+        "openai_compat_custom": "openai_compatible",
+        "anthropic": "anthropic",
+        "anthropic_native": "anthropic",
+        "claude": "anthropic",
+    }
+    return aliases.get(raw, raw)
+
+
+def _default_custom_endpoint() -> dict:
+    try:
+        endpoints = json.loads(internal_default_custom_endpoints_json())
+    except Exception:
+        return {}
+    if not isinstance(endpoints, list) or not endpoints:
+        return {}
+    first = endpoints[0]
+    return first if isinstance(first, dict) else {}
+
+
+def _default_model_policy() -> CompanyModelPolicy:
+    endpoint = _default_custom_endpoint()
+    models = endpoint.get("models") if isinstance(endpoint.get("models"), list) else []
+    first_model = models[0] if models and isinstance(models[0], dict) else {}
+    provider_id = str(endpoint.get("id") or "custom_onlyme")
+    model_id = str(first_model.get("id") or "gpt-5.5")
+    model_name = str(first_model.get("name") or "GPT-5.5")
+    return CompanyModelPolicy(
+        default_provider_id=provider_id,
+        default_model_id=model_id,
+        models=[
+            CompanyModelEntry(
+                provider_id=provider_id,
+                id=model_id,
+                name=model_name,
+                protocol="openai_compatible",
+                base_url=str(endpoint.get("base_url") or ""),
+                api_key=str(endpoint.get("api_key") or ""),
+            )
+        ],
+    )
+
+
+def _default_update_policy() -> CompanyUpdatePolicy:
+    return CompanyUpdatePolicy()
+
+
+class CompanyAuthStore:
+    """Company-auth table manager backed by a separate SQLAlchemy engine."""
+
+    def __init__(
+        self,
+        database_url: str,
+        *,
+        table_prefix: str = "fpi_desk",
+        session_days: int = 30,
+        echo: bool = False,
+    ) -> None:
+        self.database_url = database_url
+        self.table_prefix = table_prefix
+        self.session_days = session_days
+        self.metadata = MetaData()
+        self.users = Table(
+            f"{table_prefix}_users",
+            self.metadata,
+            Column("id", String(32), primary_key=True),
+            Column("email", String(255), nullable=False, unique=True, index=True),
+            Column("display_name", String(255), nullable=False, default=""),
+            Column("password_hash", String(512), nullable=False),
+            Column("role", String(50), nullable=False, default="user"),
+            Column("is_active", Boolean, nullable=False, default=True),
+            Column("time_created", DateTime(timezone=True), nullable=False),
+            Column("time_updated", DateTime(timezone=True), nullable=False),
+        )
+        self.sessions = Table(
+            f"{table_prefix}_sessions",
+            self.metadata,
+            Column("id", String(32), primary_key=True),
+            Column("user_id", String(32), ForeignKey(f"{table_prefix}_users.id"), nullable=False, index=True),
+            Column("token_hash", String(64), nullable=False, unique=True, index=True),
+            Column("expires_at", DateTime(timezone=True), nullable=False, index=True),
+            Column("revoked_at", DateTime(timezone=True), nullable=True),
+            Column("time_created", DateTime(timezone=True), nullable=False),
+            Column("last_seen_at", DateTime(timezone=True), nullable=False),
+        )
+        self.settings = Table(
+            f"{table_prefix}_settings",
+            self.metadata,
+            Column("key", String(100), primary_key=True),
+            Column("value", Text, nullable=False),
+            Column("time_updated", DateTime(timezone=True), nullable=False),
+        )
+        connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
+        if database_url.startswith("sqlite"):
+            db_path = database_url.split("///")[-1]
+            if db_path and db_path != ":memory:":
+                Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        self.engine: AsyncEngine = create_async_engine(
+            database_url,
+            echo=echo,
+            pool_pre_ping=False,
+            connect_args=connect_args,
+        )
+
+    async def startup(self) -> None:
+        async with self.engine.begin() as conn:
+            await conn.run_sync(self.metadata.create_all)
+
+    async def dispose(self) -> None:
+        await self.engine.dispose()
+
+    async def ensure_bootstrap_admin(
+        self,
+        *,
+        email: str,
+        display_name: str,
+        password: str,
+        bootstrap_file: Path,
+    ) -> bool:
+        normalized = email.strip().lower()
+        if not normalized:
+            raise ValueError("Bootstrap email cannot be empty")
+
+        async with self.engine.begin() as conn:
+            existing = await conn.execute(
+                select(self.users.c.id).where(self.users.c.email == normalized).limit(1)
+            )
+            if existing.scalar_one_or_none() is not None:
+                return False
+
+            effective_password = password or generate_temporary_password()
+            now = _utcnow()
+            await conn.execute(
+                insert(self.users).values(
+                    id=generate_ulid(),
+                    email=normalized,
+                    display_name=display_name.strip() or normalized,
+                    password_hash=hash_password(effective_password),
+                    role="admin",
+                    is_active=True,
+                    time_created=now,
+                    time_updated=now,
+                )
+            )
+
+        if not password:
+            self._write_bootstrap_file(
+                bootstrap_file,
+                {
+                    "email": normalized,
+                    "password": effective_password,
+                    "created_at": _utcnow().isoformat(),
+                },
+            )
+        return True
+
+    async def authenticate(self, email: str, password: str) -> CompanyUser | None:
+        normalized = email.strip().lower()
+        async with self.engine.connect() as conn:
+            result = await conn.execute(
+                select(
+                    self.users.c.id,
+                    self.users.c.email,
+                    self.users.c.display_name,
+                    self.users.c.password_hash,
+                    self.users.c.role,
+                    self.users.c.is_active,
+                )
+                .where(self.users.c.email == normalized)
+                .limit(1)
+            )
+            row = result.mappings().first()
+
+        if row is None or not row["is_active"]:
+            return None
+        if not verify_password(password, row["password_hash"]):
+            return None
+        return self._user_from_mapping(row)
+
+    async def list_users(self) -> list[CompanyUser]:
+        async with self.engine.connect() as conn:
+            result = await conn.execute(
+                select(
+                    self.users.c.id,
+                    self.users.c.email,
+                    self.users.c.display_name,
+                    self.users.c.role,
+                    self.users.c.is_active,
+                ).order_by(self.users.c.time_created.asc())
+            )
+            rows = result.mappings().all()
+        return [self._user_from_mapping(row) for row in rows]
+
+    async def create_user(
+        self,
+        *,
+        email: str,
+        display_name: str,
+        password: str,
+        role: str = "user",
+    ) -> CompanyUser:
+        normalized = email.strip().lower()
+        if not normalized:
+            raise ValueError("Email cannot be empty")
+        if not password:
+            raise ValueError("Password cannot be empty")
+        safe_role = role.strip().lower() if role.strip().lower() in {"admin", "user"} else "user"
+        now = _utcnow()
+        user_id = generate_ulid()
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                insert(self.users).values(
+                    id=user_id,
+                    email=normalized,
+                    display_name=display_name.strip() or normalized,
+                    password_hash=hash_password(password),
+                    role=safe_role,
+                    is_active=True,
+                    time_created=now,
+                    time_updated=now,
+                )
+            )
+            row = (
+                await conn.execute(
+                    select(
+                        self.users.c.id,
+                        self.users.c.email,
+                        self.users.c.display_name,
+                        self.users.c.role,
+                        self.users.c.is_active,
+                    ).where(self.users.c.id == user_id)
+                )
+            ).mappings().one()
+        return self._user_from_mapping(row)
+
+    async def update_user(
+        self,
+        user_id: str,
+        *,
+        display_name: str | None = None,
+        password: str | None = None,
+        role: str | None = None,
+        is_active: bool | None = None,
+    ) -> CompanyUser | None:
+        values: dict = {"time_updated": _utcnow()}
+        if display_name is not None:
+            values["display_name"] = display_name.strip()
+        if password is not None:
+            if not password:
+                raise ValueError("Password cannot be empty")
+            values["password_hash"] = hash_password(password)
+        if role is not None:
+            safe_role = role.strip().lower()
+            if safe_role not in {"admin", "user"}:
+                raise ValueError("Role must be admin or user")
+            values["role"] = safe_role
+        if is_active is not None:
+            values["is_active"] = bool(is_active)
+
+        async with self.engine.begin() as conn:
+            result = await conn.execute(
+                update(self.users)
+                .where(self.users.c.id == user_id)
+                .values(**values)
+            )
+            if (result.rowcount or 0) == 0:
+                return None
+            row = (
+                await conn.execute(
+                    select(
+                        self.users.c.id,
+                        self.users.c.email,
+                        self.users.c.display_name,
+                        self.users.c.role,
+                        self.users.c.is_active,
+                    ).where(self.users.c.id == user_id)
+                )
+            ).mappings().one()
+        return self._user_from_mapping(row)
+
+    async def create_session(self, user_id: str) -> CompanySession:
+        token = generate_session_token()
+        now = _utcnow()
+        expires_at = now + timedelta(days=self.session_days)
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                insert(self.sessions).values(
+                    id=generate_ulid(),
+                    user_id=user_id,
+                    token_hash=hash_token(token),
+                    expires_at=expires_at,
+                    revoked_at=None,
+                    time_created=now,
+                    last_seen_at=now,
+                )
+            )
+        return CompanySession(token=token, expires_at=expires_at)
+
+    async def get_session_user(self, token: str) -> CompanyUser | None:
+        if not token:
+            return None
+        now = _utcnow()
+        token_digest = hash_token(token)
+        async with self.engine.begin() as conn:
+            result = await conn.execute(
+                select(
+                    self.users.c.id,
+                    self.users.c.email,
+                    self.users.c.display_name,
+                    self.users.c.role,
+                    self.users.c.is_active,
+                )
+                .select_from(self.sessions.join(self.users, self.sessions.c.user_id == self.users.c.id))
+                .where(
+                    and_(
+                        self.sessions.c.token_hash == token_digest,
+                        self.sessions.c.revoked_at.is_(None),
+                        self.sessions.c.expires_at > now,
+                        self.users.c.is_active.is_(True),
+                    )
+                )
+                .limit(1)
+            )
+            row = result.mappings().first()
+            if row is None:
+                return None
+            await conn.execute(
+                update(self.sessions)
+                .where(self.sessions.c.token_hash == token_digest)
+                .values(last_seen_at=now)
+            )
+        return self._user_from_mapping(row)
+
+    async def revoke_session(self, token: str) -> bool:
+        if not token:
+            return False
+        async with self.engine.begin() as conn:
+            result = await conn.execute(
+                update(self.sessions)
+                .where(
+                    and_(
+                        self.sessions.c.token_hash == hash_token(token),
+                        self.sessions.c.revoked_at.is_(None),
+                    )
+                )
+                .values(revoked_at=_utcnow())
+            )
+            return (result.rowcount or 0) > 0
+
+    async def get_model_policy(self) -> CompanyModelPolicy:
+        async with self.engine.connect() as conn:
+            result = await conn.execute(
+                select(self.settings.c.value).where(self.settings.c.key == "model_policy").limit(1)
+            )
+            raw = result.scalar_one_or_none()
+        if not raw:
+            return _default_model_policy()
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            return _default_model_policy()
+        return self._policy_from_payload(payload)
+
+    async def update_model_policy(
+        self,
+        *,
+        default_provider_id: str,
+        default_model_id: str,
+        models: list[dict],
+    ) -> CompanyModelPolicy:
+        existing_policy = await self.get_model_policy()
+        policy = self._policy_from_payload(
+            {
+                "default_provider_id": default_provider_id,
+                "default_model_id": default_model_id,
+                "models": models,
+            },
+            strict=True,
+            existing=existing_policy,
+        )
+        payload = json.dumps(self._policy_to_payload(policy), ensure_ascii=False)
+        now = _utcnow()
+        async with self.engine.begin() as conn:
+            existing = await conn.execute(
+                select(self.settings.c.key).where(self.settings.c.key == "model_policy").limit(1)
+            )
+            if existing.scalar_one_or_none() is None:
+                await conn.execute(
+                    insert(self.settings).values(
+                        key="model_policy",
+                        value=payload,
+                        time_updated=now,
+                    )
+                )
+            else:
+                await conn.execute(
+                    update(self.settings)
+                    .where(self.settings.c.key == "model_policy")
+                    .values(value=payload, time_updated=now)
+                )
+        return policy
+
+    async def get_update_policy(self) -> CompanyUpdatePolicy:
+        async with self.engine.connect() as conn:
+            result = await conn.execute(
+                select(self.settings.c.value).where(self.settings.c.key == "update_policy").limit(1)
+            )
+            raw = result.scalar_one_or_none()
+        if not raw:
+            return _default_update_policy()
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            return _default_update_policy()
+        return self._update_policy_from_payload(payload)
+
+    async def update_update_policy(
+        self,
+        *,
+        enabled: bool,
+        latest_version: str,
+        min_supported_version: str,
+        force_update: bool,
+        release_notes: str,
+        macos_download_url: str,
+        windows_download_url: str,
+        linux_download_url: str,
+        default_download_url: str,
+    ) -> CompanyUpdatePolicy:
+        policy = self._update_policy_from_payload(
+            {
+                "enabled": enabled,
+                "latest_version": latest_version,
+                "min_supported_version": min_supported_version,
+                "force_update": force_update,
+                "release_notes": release_notes,
+                "macos_download_url": macos_download_url,
+                "windows_download_url": windows_download_url,
+                "linux_download_url": linux_download_url,
+                "default_download_url": default_download_url,
+            },
+            strict=True,
+        )
+        payload = json.dumps(self._update_policy_to_payload(policy), ensure_ascii=False)
+        now = _utcnow()
+        async with self.engine.begin() as conn:
+            existing = await conn.execute(
+                select(self.settings.c.key).where(self.settings.c.key == "update_policy").limit(1)
+            )
+            if existing.scalar_one_or_none() is None:
+                await conn.execute(
+                    insert(self.settings).values(
+                        key="update_policy",
+                        value=payload,
+                        time_updated=now,
+                    )
+                )
+            else:
+                await conn.execute(
+                    update(self.settings)
+                    .where(self.settings.c.key == "update_policy")
+                    .values(value=payload, time_updated=now)
+                )
+        return policy
+
+    @staticmethod
+    def _write_bootstrap_file(path: Path, payload: dict[str, str]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+
+    @staticmethod
+    def _user_from_mapping(row) -> CompanyUser:
+        return CompanyUser(
+            id=row["id"],
+            email=row["email"],
+            display_name=row["display_name"],
+            role=row["role"],
+            is_active=bool(row["is_active"]),
+        )
+
+    @staticmethod
+    def _policy_from_payload(
+        payload: dict,
+        *,
+        strict: bool = False,
+        existing: CompanyModelPolicy | None = None,
+    ) -> CompanyModelPolicy:
+        default = _default_model_policy()
+        if not isinstance(payload, dict):
+            if strict:
+                raise ValueError("Model policy must be an object")
+            return default
+
+        entries: list[CompanyModelEntry] = []
+        seen: set[tuple[str, str]] = set()
+        default_by_model = {(entry.provider_id, entry.id): entry for entry in default.models}
+        existing_models = list(existing.models) if existing is not None else []
+        existing_by_model = {(entry.provider_id, entry.id): entry for entry in existing_models}
+        existing_by_provider = {entry.provider_id: entry for entry in existing_models}
+        raw_models = payload.get("models")
+        if isinstance(raw_models, list):
+            for raw in raw_models:
+                if not isinstance(raw, dict):
+                    continue
+                provider_id = str(raw.get("provider_id") or "").strip()
+                model_id = str(raw.get("id") or raw.get("model_id") or "").strip()
+                if not provider_id or not model_id:
+                    continue
+                key = (provider_id, model_id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                fallback = existing_by_model.get(key) or default_by_model.get(key) or existing_by_provider.get(provider_id)
+                protocol = _normalise_model_protocol(
+                    str(raw.get("protocol") or (fallback.protocol if fallback else "openai_compatible"))
+                )
+                if strict and protocol not in {"openai_compatible", "anthropic"}:
+                    raise ValueError(f"Unsupported model protocol: {protocol}")
+                base_url = str(raw.get("base_url") or (fallback.base_url if fallback else "")).strip()
+                if protocol == "anthropic":
+                    base_url = ""
+                api_key = str(raw.get("api_key") or "").strip()
+                if not api_key and fallback is not None:
+                    api_key = fallback.api_key
+                if strict:
+                    if protocol == "openai_compatible" and not base_url:
+                        raise ValueError("Base URL is required for OpenAI-compatible models")
+                    if not api_key:
+                        if protocol == "anthropic":
+                            raise ValueError("API key is required for Anthropic models")
+                        raise ValueError("API key is required for OpenAI-compatible models")
+                entries.append(
+                    CompanyModelEntry(
+                        provider_id=provider_id,
+                        id=model_id,
+                        name=str(raw.get("name") or model_id).strip() or model_id,
+                        protocol=protocol,
+                        base_url=base_url,
+                        api_key=api_key,
+                    )
+                )
+        if not entries:
+            if strict:
+                raise ValueError("At least one model must be allowed")
+            entries = list(default.models)
+
+        if strict:
+            provider_configs: dict[str, tuple[str, str, str]] = {}
+            for entry in entries:
+                config = (entry.protocol, entry.base_url, entry.api_key)
+                existing_config = provider_configs.get(entry.provider_id)
+                if existing_config is not None and existing_config != config:
+                    raise ValueError("Models with the same provider_id must use the same protocol, Base URL and API key")
+                provider_configs[entry.provider_id] = config
+
+        default_provider_id = str(payload.get("default_provider_id") or default.default_provider_id).strip()
+        default_model_id = str(payload.get("default_model_id") or default.default_model_id).strip()
+        if (default_provider_id, default_model_id) not in {(entry.provider_id, entry.id) for entry in entries}:
+            if strict:
+                raise ValueError("Default model must be present in the allowed model list")
+            default_provider_id = entries[0].provider_id
+            default_model_id = entries[0].id
+
+        return CompanyModelPolicy(
+            default_provider_id=default_provider_id,
+            default_model_id=default_model_id,
+            models=entries,
+        )
+
+    @staticmethod
+    def _policy_to_payload(policy: CompanyModelPolicy) -> dict:
+        return {
+            "default_provider_id": policy.default_provider_id,
+            "default_model_id": policy.default_model_id,
+            "models": [
+                {
+                    "provider_id": model.provider_id,
+                    "id": model.id,
+                    "name": model.name,
+                    "protocol": model.protocol,
+                    "base_url": model.base_url,
+                    "api_key": model.api_key,
+                }
+                for model in policy.models
+            ],
+        }
+
+    @staticmethod
+    def _update_policy_from_payload(payload: dict, *, strict: bool = False) -> CompanyUpdatePolicy:
+        if not isinstance(payload, dict):
+            if strict:
+                raise ValueError("Update policy must be an object")
+            return _default_update_policy()
+
+        latest_version = str(payload.get("latest_version") or "").strip().lstrip("vV")
+        min_supported_version = str(payload.get("min_supported_version") or "").strip().lstrip("vV")
+        enabled = bool(payload.get("enabled", False))
+        if strict and enabled and not latest_version:
+            raise ValueError("Latest version is required when update policy is enabled")
+
+        return CompanyUpdatePolicy(
+            enabled=enabled,
+            latest_version=latest_version,
+            min_supported_version=min_supported_version,
+            force_update=bool(payload.get("force_update", False)),
+            release_notes=str(payload.get("release_notes") or "").strip(),
+            macos_download_url=str(payload.get("macos_download_url") or "").strip(),
+            windows_download_url=str(payload.get("windows_download_url") or "").strip(),
+            linux_download_url=str(payload.get("linux_download_url") or "").strip(),
+            default_download_url=str(payload.get("default_download_url") or "").strip(),
+        )
+
+    @staticmethod
+    def _update_policy_to_payload(policy: CompanyUpdatePolicy) -> dict:
+        return {
+            "enabled": policy.enabled,
+            "latest_version": policy.latest_version,
+            "min_supported_version": policy.min_supported_version,
+            "force_update": policy.force_update,
+            "release_notes": policy.release_notes,
+            "macos_download_url": policy.macos_download_url,
+            "windows_download_url": policy.windows_download_url,
+            "linux_download_url": policy.linux_download_url,
+            "default_download_url": policy.default_download_url,
+        }

@@ -335,7 +335,7 @@ export function RapidMLXPanel() {
                         ? "Wait for the current start to finish"
                         : removeMutation.isPending
                           ? "Wait for the model removal to finish"
-                          : "Uninstall Rapid-MLX from OpenYak"
+                          : "Uninstall Rapid-MLX from fpi-agent"
                   }
                 >
                   <PowerOff className="mr-1 h-3 w-3" />
@@ -679,10 +679,10 @@ export function RapidMLXPanel() {
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Uninstall Rapid-MLX from OpenYak?</DialogTitle>
+            <DialogTitle>Uninstall Rapid-MLX from fpi-agent?</DialogTitle>
             <DialogDescription>
               This stops the Rapid-MLX runtime, deletes every downloaded MLX
-              model from the HuggingFace cache, and clears OpenYak&apos;s
+              model from the HuggingFace cache, and clears fpi-agent&apos;s
               Rapid-MLX settings.
             </DialogDescription>
           </DialogHeader>
@@ -705,7 +705,7 @@ export function RapidMLXPanel() {
                   Remove the binary itself
                 </div>
                 <p className="mt-0.5 text-ui-3xs text-[var(--text-tertiary)]">
-                  OpenYak can&apos;t uninstall a brew/pip-managed binary for
+                  fpi-agent can&apos;t uninstall a brew/pip-managed binary for
                   you. Run one of these after this dialog if you want a full
                   removal:
                 </p>
@@ -772,7 +772,7 @@ export function RapidMLXPanel() {
                       ? ` (${(uninstallResult.freed_bytes / 1_073_741_824).toFixed(2)} GB freed)`
                       : ""}
                   </li>
-                  <li>OpenYak settings cleared</li>
+                  <li>fpi-agent settings cleared</li>
                 </ul>
               </div>
               <div className="rounded-md border border-[var(--border-default)] bg-[var(--surface-secondary)] px-3 py-2">

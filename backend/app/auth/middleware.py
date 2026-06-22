@@ -41,6 +41,11 @@ Currently allowed unauthenticated:
 * ``/m``, ``/m/*`` — mobile PWA HTML shells. The HTML itself is not
   sensitive; the JS it serves makes authenticated ``/api/*`` calls
   using the remote tunnel token.
+* ``/admin``, ``/admin/assets/*`` — enterprise admin HTML and static
+  bundle. Admin APIs still require company session + admin role.
+* ``/api/company-auth/*`` — company login/session bootstrap endpoints.
+* ``/api/admin/*`` — enterprise admin APIs. These are still protected by
+  the company-auth middleware and explicit admin-role checks.
 
 Everything else (``/api/*``, ``/v1/*`` OpenAI-compat, ``/shutdown``,
 root ``/``, anything a future router mounts) requires a valid token.
@@ -88,6 +93,7 @@ _PUBLIC_PATHS = frozenset({
     "/favicon.svg",    # PWA asset
     "/manifest.json",  # PWA asset
     "/m",              # Mobile PWA HTML shell (JS inside calls /api/* authed)
+    "/admin",          # Enterprise admin HTML shell (API calls use company auth)
 })
 
 # Prefix allowlist — anything under these prefixes is public. The Next.js
@@ -95,6 +101,9 @@ _PUBLIC_PATHS = frozenset({
 _PUBLIC_PREFIXES: tuple[str, ...] = (
     "/_next/",  # Next.js static bundle (JS/CSS/fonts)
     "/m/",      # Mobile PWA SPA fallback pages
+    "/admin/assets/",       # Enterprise admin static bundle
+    "/api/company-auth/",   # Company login/session bootstrap
+    "/api/admin/",          # Company session + admin role still enforced
 )
 
 _RATE_WINDOW = 60  # seconds — not user-tunable
@@ -180,14 +189,18 @@ class AuthMiddleware:
             await self.app(scope, receive, send)
             return
 
+        app_state = scope.get("app")
+        state = getattr(app_state, "state", None) if app_state else None
+        settings = getattr(state, "settings", None)
+        if settings is not None and not getattr(settings, "local_api_auth_enabled", True):
+            await self.app(scope, receive, send)
+            return
+
         path = scope.get("path", "")
         if not _requires_auth(path):
             await self.app(scope, receive, send)
             return
 
-        app_state = scope.get("app")
-        state = getattr(app_state, "state", None) if app_state else None
-        settings = getattr(state, "settings", None)
         session_token = getattr(state, "session_token", None)
 
         if settings is None or not session_token:

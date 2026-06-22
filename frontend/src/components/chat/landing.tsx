@@ -1,12 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import {
-  Mail, FileDiff, CalendarDays, Settings,
-  Receipt, FolderOpen, Trash2, Images, Table2,
-  MessagesSquare,
-} from "lucide-react";
+import { useEffect, useRef } from "react";
+import { motion } from "framer-motion";
+import { Settings } from "lucide-react";
 import Link from "next/link";
 import { useTranslation } from 'react-i18next';
 import { ChatForm } from "./chat-form";
@@ -19,20 +15,6 @@ import { useChatStore } from "@/stores/chat-store";
 import { useArtifactStore } from "@/stores/artifact-store";
 import { useActivityStore } from "@/stores/activity-store";
 import { useSettingsStore } from "@/stores/settings-store";
-import { cn } from "@/lib/utils";
-
-const FEATURED_STARTERS = [
-  { icon: Mail, textKey: "starterDraftFromNotes", promptKey: "starterDraftFromNotesPrompt" },
-  { icon: FileDiff, textKey: "starterCompareDocs", promptKey: "starterCompareDocsPrompt" },
-  { icon: CalendarDays, textKey: "starterWeeklyDigest", promptKey: "starterWeeklyDigestPrompt" },
-  { icon: Receipt, textKey: "starterOrganizeBills", promptKey: "starterOrganizeBillsPrompt" },
-  { icon: FolderOpen, textKey: "starterSummarizeFolder", promptKey: "starterSummarizeFolderPrompt" },
-  { icon: Trash2, textKey: "starterCleanupFiles", promptKey: "starterCleanupFilesPrompt" },
-  { icon: Images, textKey: "starterRenamePhotos", promptKey: "starterRenamePhotosPrompt" },
-  { icon: Table2, textKey: "starterExtractPdfTables", promptKey: "starterExtractPdfTablesPrompt" },
-];
-
-const STARTERS_PER_MOUNT = 3;
 
 interface LandingProps {
   directoryParam?: string | null;
@@ -46,40 +28,12 @@ function workspaceBasename(path: string | null | undefined): string | null {
   return last || null;
 }
 
-function pickRandomStarters(count: number): typeof FEATURED_STARTERS {
-  const pool = [...FEATURED_STARTERS];
-  for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
-  }
-  return pool.slice(0, count);
-}
-
 export function Landing({ directoryParam = null }: LandingProps) {
   const { t } = useTranslation('chat');
   const { sendMessage, sendTaskBatch, isGenerating, stopGeneration, pendingUserText, pendingAttachments, streamingParts, streamingText, streamingReasoning } = useChat();
   const globalWorkspace = useSettingsStore((s) => s.workspaceDirectory);
   const workspaceName = workspaceBasename(globalWorkspace);
   const activeProvider = useSettingsStore((s) => s.activeProvider);
-  // Start with a deterministic slice so SSR and first client render match,
-  // then shuffle post-mount. A new random pair is drawn every time Landing
-  // remounts (i.e. every new chat opened).
-  const [starters, setStarters] = useState(() =>
-    FEATURED_STARTERS.slice(0, STARTERS_PER_MOUNT),
-  );
-  // `round` increments every refresh so each starter re-mounts
-  // (keyed by round+index) and the flip animation replays — avoids the
-  // "same textKey sampled twice in a row = no animation" trap.
-  const [round, setRound] = useState(0);
-  useEffect(() => {
-    setStarters(pickRandomStarters(STARTERS_PER_MOUNT));
-    setRound((r) => r + 1);
-    const id = setInterval(() => {
-      setStarters(pickRandomStarters(STARTERS_PER_MOUNT));
-      setRound((r) => r + 1);
-    }, 10_000);
-    return () => clearInterval(id);
-  }, []);
 
   useEffect(() => {
     const chat = useChatStore.getState();
@@ -213,34 +167,6 @@ export function Landing({ directoryParam = null }: LandingProps) {
             onStop={stopGeneration}
             directory={globalWorkspace}
           />
-
-          {/* Suggested starters — mx-7 aligns suggestion icons with the folder picker icon inside the input container */}
-          <div className="-mt-3 mx-7" style={{ perspective: 1200 }}>
-            <AnimatePresence mode="popLayout" initial={false}>
-              {starters.map((starter, index) => (
-                <motion.button
-                  key={`${round}-${index}`}
-                  initial={{ opacity: 0, rotateX: -90 }}
-                  animate={{ opacity: 1, rotateX: 0 }}
-                  exit={{ opacity: 0, rotateX: 90 }}
-                  transition={{
-                    duration: 0.55,
-                    delay: index * 0.12,
-                    ease: [0.16, 1, 0.3, 1],
-                  }}
-                  onClick={() => useArtifactStore.getState().requestFix(t(starter.promptKey))}
-                  disabled={isGenerating}
-                  className={cn(
-                    "group flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-secondary)] disabled:opacity-50 disabled:cursor-not-allowed",
-                    index > 0 && "border-t border-[var(--border-default)]/40",
-                  )}
-                >
-                  <MessagesSquare className="h-[18px] w-[18px] shrink-0 text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)]" strokeWidth={1.75} />
-                  <span className="truncate">{t(starter.textKey)}</span>
-                </motion.button>
-              ))}
-            </AnimatePresence>
-          </div>
         </div>
       </div>
     </div>

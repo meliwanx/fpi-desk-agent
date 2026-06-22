@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Archive, EllipsisVertical, Loader2, MessageCircle, Pin, PinOff } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, parseApiDate } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { API, queryKeys } from "@/lib/constants";
 import { getChatRoute } from "@/lib/routes";
@@ -71,7 +71,6 @@ export const SessionItem = memo(function SessionItem({
   const inputRef = useRef<HTMLInputElement>(null);
   const itemRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLParagraphElement>(null);
-  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const rawTitle = session.title || t('newConversation');
   // Clean up ugly channel titles: "Channel: whatsapp:+1234567890" → "+1234567890"
@@ -149,33 +148,22 @@ export const SessionItem = memo(function SessionItem({
     [handleSubmitRename, handleCancelRename],
   );
 
-  // Defer single-click navigation briefly so a double-click (which opens
-  // rename) doesn't also navigate into the session first. A double-click
-  // cancels the pending navigation. Keyboard Enter stays immediate.
-  const handleRowClick = useCallback(() => {
+  const sessionRoute = getChatRoute(session.id);
+
+  const navigateToSession = useCallback(() => {
     if (isEditing) return;
-    if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
-    clickTimerRef.current = setTimeout(() => {
-      clickTimerRef.current = null;
-      router.push(getChatRoute(session.id));
-    }, 250);
-  }, [isEditing, router, session.id]);
+    router.push(sessionRoute);
 
-  const handleRowDoubleClick = useCallback(() => {
-    if (clickTimerRef.current) {
-      clearTimeout(clickTimerRef.current);
-      clickTimerRef.current = null;
-    }
-    if (!isEditing) onEditStart?.(session.id);
-  }, [isEditing, onEditStart, session.id]);
-
-  // Cancel a pending navigation if the row unmounts mid-debounce.
-  useEffect(
-    () => () => {
-      if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
-    },
-    [],
-  );
+    // Tauri's static app route occasionally misses a soft navigation after
+    // virtualized-row focus changes. Fall back to a normal location change so
+    // clicking a conversation always opens it.
+    window.setTimeout(() => {
+      const currentRoute = `${window.location.pathname}${window.location.search}`;
+      if (currentRoute !== sessionRoute) {
+        window.location.assign(sessionRoute);
+      }
+    }, 120);
+  }, [isEditing, router, sessionRoute]);
 
   const handleOpenDirectory = useCallback(async () => {
     if (!hasDirectory || !session.directory) return;
@@ -284,9 +272,13 @@ export const SessionItem = memo(function SessionItem({
           role="option"
           aria-selected={isActive}
           tabIndex={isFocused ? 0 : -1}
-          onClick={handleRowClick}
-          onDoubleClick={handleRowDoubleClick}
-          onKeyDown={(e) => !isEditing && e.key === "Enter" && router.push(getChatRoute(session.id))}
+          onClick={navigateToSession}
+          onKeyDown={(e) => {
+            if (!isEditing && (e.key === "Enter" || e.key === " ")) {
+              e.preventDefault();
+              navigateToSession();
+            }
+          }}
           onMouseEnter={() => {
             prefetch(() => {
               const isCached = queryClient.getQueryData(queryKeys.messages.list(session.id));
@@ -446,7 +438,7 @@ export const SessionItem = memo(function SessionItem({
 
 function getRelativeTimeLabel(date: string) {
   const now = new Date();
-  const d = new Date(date);
+  const d = parseApiDate(date);
   const diff = now.getTime() - d.getTime();
   const seconds = Math.floor(diff / 1000);
   const minutes = Math.floor(seconds / 60);

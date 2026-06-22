@@ -18,6 +18,7 @@ from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 from typing import Any
 
+from app.sandbox.manager import SandboxUnavailable, get_sandbox_manager
 from app.tool.base import ToolDefinition, ToolResult
 from app.tool.context import ToolContext
 
@@ -60,9 +61,10 @@ class CodeExecuteTool(ToolDefinition):
     @property
     def description(self) -> str:
         return (
-            "Execute Python code. "
-            "The code runs with the backend's Python environment so pandas, "
-            "numpy, matplotlib and other installed packages are available. "
+            "Execute Python code on this computer. "
+            "When the local sandbox is available, code runs inside that sandbox; "
+            "otherwise auto mode falls back to the backend's Python environment "
+            "with pandas, numpy, matplotlib and other bundled packages. "
             "IMPORTANT: Each call runs in a fresh, isolated namespace — no state "
             "(variables, imports, data) persists between calls. You MUST include "
             "all imports and data loading in every call. For multi-step analysis, "
@@ -94,18 +96,51 @@ class CodeExecuteTool(ToolDefinition):
         timeout = min(args.get("timeout", DEFAULT_TIMEOUT), MAX_TIMEOUT)
         before_snapshot = _snapshot_workspace(ctx.workspace)
 
-        try:
-            output, exit_code = await asyncio.wait_for(
-                asyncio.to_thread(_run_code, code),
-                timeout=timeout,
-            )
-        except asyncio.TimeoutError:
-            return ToolResult(
-                error=f"Execution timed out after {timeout}s",
-                metadata={"timeout": True},
-            )
-        except Exception as exc:
-            return ToolResult(error=f"Execution failed: {exc}")
+        manager = get_sandbox_manager()
+        sandbox_metadata: dict[str, Any] = {"used": False}
+        if manager.is_enabled():
+            try:
+                sandbox_result = await manager.run_python(
+                    session_id=ctx.session_id,
+                    code=code,
+                    cwd=str(Path(ctx.workspace).resolve() if ctx.workspace else Path.cwd().resolve()),
+                    workspace=ctx.workspace,
+                    timeout=timeout,
+                )
+                output = sandbox_result.output
+                exit_code = sandbox_result.exit_code
+                sandbox_metadata = {"used": True, **sandbox_result.metadata}
+            except SandboxUnavailable as exc:
+                if manager.is_required():
+                    return ToolResult(
+                        error=f"Sandbox unavailable: {exc}",
+                        metadata={"sandbox": {"used": False, "required": True, "error": str(exc)}},
+                    )
+                try:
+                    output, exit_code = await asyncio.wait_for(
+                        asyncio.to_thread(_run_code, code),
+                        timeout=timeout,
+                    )
+                except asyncio.TimeoutError:
+                    return ToolResult(
+                        error=f"Execution timed out after {timeout}s",
+                        metadata={"timeout": True, "sandbox": {"used": False, "error": str(exc)}},
+                    )
+                except Exception as inner_exc:
+                    return ToolResult(error=f"Execution failed: {inner_exc}")
+        else:
+            try:
+                output, exit_code = await asyncio.wait_for(
+                    asyncio.to_thread(_run_code, code),
+                    timeout=timeout,
+                )
+            except asyncio.TimeoutError:
+                return ToolResult(
+                    error=f"Execution timed out after {timeout}s",
+                    metadata={"timeout": True, "sandbox": sandbox_metadata},
+                )
+            except Exception as exc:
+                return ToolResult(error=f"Execution failed: {exc}")
 
         title = f"python: {code[:60]}..." if len(code) > 60 else f"python: {code}"
         after_snapshot = _snapshot_workspace(ctx.workspace)
@@ -122,6 +157,7 @@ class CodeExecuteTool(ToolDefinition):
                 "exit_code": exit_code,
                 "language": "python",
                 "written_files": written_files,
+                "sandbox": sandbox_metadata,
             },
             error=f"Code execution failed with exit code {exit_code}" if exit_code != 0 else None,
         )

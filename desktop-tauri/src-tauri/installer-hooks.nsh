@@ -1,6 +1,6 @@
-; Custom NSIS installer hooks for OpenYak.
+; Custom NSIS installer hooks for fpi-agent.
 ;
-; OpenYak runs as two processes: the Tauri UI (OpenYak.exe) and a PyInstaller
+; fpi-agent runs as two processes: the Tauri UI (fpi-agent.exe) and a PyInstaller
 ; sidecar (openyak-backend.exe). The backend keeps several .pyd files loaded
 ; (e.g. PIL's _imaging.pyd, mypyc-compiled modules), which locks them on disk.
 ;
@@ -13,7 +13,7 @@
 ; locked files cleanly.
 
 !macro NSIS_HOOK_PREINSTALL
-  DetailPrint "Terminating OpenYak backend process if running..."
+  DetailPrint "Terminating fpi-agent backend process if running..."
 
   ; Kill the backend sidecar. Try current-user first (matches our default
   ; per-user install), then fall back to the machine-wide variant so this
@@ -35,10 +35,10 @@
   ; Also make sure the main binary is gone. Tauri's CheckIfAppIsRunning
   ; handles this later too, but doing it here means we don't race the
   ; backend respawning a UI process between the two steps.
-  nsis_tauri_utils::FindProcessCurrentUser "OpenYak.exe"
+  nsis_tauri_utils::FindProcessCurrentUser "fpi-agent.exe"
   Pop $R0
   ${If} $R0 = 0
-    nsis_tauri_utils::KillProcessCurrentUser "OpenYak.exe"
+    nsis_tauri_utils::KillProcessCurrentUser "fpi-agent.exe"
     Pop $R0
   ${EndIf}
 

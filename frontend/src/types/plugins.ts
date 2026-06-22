@@ -23,8 +23,15 @@ export interface PluginsStatusResponse {
 export interface SkillInfo {
   name: string;
   description: string;
+  display_name?: string | null;
+  short_description?: string | null;
   location: string;
   source: "bundled" | "plugin" | "project";
+  scope?: "system" | "admin" | "user" | "repo" | "project" | "external" | "plugin" | string | null;
+  source_path?: string | null;
+  allow_implicit_invocation?: boolean;
+  tool_dependencies?: Array<Record<string, unknown>>;
+  metadata_path?: string | null;
   enabled: boolean;
 }
 

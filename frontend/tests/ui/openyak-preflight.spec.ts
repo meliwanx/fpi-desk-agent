@@ -190,6 +190,29 @@ async function installTauriDragDropMock(page: Page) {
 }
 
 test.describe("OpenYak UI preflight", () => {
+  test("company login path: uses 聚光 logo and starts in light theme", async ({
+    page,
+  }) => {
+    await seedOpenYakStorage(page, {
+      force: true,
+      hasCompanySession: false,
+    });
+
+    await page.goto("/c/new");
+
+    await expect(
+      page.getByRole("img", { name: "聚光科技" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "聚光办公助理" }),
+    ).toBeVisible();
+    await expect
+      .poll(() =>
+        page.evaluate(() => document.documentElement.classList.contains("dark")),
+      )
+      .toBe(false);
+  });
+
   test("desktop chat path: landing, mode switch, attachments, mentions, send, workspace panel", async ({
     page,
   }) => {
@@ -684,10 +707,10 @@ test.describe("OpenYak UI preflight", () => {
     await expect(
       page.getByRole("heading", { name: "Providers" }),
     ).toBeVisible();
+    await expect(page.getByText("OnlyMe GPT-5.5")).toBeVisible();
     await expect(
-      page.getByRole("button", { name: /Own API Key/i }),
+      page.getByText("https://sub2api.onlymeok.com/v1"),
     ).toBeVisible();
-    await expect(page.getByText("OpenRouter")).toBeVisible();
 
     await page.getByRole("button", { name: "Permissions" }).click();
     await expect(
@@ -771,7 +794,7 @@ test.describe("OpenYak UI preflight", () => {
     await expect(page.getByText("No remembered permissions")).toBeVisible();
   });
 
-  test("settings providers path: all provider modes can be configured from GUI controls", async ({
+  test("settings providers path: provider configuration is company managed", async ({
     page,
   }) => {
     await page.goto("/settings?tab=providers");
@@ -779,41 +802,22 @@ test.describe("OpenYak UI preflight", () => {
       page.getByRole("heading", { name: "Providers" }),
     ).toBeVisible();
 
-    await page.getByRole("button", { name: /Own API Key/i }).click();
-    await page.getByPlaceholder("sk-or-...").fill("sk-or-preflight");
-    await page.getByRole("button", { name: "Save" }).first().click();
-    await expect(page.getByText("sk-or-...mock")).toBeVisible();
-
-    await page.getByRole("button", { name: /ChatGPT Subscription/i }).click();
-    await expect(page.getByText("chatgpt@openyak.test")).toBeVisible();
+    await expect(page.getByText("OnlyMe GPT-5.5")).toBeVisible();
     await expect(
-      page.getByRole("button", { name: /Disconnect/i }),
+      page.getByText("https://sub2api.onlymeok.com/v1"),
     ).toBeVisible();
-
-    await page.getByRole("button", { name: /Rapid-MLX/i }).click();
     await expect(
-      page.getByText("brew install raullenchai/rapid-mlx/rapid-mlx"),
-    ).toBeVisible();
-
-    await page.getByRole("button", { name: /Custom Endpoint/i }).click();
-    await expect(page.getByRole("button", { name: /Local API/i })).toBeHidden();
-    await expect(page.getByText("Local endpoint")).toBeVisible();
+      page.getByRole("button", { name: /Custom Endpoint/i }),
+    ).toHaveCount(0);
     await expect(
-      page.getByText("http://localhost:11434/v1", { exact: true }),
-    ).toBeVisible();
-    await expect(page.getByText("Acme Local Proxy")).toBeVisible();
-    await page
-      .getByPlaceholder("Endpoint Name (e.g. My Local Model)")
-      .fill("Preflight Endpoint");
-    await page
-      .getByPlaceholder(
-        "http://localhost:1234/v1 or https://api.example.com/v1",
-      )
-      .fill("http://localhost:1234/v1");
-    await page
-      .getByPlaceholder("API Key (Leave blank if not required)")
-      .fill("sk-custom-preflight");
-    await page.getByRole("button", { name: "Add Endpoint" }).click();
+      page.getByRole("button", { name: /Own API Key/i }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: /^Save$/i }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: /Add Endpoint/i }),
+    ).toHaveCount(0);
   });
 
   test("automations path: create dialog, required fields, templates", async ({

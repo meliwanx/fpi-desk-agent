@@ -11,7 +11,9 @@ from app.skill.model import SkillInfo, parse_skill_file
 logger = logging.getLogger(__name__)
 
 # Directories under a project root (or home dir) that may contain skills.
-_EXTERNAL_SKILL_DIRS = [".claude", ".agents"]
+_ADMIN_SKILL_DIR = Path("/etc/codex/skills")
+_CODEX_SKILL_DIR = ".agents"
+_EXTERNAL_SKILL_DIRS = [".claude"]
 _OPENYAK_SKILL_DIR = ".openyak"
 
 
@@ -20,9 +22,11 @@ class SkillRegistry:
 
     Discovery order (lowest → highest priority):
       1. Bundled skills shipped with the application
-      2. Global user skills  (~/.openyak/skills/)
-      3. External skills     ({project}/.claude/skills/, {project}/.agents/skills/)
-      4. Project skills      ({project}/.openyak/skills/)
+      2. Admin skills        (/etc/codex/skills/)
+      3. Global user skills  (~/.agents/skills/, ~/.openyak/skills/)
+      4. Repo skills         ({repo..project}/.agents/skills/)
+      5. External skills     ({project}/.claude/skills/)
+      6. Project skills      ({project}/.openyak/skills/)
 
     Later-discovered skills with the same name override earlier ones.
     """
@@ -51,42 +55,64 @@ class SkillRegistry:
             project_dir: The project working directory. If provided, project-
                          level and external skill directories are searched.
         """
-        search_dirs: list[Path] = []
+        search_dirs: list[tuple[Path, str]] = []
 
         # 1. Bundled skills (lowest priority)
         if self._bundled_dir and self._bundled_dir.is_dir():
-            search_dirs.append(self._bundled_dir)
+            search_dirs.append((self._bundled_dir, "system"))
 
-        # 2. Global user skills
+        # 2. Admin skills (optional Codex-compatible install location)
+        if _ADMIN_SKILL_DIR.is_dir():
+            search_dirs.append((_ADMIN_SKILL_DIR, "admin"))
+
+        # 3. Global user skills
         home = Path.home()
-        global_dir = home / _OPENYAK_SKILL_DIR / "skills"
-        if global_dir.is_dir():
-            search_dirs.append(global_dir)
+        for global_dir in (
+            home / _CODEX_SKILL_DIR / "skills",
+            home / _OPENYAK_SKILL_DIR / "skills",
+        ):
+            if global_dir.is_dir():
+                search_dirs.append((global_dir, "user"))
 
-        if project_dir:
-            project = Path(project_dir).resolve()
+        effective_project_dir = project_dir or self._project_dir
+        if effective_project_dir:
+            project = Path(effective_project_dir).resolve()
 
-            # 3. External directories (.claude/skills, .agents/skills)
+            # 4. Codex-style repo/current .agents/skills, repo root first
+            for repo_dir in _repo_skill_dirs(project):
+                if repo_dir.is_dir():
+                    search_dirs.append((repo_dir, "repo"))
+
+            # 5. External compatibility directories (.claude/skills)
             for ext in _EXTERNAL_SKILL_DIRS:
                 ext_dir = project / ext / "skills"
                 if ext_dir.is_dir():
-                    search_dirs.append(ext_dir)
+                    search_dirs.append((ext_dir, "external"))
 
-            # 4. Project-level .openyak/skills (highest priority)
+            # 6. Project-level .openyak/skills (highest priority)
             proj_dir = project / _OPENYAK_SKILL_DIR / "skills"
             if proj_dir.is_dir():
-                search_dirs.append(proj_dir)
+                search_dirs.append((proj_dir, "project"))
 
         # Scan each directory for **/SKILL.md
-        for base in search_dirs:
-            self._scan_directory(base)
+        seen: set[str] = set()
+        for base, scope in search_dirs:
+            key = str(base.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+            self._scan_directory(base, scope=scope)
 
         logger.info("Discovered %d skill(s)", len(self._skills))
 
-    def _scan_directory(self, directory: Path) -> None:
+    def _scan_directory(self, directory: Path, *, scope: str) -> None:
         """Recursively find and parse SKILL.md files under *directory*."""
         for skill_path in sorted(directory.rglob("SKILL.md")):
-            skill = parse_skill_file(skill_path)
+            skill = parse_skill_file(
+                skill_path,
+                scope=scope,
+                source=str(directory.resolve()),
+            )
             if skill is None:
                 continue
 
@@ -198,3 +224,27 @@ class SkillRegistry:
             )
         except OSError as e:
             logger.warning("Cannot persist disabled skills: %s", e)
+
+
+def _repo_skill_dirs(project: Path) -> list[Path]:
+    """Return Codex-compatible .agents/skills dirs from repo root to cwd."""
+    root = _repo_root(project)
+    chain: list[Path] = []
+    current = project
+    while True:
+        chain.append(current)
+        if current == root or current.parent == current:
+            break
+        current = current.parent
+
+    return [p / _CODEX_SKILL_DIR / "skills" for p in reversed(chain)]
+
+
+def _repo_root(project: Path) -> Path:
+    current = project
+    while True:
+        if (current / ".git").exists():
+            return current
+        if current.parent == current:
+            return project
+        current = current.parent

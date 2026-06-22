@@ -276,6 +276,14 @@ export const API = {
     OLLAMA: "/api/config/ollama",
     LOCAL_PROVIDER: "/api/config/local",
   },
+  COMPANY_AUTH: {
+    LOGIN: "/api/company-auth/login",
+    SESSION: "/api/company-auth/session",
+    LOGOUT: "/api/company-auth/logout",
+  },
+  APP: {
+    UPDATE_POLICY: "/api/app/update-policy",
+  },
   FTS: {
     INDEX: (workspace: string, sessionId?: string) =>
       `/api/fts/index/${workspace.replace(/\\/g, "/")}${sessionId ? `?session_id=${sessionId}` : ""}`,
@@ -307,6 +315,7 @@ export const API = {
   },
   AGENTS: "/api/agents",
   MODELS: "/api/models",
+  MODEL_POLICY: "/api/models/policy",
   TOOLS: "/api/tools",
   SKILLS: {
     LIST: "/api/skills",

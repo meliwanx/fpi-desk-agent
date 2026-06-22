@@ -12,8 +12,11 @@ from app.session.manager import (
     get_messages,
     get_session,
     list_sessions,
+    update_session,
     update_session_title,
 )
+from app.errors import Conflict
+from app.schemas.session import SessionUpdate
 
 
 class TestSessionManager:
@@ -48,6 +51,20 @@ class TestSessionManager:
         await update_session_title(db, session.id, "New")
         updated = await get_session(db, session.id)
         assert updated.title == "New"
+
+    @pytest.mark.asyncio
+    async def test_update_session_rejects_directory_change(self, db: AsyncSession):
+        session = await create_session(db, title="Workspace", directory="/tmp/work-a")
+
+        with pytest.raises(Conflict):
+            await update_session(
+                db,
+                session.id,
+                SessionUpdate(directory="/tmp/work-b"),
+            )
+
+        updated = await get_session(db, session.id)
+        assert updated.directory == "/tmp/work-a"
 
 
 class TestMessageManager:

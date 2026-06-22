@@ -30,6 +30,17 @@ def event_loop():
     loop.close()
 
 
+@pytest.fixture(autouse=True)
+def disable_sandbox_by_default(monkeypatch):
+    """Unit tests exercise host tools unless a test explicitly enables sandboxing."""
+    from app.config import get_settings
+
+    monkeypatch.setenv("OPENYAK_SANDBOX_MODE", "off")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
@@ -141,6 +152,7 @@ async def app_client(db_engine, session_factory):
     settings = Settings(
         openrouter_api_key="test-key",
         database_url="sqlite+aiosqlite://",
+        company_auth_enabled=False,
     )
     app = create_app(settings)
 

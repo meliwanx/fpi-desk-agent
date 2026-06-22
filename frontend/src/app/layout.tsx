@@ -20,7 +20,7 @@ const notoSansSC = Noto_Sans_SC({
 });
 
 export const metadata: Metadata = {
-  title: "OpenYak",
+  title: "fpi-agent",
   description: "Local-first AI agent for desktop files, tools, and long-running work",
   icons: {
     icon: "/favicon.svg",

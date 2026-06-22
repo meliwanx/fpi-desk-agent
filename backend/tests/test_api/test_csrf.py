@@ -156,6 +156,24 @@ class TestOriginAllowlist:
             assert r.status_code == 200, (origin, r.text)
 
     @pytest.mark.asyncio
+    async def test_same_host_public_admin_origin_allowed(self):
+        """The deployed /admin page is served from the same public host as
+        the API, so its same-origin POSTs must not require an extra env
+        allowlist entry."""
+        app = _make_app()
+        async with await _client(app) as c:
+            r = await c.post(
+                "/api/echo",
+                json={"x": 1},
+                headers={
+                    "host": "120.26.208.161:5201",
+                    "origin": "http://120.26.208.161:5201",
+                    "referer": "http://120.26.208.161:5201/admin",
+                },
+            )
+        assert r.status_code == 200, r.text
+
+    @pytest.mark.asyncio
     async def test_referer_fallback(self):
         """If Origin is absent but Referer is present, check Referer's
         origin — some older browsers and <form> submissions rely on this."""

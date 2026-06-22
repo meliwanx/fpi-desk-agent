@@ -5,8 +5,8 @@
   "license": "Apache-2.0",
   "scripts": {
     "dev": "next dev --turbopack",
-    "postinstall": "cp node_modules/pdfjs-dist/build/pdf.worker.min.mjs public/pdf.worker.min.mjs 2>/dev/null || true; rm -rf public/cmaps public/standard_fonts 2>/dev/null; cp -R node_modules/pdfjs-dist/cmaps public/cmaps 2>/dev/null || true; cp -R node_modules/pdfjs-dist/standard_fonts public/standard_fonts 2>/dev/null || true",
-    "build": "cp node_modules/pdfjs-dist/build/pdf.worker.min.mjs public/pdf.worker.min.mjs 2>/dev/null || true; rm -rf public/cmaps public/standard_fonts 2>/dev/null; cp -R node_modules/pdfjs-dist/cmaps public/cmaps 2>/dev/null || true; cp -R node_modules/pdfjs-dist/standard_fonts public/standard_fonts 2>/dev/null || true; next build",
+    "postinstall": "node scripts/prepare-pdf-assets.mjs",
+    "build": "node scripts/prepare-pdf-assets.mjs && next build",
     "start": "next start",
     "lint": "eslint .",
     "test:ui": "node scripts/playwright-env.mjs test",

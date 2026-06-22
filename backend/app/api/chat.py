@@ -23,6 +23,7 @@ from app.dependencies import (
     StreamManagerDep,
     ToolRegistryDep,
 )
+from app.audit.client import AuditContext, reset_audit_context, set_audit_context
 from app.models.todo import Todo
 from app.models.message import Message
 from app.schemas.chat import (
@@ -59,6 +60,22 @@ MODEL_DOES_NOT_SUPPORT_IMAGES = "MODEL_DOES_NOT_SUPPORT_IMAGES"
 _HEARTBEAT_INTERVAL = 15.0
 
 
+def _audit_context_from_request(request: Request) -> AuditContext | None:
+    token = request.headers.get("X-FPI-Session", "").strip()
+    if not token:
+        return None
+    return AuditContext(company_session_token=token)
+
+
+def _create_task_with_audit_context(coro, *, name: str, request: Request) -> asyncio.Task:
+    context = _audit_context_from_request(request)
+    context_token = set_audit_context(context)
+    try:
+        return asyncio.create_task(coro, name=name)
+    finally:
+        reset_audit_context(context_token)
+
+
 def _unsupported_images_error() -> HTTPException:
     return HTTPException(
         status_code=400,
@@ -90,6 +107,32 @@ def _ensure_image_attachments_supported(
     _provider, model_info = resolved
     if not model_info.capabilities.vision:
         raise _unsupported_images_error()
+
+
+def _has_workspace(value: str | None) -> bool:
+    return bool(value and value.strip() and value.strip() != ".")
+
+
+def _validate_prompt_workspace(
+    body: PromptRequest | EditAndResendRequest | TaskBatchRequest,
+    *,
+    existing_directory: str | None,
+    existing_session: bool,
+) -> None:
+    if existing_session:
+        if _has_workspace(existing_directory):
+            return
+        raise HTTPException(
+            status_code=400,
+            detail="当前对话没有绑定工作区，请新建对话并选择一个文件夹。",
+        )
+
+    if _has_workspace(getattr(body, "workspace", None)):
+        return
+    raise HTTPException(
+        status_code=400,
+        detail="请先选择一个文件夹作为工作区，再开始对话。",
+    )
 
 
 def _on_task_done(task: asyncio.Task[None], *, job: GenerationJob) -> None:
@@ -171,6 +214,7 @@ async def _get_session_context_usage_ratio(
 
 @router.post("/chat/prompt", response_model=PromptResponse)
 async def start_prompt(
+    request: Request,
     body: PromptRequest,
     sm: StreamManagerDep,
     session_factory: SessionFactoryDep,
@@ -190,6 +234,18 @@ async def start_prompt(
     session_id = body.session_id or generate_ulid()
     stream_id = generate_ulid()
 
+    existing_directory: str | None = None
+    if body.session_id:
+        async with session_factory() as db:
+            async with db.begin():
+                existing = await get_session(db, body.session_id)
+                existing_directory = existing.directory if existing else None
+    _validate_prompt_workspace(
+        body,
+        existing_directory=existing_directory,
+        existing_session=bool(body.session_id),
+    )
+
     job = sm.create_job(stream_id=stream_id, session_id=session_id)
     # Browser chat jobs are interactive as soon as they are created. The SSE
     # stream may connect a moment later, but ask-first permissions must never
@@ -206,9 +262,10 @@ async def start_prompt(
         tool_registry=tool_registry,
         index_manager=index_manager,
     )
-    task = asyncio.create_task(
+    task = _create_task_with_audit_context(
         _run_with_semaphore(sm, job, coro),
         name=f"gen-{stream_id}",
+        request=request,
     )
     task.add_done_callback(functools.partial(_on_task_done, job=job))
     job.task = task  # prevent GC from silently cancelling the task
@@ -218,6 +275,7 @@ async def start_prompt(
 
 @router.post("/chat/task-batch", response_model=PromptResponse)
 async def start_task_batch(
+    request: Request,
     body: TaskBatchRequest,
     sm: StreamManagerDep,
     session_factory: SessionFactoryDep,
@@ -229,6 +287,18 @@ async def start_task_batch(
     """Start an explicit sequential or parallel multi-agent task batch."""
     session_id = body.session_id or generate_ulid()
     stream_id = generate_ulid()
+
+    existing_directory: str | None = None
+    if body.session_id:
+        async with session_factory() as db:
+            async with db.begin():
+                existing = await get_session(db, body.session_id)
+                existing_directory = existing.directory if existing else None
+    _validate_prompt_workspace(
+        body,
+        existing_directory=existing_directory,
+        existing_session=bool(body.session_id),
+    )
 
     job = sm.create_job(stream_id=stream_id, session_id=session_id)
     job.interactive = True
@@ -242,9 +312,10 @@ async def start_task_batch(
         tool_registry=tool_registry,
         index_manager=index_manager,
     )
-    task = asyncio.create_task(
+    task = _create_task_with_audit_context(
         _run_with_semaphore(sm, job, coro),
         name=f"task-batch-{stream_id}",
+        request=request,
     )
     task.add_done_callback(functools.partial(_on_task_done, job=job))
     job.task = task
@@ -254,6 +325,7 @@ async def start_task_batch(
 
 @router.post("/chat/compact", response_model=PromptResponse)
 async def start_compaction(
+    request: Request,
     body: CompactRequest,
     sm: StreamManagerDep,
     session_factory: SessionFactoryDep,
@@ -328,9 +400,10 @@ async def start_compaction(
             )
             job.complete()
 
-    task = asyncio.create_task(
+    task = _create_task_with_audit_context(
         _run_with_semaphore(sm, job, _run_compaction_job()),
         name=f"compact-{stream_id}",
+        request=request,
     )
     task.add_done_callback(functools.partial(_on_task_done, job=job))
     job.task = task
@@ -340,6 +413,7 @@ async def start_compaction(
 
 @router.post("/chat/edit", response_model=PromptResponse)
 async def edit_and_resend(
+    request: Request,
     body: EditAndResendRequest,
     sm: StreamManagerDep,
     session_factory: SessionFactoryDep,
@@ -356,18 +430,32 @@ async def edit_and_resend(
         provider_id=body.provider_id,
     )
 
+    async with session_factory() as db:
+        async with db.begin():
+            existing = await get_session(db, body.session_id)
+            existing_directory = existing.directory if existing else None
+    _validate_prompt_workspace(
+        body,
+        existing_directory=existing_directory,
+        existing_session=True,
+    )
+
     stream_id = generate_ulid()
 
     # Atomic DB operation: update message text + delete subsequent messages
-    async with session_factory() as db:
-        async with db.begin():
-            await update_message_text(db, body.message_id, body.text)
-            await update_message_file_parts(
-                db, body.message_id, body.session_id, body.attachments or []
-            )
-            await delete_messages_after(db, body.session_id, body.message_id)
-            # Clear stale todos so re-fetches return empty until new generation populates them
-            await db.execute(sa_delete(Todo).where(Todo.session_id == body.session_id))
+    context_token = set_audit_context(_audit_context_from_request(request))
+    try:
+        async with session_factory() as db:
+            async with db.begin():
+                await update_message_text(db, body.message_id, body.text)
+                await update_message_file_parts(
+                    db, body.message_id, body.session_id, body.attachments or []
+                )
+                await delete_messages_after(db, body.session_id, body.message_id)
+                # Clear stale todos so re-fetches return empty until new generation populates them
+                await db.execute(sa_delete(Todo).where(Todo.session_id == body.session_id))
+    finally:
+        reset_audit_context(context_token)
 
     job = sm.create_job(stream_id=stream_id, session_id=body.session_id)
     job.interactive = True
@@ -396,9 +484,10 @@ async def edit_and_resend(
         index_manager=index_manager,
         skip_user_message=True,
     )
-    task = asyncio.create_task(
+    task = _create_task_with_audit_context(
         _run_with_semaphore(sm, job, coro),
         name=f"gen-edit-{stream_id}",
+        request=request,
     )
     task.add_done_callback(functools.partial(_on_task_done, job=job))
     job.task = task

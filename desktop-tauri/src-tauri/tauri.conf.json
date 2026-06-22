@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
-  "productName": "OpenYak",
+  "productName": "fpi-agent",
   "identifier": "com.openyak.desktop",
   "version": "1.3.0",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "OpenYak",
+        "title": "fpi-agent",
         "width": 1360,
         "height": 840,
         "minWidth": 1024,
