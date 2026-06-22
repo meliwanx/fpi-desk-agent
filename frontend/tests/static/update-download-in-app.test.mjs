@@ -32,9 +32,45 @@ assert.match(
 );
 
 assert.match(
+  updateHook,
+  /onUpdateDownloadProgress/,
+  "enterprise app updates should subscribe to native download progress events",
+);
+
+assert.match(
+  updateHook,
+  /expectedSha256/,
+  "enterprise app updates should pass the backend-provided sha256 to the native downloader",
+);
+
+assert.match(
   tauriApi,
-  /downloadUpdateAndOpen: \(\{ url, defaultName \}\) =>\s*invoke/,
+  /downloadUpdateAndOpen: \(\{ url, defaultName, expectedSha256 \}\) =>\s*invoke/,
   "Tauri API should expose an installer download/open command",
+);
+
+assert.match(
+  tauriApi,
+  /onUpdateDownloadProgress/,
+  "Tauri API should expose update download progress events",
+);
+
+assert.match(
+  tauriCommands,
+  /emit\([\s\S]*"update-download-progress"/,
+  "Rust update download command should emit progress events",
+);
+
+assert.match(
+  tauriCommands,
+  /actual_sha256[\s\S]+eq_ignore_ascii_case/,
+  "Rust update download command should verify the downloaded package hash before installation",
+);
+
+assert.match(
+  tauriCommands,
+  /Command::new\(&file_path\)[\s\S]+\.arg\("\/S"\)/,
+  "Windows update installer should be launched silently instead of showing the first-install wizard",
 );
 
 assert.match(

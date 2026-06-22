@@ -43,6 +43,12 @@ export function GeneralTab() {
     ).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    if (updateStatus === "downloading") {
+      setDownloadProgress(enterpriseUpdate.progress);
+    }
+  }, [enterpriseUpdate.progress, updateStatus]);
+
   const checkForUpdate = useCallback(async () => {
     if (!IS_DESKTOP) return;
     setUpdateStatus("checking");

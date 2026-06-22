@@ -463,6 +463,7 @@ async def test_employee_update_policy_serves_local_asset_and_counts_downloads(ap
         assert payload["update_available"] is True
         assert f"/download/{windows_asset.id}" in payload["download_url"]
         assert payload["download_filename"] == "FPI Agent Setup.exe"
+        assert payload["download_sha256"] == hashlib.sha256(windows_bytes).hexdigest()
 
         download = await app_client.get(payload["download_url"])
         assert download.status_code == 200
@@ -474,6 +475,64 @@ async def test_employee_update_policy_serves_local_asset_and_counts_downloads(ap
         )
         assert fallback.status_code == 200
         assert f"/download/{default_asset.id}" in fallback.json()["download_url"]
+    finally:
+        await store.dispose()
+
+
+async def test_employee_update_policy_uses_platform_asset_version_when_policy_is_newer(app_client, tmp_path):
+    store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
+    await store.startup()
+    app_client.app.state.company_auth_store = store
+    app_client.app.state.settings.update_asset_storage_dir = str(tmp_path / "update_assets")
+    app_client.app.middleware_stack = None
+
+    async def inject_employee(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="employee-1",
+            email="10001",
+            display_name="员工一",
+            role="user",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_employee)
+
+    storage_dir = tmp_path / "update_assets"
+    storage_dir.mkdir()
+    windows_bytes = b"windows-installer"
+    (storage_dir / "windows.exe").write_bytes(windows_bytes)
+
+    try:
+        windows_asset = await store.create_update_asset(
+            platform="windows",
+            version="1.3.0",
+            original_filename="FPI Agent Setup.exe",
+            stored_filename="windows.exe",
+            mime_type="application/vnd.microsoft.portable-executable",
+            size_bytes=len(windows_bytes),
+            sha256=hashlib.sha256(windows_bytes).hexdigest(),
+            uploaded_by_user_id="admin-1",
+            uploaded_by_email="admin@example.com",
+            uploaded_by_display_name="Admin",
+        )
+        await store.update_update_policy(
+            enabled=True,
+            latest_version="1.4.0",
+            min_supported_version="",
+            force_update=True,
+            release_notes="macOS already moved ahead",
+            windows_asset_id=windows_asset.id,
+        )
+
+        response = await app_client.get(
+            "/api/app/update-policy?current_version=1.3.0&platform=windows&arch=x64"
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["latest_version"] == "1.3.0"
+        assert payload["update_available"] is False
+        assert payload["force_update"] is False
     finally:
         await store.dispose()
 

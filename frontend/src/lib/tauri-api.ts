@@ -12,6 +12,12 @@ export interface TrayRecent {
   title: string | null;
 }
 
+export interface UpdateDownloadProgress {
+  downloaded: number;
+  total?: number | null;
+  progress: number;
+}
+
 export interface DesktopAPI {
   getBackendUrl: () => Promise<string>;
   getBackendToken: () => Promise<string>;
@@ -27,6 +33,7 @@ export interface DesktopAPI {
   downloadUpdateAndOpen: (opts: {
     url: string;
     defaultName: string;
+    expectedSha256?: string | null;
   }) => Promise<string>;
   minimize: () => Promise<void>;
   maximize: () => Promise<void>;
@@ -40,6 +47,7 @@ export interface DesktopAPI {
   onNavigate: (callback: (path: string) => void) => () => void;
   onToggleSidebar: (callback: () => void) => () => void;
   onCheckForUpdates: (callback: () => void) => () => void;
+  onUpdateDownloadProgress: (callback: (progress: UpdateDownloadProgress) => void) => () => void;
   onOpenSearch: (callback: () => void) => () => void;
 }
 
@@ -73,8 +81,8 @@ export const desktopAPI: DesktopAPI = {
   openExternal: (url) => invoke("open_external", { url }),
   downloadAndSave: ({ url, data, defaultName, defaultDirectory }) =>
     invoke<boolean>("download_and_save", { url, data, defaultName, defaultDirectory }),
-  downloadUpdateAndOpen: ({ url, defaultName }) =>
-    invoke<string>("download_update_and_open", { url, defaultName }),
+  downloadUpdateAndOpen: ({ url, defaultName, expectedSha256 }) =>
+    invoke<string>("download_update_and_open", { url, defaultName, expectedSha256 }),
   minimize: () => invoke("window_minimize"),
   maximize: () => invoke("window_maximize"),
   close: () => invoke("window_close"),
@@ -91,5 +99,7 @@ export const desktopAPI: DesktopAPI = {
   onNavigate: (callback) => listenSync<string>("navigate", callback),
   onToggleSidebar: (callback) => listenSync<void>("toggle-sidebar", callback),
   onCheckForUpdates: (callback) => listenSync<void>("check-for-updates", callback),
+  onUpdateDownloadProgress: (callback) =>
+    listenSync<UpdateDownloadProgress>("update-download-progress", callback),
   onOpenSearch: (callback) => listenSync<void>("open-search", callback),
 };

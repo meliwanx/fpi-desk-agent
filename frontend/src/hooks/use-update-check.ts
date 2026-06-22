@@ -20,6 +20,7 @@ export interface EnterpriseUpdatePolicy {
   download_url: string;
   download_filename?: string;
   download_size_bytes?: number;
+  download_sha256?: string;
   checked_at: string;
 }
 
@@ -30,6 +31,7 @@ interface UpdateState {
   forceUpdate: boolean;
   downloadUrl: string | null;
   downloadFilename: string | null;
+  downloadSha256: string | null;
   downloading: boolean;
   progress: number;
   dismissed: boolean;
@@ -49,6 +51,7 @@ let state: UpdateState = {
   forceUpdate: false,
   downloadUrl: null,
   downloadFilename: null,
+  downloadSha256: null,
   downloading: false,
   progress: 0,
   dismissed: false,
@@ -97,6 +100,7 @@ export async function checkForUpdates(): Promise<EnterpriseUpdatePolicy | null> 
         forceUpdate: false,
         downloadUrl: update.download_url || null,
         downloadFilename: update.download_filename || null,
+        downloadSha256: update.download_sha256 || null,
         downloading: false,
         progress: 0,
         dismissed: false,
@@ -114,6 +118,7 @@ export async function checkForUpdates(): Promise<EnterpriseUpdatePolicy | null> 
         forceUpdate: false,
         downloadUrl: update.download_url || null,
         downloadFilename: update.download_filename || null,
+        downloadSha256: update.download_sha256 || null,
         dismissed: true,
         error: null,
       });
@@ -127,6 +132,7 @@ export async function checkForUpdates(): Promise<EnterpriseUpdatePolicy | null> 
       forceUpdate: update.force_update,
       downloadUrl: update.download_url || null,
       downloadFilename: update.download_filename || null,
+      downloadSha256: update.download_sha256 || null,
       dismissed: false,
       error: null,
     });
@@ -159,14 +165,20 @@ async function downloadAndInstall() {
     pendingUpdate?.download_filename ||
     state.downloadFilename ||
     fallbackUpdateFilename(downloadUrl, pendingUpdate?.latest_version || state.version);
+  const expectedSha256 = pendingUpdate?.download_sha256 || state.downloadSha256 || null;
   setState({ downloading: true, error: null, progress: 0 });
+  const cleanupProgress = desktopAPI.onUpdateDownloadProgress((event) => {
+    setState({ progress: Math.max(0, Math.min(100, Math.round(event.progress || 0))) });
+  });
   try {
-    await desktopAPI.downloadUpdateAndOpen({ url: downloadUrl, defaultName });
+    await desktopAPI.downloadUpdateAndOpen({ url: downloadUrl, defaultName, expectedSha256 });
     setState({ downloading: false, progress: 100 });
   } catch (error) {
     console.error("Update download failed:", error);
     const message = error instanceof Error ? error.message : String(error);
     setState({ error: message, downloading: false });
+  } finally {
+    cleanupProgress();
   }
 }
 
@@ -193,6 +205,7 @@ const serverSnapshot: UpdateState = {
   forceUpdate: false,
   downloadUrl: null,
   downloadFilename: null,
+  downloadSha256: null,
   downloading: false,
   progress: 0,
   dismissed: false,
@@ -220,6 +233,7 @@ export function useUpdateCheck(): UpdateInfo {
     forceUpdate: snapshot.forceUpdate,
     downloadUrl: snapshot.downloadUrl,
     downloadFilename: snapshot.downloadFilename,
+    downloadSha256: snapshot.downloadSha256,
     downloading: snapshot.downloading,
     progress: snapshot.progress,
     error: snapshot.error,

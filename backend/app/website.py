@@ -89,6 +89,7 @@ async def _public_platform_download(request: Request, store: Any, policy: Any, p
             "filename": "",
             "version": str(_policy_value(policy, "latest_version", "") or ""),
             "size_bytes": 0,
+            "sha256": "",
         }
     return {
         "platform": platform,
@@ -98,6 +99,7 @@ async def _public_platform_download(request: Request, store: Any, policy: Any, p
         "filename": asset.original_filename or "",
         "version": asset.version or str(_policy_value(policy, "latest_version", "") or ""),
         "size_bytes": int(asset.size_bytes or 0),
+        "sha256": asset.sha256 or "",
     }
 
 
