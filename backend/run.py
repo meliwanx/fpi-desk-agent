@@ -29,6 +29,23 @@ def _configure_bundled_node(resource_dir: str | None) -> None:
         os.environ["PATH"] = os.pathsep.join([node_bin_text, *path_parts])
 
 
+def _configure_enterprise_defaults(resource_dir: str | None) -> None:
+    """Seed production desktop defaults for remote enterprise control-plane APIs."""
+    if not resource_dir:
+        return
+
+    control_url = os.environ.get(
+        "OPENYAK_ENTERPRISE_CONTROL_URL",
+        "http://120.26.208.161:5201",
+    ).rstrip("/")
+    os.environ.setdefault("OPENYAK_ENTERPRISE_CONTROL_URL", control_url)
+    os.environ.setdefault("OPENYAK_AUDIT_SYNC_ENABLED", "true")
+    os.environ.setdefault("OPENYAK_AUDIT_SERVER_URL", control_url)
+    # Company login is remote-control-plane based in desktop builds. Do not try
+    # to initialize a local company auth DB from the packaged backend.
+    os.environ.setdefault("OPENYAK_COMPANY_AUTH_ENABLED", "false")
+
+
 def _install_crash_reporter() -> None:
     """Install global crash handlers so unhandled exceptions are always logged to stderr.
 
@@ -85,6 +102,7 @@ def main() -> None:
     if args.resource_dir:
         os.environ["OPENYAK_RESOURCE_DIR"] = args.resource_dir
         _configure_bundled_node(args.resource_dir)
+        _configure_enterprise_defaults(args.resource_dir)
 
     import uvicorn
     from app.main import create_app

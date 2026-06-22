@@ -83,6 +83,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./data/openyak.db"
 
     # --- Company login (business-user auth, separate from local bearer token) ---
+    enterprise_control_url: str = "http://120.26.208.161:5201"
     company_auth_enabled: bool = False
     company_auth_database_url: str = ""
     company_auth_mysql_host: str = ""

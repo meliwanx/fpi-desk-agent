@@ -113,6 +113,77 @@ class TestListModels:
         assert "base_url" not in resp.json()["models"][0]
         assert "protocol" not in resp.json()["models"][0]
 
+    async def test_runtime_model_policy_endpoint_returns_provider_config(self, app_client):
+        class FakeCompanyStore:
+            async def get_session_user(self, token: str):
+                return CompanyUser(
+                    id="employee-1",
+                    email="employee@example.com",
+                    display_name="Employee One",
+                    role="user",
+                    is_active=True,
+                )
+
+            async def get_model_policy(self):
+                return CompanyModelPolicy(
+                    default_provider_id="custom_onlyme",
+                    default_model_id="gpt-5.5",
+                    models=[
+                        CompanyModelEntry(
+                            provider_id="custom_onlyme",
+                            id="gpt-5.5",
+                            name="GPT-5.5",
+                            protocol="openai_compatible",
+                            base_url="https://sub2api.onlymeok.com/v1",
+                            api_key="sk-runtime-secret",
+                        ),
+                    ],
+                )
+
+        app_client.app.state.settings.company_auth_enabled = True
+        app_client.app.state.company_auth_store = FakeCompanyStore()
+
+        resp = await app_client.get("/api/models/policy/runtime", headers={"X-FPI-Session": "token"})
+
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["default_provider_id"] == "custom_onlyme"
+        assert payload["default_model_id"] == "gpt-5.5"
+        assert payload["models"][0]["provider_id"] == "custom_onlyme"
+        assert payload["models"][0]["id"] == "gpt-5.5"
+        assert payload["models"][0]["protocol"] == "openai_compatible"
+        assert payload["models"][0]["base_url"] == "https://sub2api.onlymeok.com/v1"
+        assert payload["models"][0]["api_key"] == "sk-runtime-secret"
+
+    async def test_runtime_model_policy_requires_company_session(self, app_client):
+        class FakeCompanyStore:
+            async def get_session_user(self, token: str):
+                return None
+
+            async def get_model_policy(self):
+                return CompanyModelPolicy(
+                    default_provider_id="custom_onlyme",
+                    default_model_id="gpt-5.5",
+                    models=[
+                        CompanyModelEntry(
+                            provider_id="custom_onlyme",
+                            id="gpt-5.5",
+                            name="GPT-5.5",
+                            protocol="openai_compatible",
+                            base_url="https://sub2api.onlymeok.com/v1",
+                            api_key="sk-runtime-secret",
+                        ),
+                    ],
+                )
+
+        app_client.app.state.settings.company_auth_enabled = True
+        app_client.app.state.company_auth_store = FakeCompanyStore()
+
+        resp = await app_client.get("/api/models/policy/runtime")
+
+        assert resp.status_code == 401
+        assert resp.json()["detail"] == "Company login required"
+
 
 class TestRefreshModels:
     async def test_success(self, app_client):

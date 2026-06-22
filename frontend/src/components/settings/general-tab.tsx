@@ -6,9 +6,9 @@ import { useTheme } from "next-themes";
 import { useTranslation } from "react-i18next";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
-import { api } from "@/lib/api";
 import { clearCompanySession, readCompanySession } from "@/lib/company-auth";
 import { API, IS_DESKTOP } from "@/lib/constants";
+import { enterpriseApi } from "@/lib/enterprise-api";
 import { TextPart } from "@/components/parts/text-part";
 import { AppearanceCustomize } from "@/components/settings/appearance-customize";
 import { useUpdateCheck } from "@/hooks/use-update-check";
@@ -88,7 +88,7 @@ export function GeneralTab() {
 
   const handleLogout = useCallback(async () => {
     try {
-      await api.post(API.COMPANY_AUTH.LOGOUT);
+      await enterpriseApi.post(API.COMPANY_AUTH.LOGOUT);
     } catch {
       // Local logout should still clear the client session if the server is gone.
     }

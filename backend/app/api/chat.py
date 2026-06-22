@@ -24,6 +24,8 @@ from app.dependencies import (
     ToolRegistryDep,
 )
 from app.audit.client import AuditContext, reset_audit_context, set_audit_context
+from app.company_auth.model_policy_sync import sync_company_model_policy
+from app.company_auth.remote_control import sync_remote_model_policy_for_request
 from app.models.todo import Todo
 from app.models.message import Message
 from app.schemas.chat import (
@@ -65,6 +67,30 @@ def _audit_context_from_request(request: Request) -> AuditContext | None:
     if not token:
         return None
     return AuditContext(company_session_token=token)
+
+
+async def _sync_model_policy_for_request(request: Request, provider_registry) -> None:
+    settings = getattr(request.app.state, "settings", None)
+    if settings is None:
+        return
+
+    store = getattr(request.app.state, "company_auth_store", None)
+    if store is not None and getattr(settings, "company_auth_enabled", False):
+        try:
+            policy = await store.get_model_policy()
+            await sync_company_model_policy(provider_registry, policy)
+        except Exception as exc:
+            logger.warning("Failed to sync company model policy: %s", exc)
+        return
+
+    token = request.headers.get("X-FPI-Session", "").strip()
+    if not token:
+        return
+    await sync_remote_model_policy_for_request(
+        settings=settings,
+        registry=provider_registry,
+        company_session_token=token,
+    )
 
 
 def _create_task_with_audit_context(coro, *, name: str, request: Request) -> asyncio.Task:
@@ -224,6 +250,7 @@ async def start_prompt(
     index_manager: IndexManagerDep,
 ) -> PromptResponse:
     """Start a new generation. Returns stream_id for SSE subscription."""
+    await _sync_model_policy_for_request(request, provider_registry)
     _ensure_image_attachments_supported(
         attachments=body.attachments,
         provider_registry=provider_registry,
@@ -285,6 +312,7 @@ async def start_task_batch(
     index_manager: IndexManagerDep,
 ) -> PromptResponse:
     """Start an explicit sequential or parallel multi-agent task batch."""
+    await _sync_model_policy_for_request(request, provider_registry)
     session_id = body.session_id or generate_ulid()
     stream_id = generate_ulid()
 
@@ -333,6 +361,7 @@ async def start_compaction(
     agent_registry: AgentRegistryDep,
 ) -> PromptResponse:
     """Start a manual compaction stream. Reuses the normal SSE/abort lifecycle."""
+    await _sync_model_policy_for_request(request, provider_registry)
     async with session_factory() as db:
         async with db.begin():
             session = await get_session(db, body.session_id)
@@ -423,6 +452,7 @@ async def edit_and_resend(
     index_manager: IndexManagerDep,
 ) -> PromptResponse:
     """Edit a user message, delete all subsequent messages, and re-generate."""
+    await _sync_model_policy_for_request(request, provider_registry)
     _ensure_image_attachments_supported(
         attachments=body.attachments,
         provider_registry=provider_registry,

@@ -4,8 +4,9 @@ import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import { AlertCircle, Loader2, LockKeyhole } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { api, apiErrorMessage } from "@/lib/api";
+import { apiErrorMessage } from "@/lib/api";
 import { API } from "@/lib/constants";
+import { enterpriseApi } from "@/lib/enterprise-api";
 import {
   type CompanyLoginResponse,
   type CompanySessionPayload,
@@ -34,7 +35,7 @@ export function CompanyLoginGate({ children }: { children: ReactNode }) {
       return;
     }
 
-    api
+    enterpriseApi
       .get<CompanySessionResponse>(API.COMPANY_AUTH.SESSION)
       .then((res) => {
         if (!mounted) return;
@@ -59,9 +60,10 @@ export function CompanyLoginGate({ children }: { children: ReactNode }) {
     setSubmitting(true);
     setError(null);
     try {
-      const response = await api.post<CompanyLoginResponse>(
+      const response = await enterpriseApi.post<CompanyLoginResponse>(
         API.COMPANY_AUTH.LOGIN,
         { email, password },
+        { includeCompanySession: false },
       );
       setSession(saveCompanySession(response));
       setPassword("");

@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useSyncExternalStore } from "react";
-import { api } from "@/lib/api";
 import { API, IS_DESKTOP } from "@/lib/constants";
+import { enterpriseApi } from "@/lib/enterprise-api";
 import { desktopAPI } from "@/lib/tauri-api";
 
 const CHECK_INTERVAL = 4 * 60 * 60 * 1000; // 4 hours
@@ -79,7 +79,7 @@ export async function checkForUpdates(): Promise<EnterpriseUpdatePolicy | null> 
       current_version: currentVersion,
       platform,
     });
-    const update = await api.get<EnterpriseUpdatePolicy>(
+    const update = await enterpriseApi.get<EnterpriseUpdatePolicy>(
       `${API.APP.UPDATE_POLICY}?${query.toString()}`,
       { timeoutMs: 15_000 },
     );
