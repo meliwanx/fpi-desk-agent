@@ -7,7 +7,11 @@ import {
   resolveApiUrl,
 } from "./constants";
 import { getRemoteConfig } from "./remote-connection";
-import { getCompanySessionToken } from "./company-auth";
+import {
+  clearCompanySession,
+  getCompanySessionToken,
+  isCompanyAuthFailure,
+} from "./company-auth";
 import i18n from "@/i18n/config";
 
 class ApiError extends Error {
@@ -97,6 +101,14 @@ export async function apiFetch(
       headers,
       signal: controller.signal,
     });
+    if (!res.ok) {
+      try {
+        const body = await res.clone().json();
+        if (isCompanyAuthFailure(res.status, body)) clearCompanySession();
+      } catch {
+        // Raw-response callers still receive the original response below.
+      }
+    }
     return res;
   } catch (err) {
     if (didTimeout) {
@@ -179,6 +191,7 @@ async function request<T>(
         } catch {
           body = raw;
         }
+        if (isCompanyAuthFailure(res.status, body)) clearCompanySession();
         throw new ApiError(res.status, res.statusText, body);
       }
 

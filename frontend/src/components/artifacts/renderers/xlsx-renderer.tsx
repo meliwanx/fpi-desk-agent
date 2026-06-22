@@ -5,6 +5,7 @@ import { Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api, apiErrorMessage } from "@/lib/api";
 import { API } from "@/lib/constants";
+import { parentDirectory, saveBlobAsFile } from "@/lib/file-download";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
 interface XlsxRendererProps {
@@ -91,13 +92,10 @@ export function XlsxRenderer({ filePath }: XlsxRendererProps) {
 
   const handleDownload = useCallback(() => {
     if (!blobRef.current) return;
-    const url = URL.createObjectURL(blobRef.current);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileName || "spreadsheet.xlsx";
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [fileName]);
+    void saveBlobAsFile(blobRef.current, fileName || "spreadsheet.xlsx", parentDirectory(filePath)).catch((err) => {
+      console.error("Failed to download spreadsheet", err);
+    });
+  }, [fileName, filePath]);
 
   if (error) {
     return (

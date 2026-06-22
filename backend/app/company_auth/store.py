@@ -13,6 +13,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Integer,
     MetaData,
     String,
     Table,
@@ -74,10 +75,48 @@ class CompanyUpdatePolicy:
     min_supported_version: str = ""
     force_update: bool = False
     release_notes: str = ""
+    macos_asset_id: str = ""
+    windows_asset_id: str = ""
+    linux_asset_id: str = ""
+    default_asset_id: str = ""
     macos_download_url: str = ""
     windows_download_url: str = ""
     linux_download_url: str = ""
     default_download_url: str = ""
+
+
+@dataclass(frozen=True)
+class CompanyUpdateAsset:
+    id: str
+    platform: str
+    version: str
+    original_filename: str
+    stored_filename: str
+    mime_type: str
+    size_bytes: int
+    sha256: str
+    uploaded_by_user_id: str
+    uploaded_by_email: str
+    uploaded_by_display_name: str
+    download_count: int
+    time_created: datetime
+    time_updated: datetime
+
+
+@dataclass(frozen=True)
+class CompanyFeedback:
+    id: str
+    user_id: str
+    user_email: str
+    user_display_name: str
+    description: str
+    image_original_filename: str
+    image_stored_filename: str
+    image_mime_type: str
+    image_size_bytes: int
+    image_sha256: str
+    time_created: datetime
+    time_updated: datetime
 
 
 def _utcnow() -> datetime:
@@ -179,6 +218,40 @@ class CompanyAuthStore:
             self.metadata,
             Column("key", String(100), primary_key=True),
             Column("value", Text, nullable=False),
+            Column("time_updated", DateTime(timezone=True), nullable=False),
+        )
+        self.update_assets = Table(
+            f"{table_prefix}_update_assets",
+            self.metadata,
+            Column("id", String(32), primary_key=True),
+            Column("platform", String(20), nullable=False, index=True),
+            Column("version", String(64), nullable=False, index=True),
+            Column("original_filename", String(512), nullable=False, default=""),
+            Column("stored_filename", String(512), nullable=False),
+            Column("mime_type", String(255), nullable=False, default=""),
+            Column("size_bytes", Integer, nullable=False, default=0),
+            Column("sha256", String(64), nullable=False),
+            Column("uploaded_by_user_id", String(32), nullable=False, default=""),
+            Column("uploaded_by_email", String(255), nullable=False, default=""),
+            Column("uploaded_by_display_name", String(255), nullable=False, default=""),
+            Column("download_count", Integer, nullable=False, default=0),
+            Column("time_created", DateTime(timezone=True), nullable=False),
+            Column("time_updated", DateTime(timezone=True), nullable=False),
+        )
+        self.feedback = Table(
+            f"{table_prefix}_feedback",
+            self.metadata,
+            Column("id", String(32), primary_key=True),
+            Column("user_id", String(32), nullable=False, index=True),
+            Column("user_email", String(255), nullable=False, default=""),
+            Column("user_display_name", String(255), nullable=False, default=""),
+            Column("description", Text, nullable=False),
+            Column("image_original_filename", String(512), nullable=False, default=""),
+            Column("image_stored_filename", String(512), nullable=False, default=""),
+            Column("image_mime_type", String(255), nullable=False, default=""),
+            Column("image_size_bytes", Integer, nullable=False, default=0),
+            Column("image_sha256", String(64), nullable=False, default=""),
+            Column("time_created", DateTime(timezone=True), nullable=False, index=True),
             Column("time_updated", DateTime(timezone=True), nullable=False),
         )
         connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
@@ -513,10 +586,14 @@ class CompanyAuthStore:
         min_supported_version: str,
         force_update: bool,
         release_notes: str,
-        macos_download_url: str,
-        windows_download_url: str,
-        linux_download_url: str,
-        default_download_url: str,
+        macos_asset_id: str = "",
+        windows_asset_id: str = "",
+        linux_asset_id: str = "",
+        default_asset_id: str = "",
+        macos_download_url: str = "",
+        windows_download_url: str = "",
+        linux_download_url: str = "",
+        default_download_url: str = "",
     ) -> CompanyUpdatePolicy:
         policy = self._update_policy_from_payload(
             {
@@ -525,6 +602,10 @@ class CompanyAuthStore:
                 "min_supported_version": min_supported_version,
                 "force_update": force_update,
                 "release_notes": release_notes,
+                "macos_asset_id": macos_asset_id,
+                "windows_asset_id": windows_asset_id,
+                "linux_asset_id": linux_asset_id,
+                "default_asset_id": default_asset_id,
                 "macos_download_url": macos_download_url,
                 "windows_download_url": windows_download_url,
                 "linux_download_url": linux_download_url,
@@ -554,6 +635,146 @@ class CompanyAuthStore:
                 )
         return policy
 
+    async def create_update_asset(
+        self,
+        *,
+        platform: str,
+        version: str,
+        original_filename: str,
+        stored_filename: str,
+        mime_type: str,
+        size_bytes: int,
+        sha256: str,
+        uploaded_by_user_id: str,
+        uploaded_by_email: str,
+        uploaded_by_display_name: str,
+    ) -> CompanyUpdateAsset:
+        normalized_platform = self._normalise_update_platform(platform, strict=True)
+        normalized_version = str(version or "").strip().lstrip("vV")
+        if not normalized_version:
+            raise ValueError("Update asset version is required")
+        normalized_sha = str(sha256 or "").strip().lower()
+        if len(normalized_sha) != 64:
+            raise ValueError("Update asset SHA-256 must be 64 hex characters")
+
+        asset_id = generate_ulid()
+        now = _utcnow()
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                insert(self.update_assets).values(
+                    id=asset_id,
+                    platform=normalized_platform,
+                    version=normalized_version,
+                    original_filename=str(original_filename or "").strip(),
+                    stored_filename=str(stored_filename or "").strip(),
+                    mime_type=str(mime_type or "").strip(),
+                    size_bytes=max(0, int(size_bytes or 0)),
+                    sha256=normalized_sha,
+                    uploaded_by_user_id=str(uploaded_by_user_id or "").strip(),
+                    uploaded_by_email=str(uploaded_by_email or "").strip(),
+                    uploaded_by_display_name=str(uploaded_by_display_name or "").strip(),
+                    download_count=0,
+                    time_created=now,
+                    time_updated=now,
+                )
+            )
+        asset = await self.get_update_asset(asset_id)
+        if asset is None:
+            raise RuntimeError("Created update asset could not be loaded")
+        return asset
+
+    async def list_update_assets(self) -> list[CompanyUpdateAsset]:
+        async with self.engine.connect() as conn:
+            result = await conn.execute(
+                select(self.update_assets).order_by(self.update_assets.c.time_created.asc())
+            )
+            return [self._update_asset_from_mapping(row) for row in result.mappings().all()]
+
+    async def get_update_asset(self, asset_id: str) -> CompanyUpdateAsset | None:
+        async with self.engine.connect() as conn:
+            result = await conn.execute(
+                select(self.update_assets).where(self.update_assets.c.id == asset_id).limit(1)
+            )
+            row = result.mappings().first()
+        return self._update_asset_from_mapping(row) if row is not None else None
+
+    async def increment_update_asset_download_count(self, asset_id: str) -> CompanyUpdateAsset | None:
+        now = _utcnow()
+        async with self.engine.begin() as conn:
+            existing = await conn.execute(
+                select(self.update_assets.c.download_count)
+                .where(self.update_assets.c.id == asset_id)
+                .limit(1)
+            )
+            current = existing.scalar_one_or_none()
+            if current is None:
+                return None
+            await conn.execute(
+                update(self.update_assets)
+                .where(self.update_assets.c.id == asset_id)
+                .values(download_count=int(current) + 1, time_updated=now)
+            )
+        return await self.get_update_asset(asset_id)
+
+    async def create_feedback(
+        self,
+        *,
+        user_id: str,
+        user_email: str,
+        user_display_name: str,
+        description: str,
+        image_original_filename: str = "",
+        image_stored_filename: str = "",
+        image_mime_type: str = "",
+        image_size_bytes: int = 0,
+        image_sha256: str = "",
+    ) -> CompanyFeedback:
+        normalized_description = str(description or "").strip()
+        if not normalized_description:
+            raise ValueError("Feedback description is required")
+        normalized_sha = str(image_sha256 or "").strip().lower()
+        if normalized_sha and len(normalized_sha) != 64:
+            raise ValueError("Feedback image SHA-256 must be 64 hex characters")
+
+        feedback_id = generate_ulid()
+        now = _utcnow()
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                insert(self.feedback).values(
+                    id=feedback_id,
+                    user_id=str(user_id or "").strip(),
+                    user_email=str(user_email or "").strip(),
+                    user_display_name=str(user_display_name or "").strip(),
+                    description=normalized_description,
+                    image_original_filename=str(image_original_filename or "").strip(),
+                    image_stored_filename=str(image_stored_filename or "").strip(),
+                    image_mime_type=str(image_mime_type or "").strip(),
+                    image_size_bytes=max(0, int(image_size_bytes or 0)),
+                    image_sha256=normalized_sha,
+                    time_created=now,
+                    time_updated=now,
+                )
+            )
+        feedback = await self.get_feedback(feedback_id)
+        if feedback is None:
+            raise RuntimeError("Created feedback could not be loaded")
+        return feedback
+
+    async def list_feedback(self) -> list[CompanyFeedback]:
+        async with self.engine.connect() as conn:
+            result = await conn.execute(
+                select(self.feedback).order_by(self.feedback.c.time_created.desc())
+            )
+            return [self._feedback_from_mapping(row) for row in result.mappings().all()]
+
+    async def get_feedback(self, feedback_id: str) -> CompanyFeedback | None:
+        async with self.engine.connect() as conn:
+            result = await conn.execute(
+                select(self.feedback).where(self.feedback.c.id == feedback_id).limit(1)
+            )
+            row = result.mappings().first()
+        return self._feedback_from_mapping(row) if row is not None else None
+
     @staticmethod
     def _write_bootstrap_file(path: Path, payload: dict[str, str]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -571,6 +792,65 @@ class CompanyAuthStore:
             display_name=row["display_name"],
             role=row["role"],
             is_active=bool(row["is_active"]),
+        )
+
+    @staticmethod
+    def _update_asset_from_mapping(row) -> CompanyUpdateAsset:
+        return CompanyUpdateAsset(
+            id=row["id"],
+            platform=row["platform"],
+            version=row["version"],
+            original_filename=row["original_filename"],
+            stored_filename=row["stored_filename"],
+            mime_type=row["mime_type"],
+            size_bytes=int(row["size_bytes"] or 0),
+            sha256=row["sha256"],
+            uploaded_by_user_id=row["uploaded_by_user_id"],
+            uploaded_by_email=row["uploaded_by_email"],
+            uploaded_by_display_name=row["uploaded_by_display_name"],
+            download_count=int(row["download_count"] or 0),
+            time_created=row["time_created"],
+            time_updated=row["time_updated"],
+        )
+
+    @staticmethod
+    def _normalise_update_platform(value: str | None, *, strict: bool = False) -> str:
+        raw = (value or "default").strip().lower()
+        aliases = {
+            "darwin": "macos",
+            "mac": "macos",
+            "macos": "macos",
+            "osx": "macos",
+            "win": "windows",
+            "win32": "windows",
+            "win64": "windows",
+            "windows": "windows",
+            "linux": "linux",
+            "linux-x64": "linux",
+            "ubuntu": "linux",
+            "debian": "linux",
+            "default": "default",
+        }
+        normalized = aliases.get(raw, raw)
+        if strict and normalized not in {"macos", "windows", "linux", "default"}:
+            raise ValueError(f"Unsupported update asset platform: {value}")
+        return normalized
+
+    @staticmethod
+    def _feedback_from_mapping(row) -> CompanyFeedback:
+        return CompanyFeedback(
+            id=row["id"],
+            user_id=row["user_id"],
+            user_email=row["user_email"],
+            user_display_name=row["user_display_name"],
+            description=row["description"],
+            image_original_filename=row["image_original_filename"],
+            image_stored_filename=row["image_stored_filename"],
+            image_mime_type=row["image_mime_type"],
+            image_size_bytes=int(row["image_size_bytes"] or 0),
+            image_sha256=row["image_sha256"],
+            time_created=row["time_created"],
+            time_updated=row["time_updated"],
         )
 
     @staticmethod
@@ -699,6 +979,10 @@ class CompanyAuthStore:
             min_supported_version=min_supported_version,
             force_update=bool(payload.get("force_update", False)),
             release_notes=str(payload.get("release_notes") or "").strip(),
+            macos_asset_id=str(payload.get("macos_asset_id") or "").strip(),
+            windows_asset_id=str(payload.get("windows_asset_id") or "").strip(),
+            linux_asset_id=str(payload.get("linux_asset_id") or "").strip(),
+            default_asset_id=str(payload.get("default_asset_id") or "").strip(),
             macos_download_url=str(payload.get("macos_download_url") or "").strip(),
             windows_download_url=str(payload.get("windows_download_url") or "").strip(),
             linux_download_url=str(payload.get("linux_download_url") or "").strip(),
@@ -713,6 +997,10 @@ class CompanyAuthStore:
             "min_supported_version": policy.min_supported_version,
             "force_update": policy.force_update,
             "release_notes": policy.release_notes,
+            "macos_asset_id": policy.macos_asset_id,
+            "windows_asset_id": policy.windows_asset_id,
+            "linux_asset_id": policy.linux_asset_id,
+            "default_asset_id": policy.default_asset_id,
             "macos_download_url": policy.macos_download_url,
             "windows_download_url": policy.windows_download_url,
             "linux_download_url": policy.linux_download_url,

@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./data/openyak.db"
 
     # --- Company login (business-user auth, separate from local bearer token) ---
-    enterprise_control_url: str = "http://120.26.208.161:5201"
+    enterprise_control_url: str = "http://fpiagent.hangzhoupuyu.work"
     company_auth_enabled: bool = False
     company_auth_database_url: str = ""
     company_auth_mysql_host: str = ""
@@ -105,6 +105,8 @@ class Settings(BaseSettings):
     audit_file_upload_enabled: bool = True
     audit_file_upload_max_bytes: int = 200 * 1024 * 1024
     audit_file_storage_dir: str = "data/audit_uploads"
+    update_asset_storage_dir: str = "data/update_assets"
+    feedback_storage_dir: str = "data/feedback_uploads"
 
     # --- Server ---
     host: str = "0.0.0.0"

@@ -36,7 +36,7 @@ def _configure_enterprise_defaults(resource_dir: str | None) -> None:
 
     control_url = os.environ.get(
         "OPENYAK_ENTERPRISE_CONTROL_URL",
-        "http://120.26.208.161:5201",
+        "http://fpiagent.hangzhoupuyu.work",
     ).rstrip("/")
     os.environ.setdefault("OPENYAK_ENTERPRISE_CONTROL_URL", control_url)
     os.environ.setdefault("OPENYAK_AUDIT_SYNC_ENABLED", "true")

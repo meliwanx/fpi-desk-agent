@@ -12,9 +12,11 @@ import {
   Loader2,
   Presentation,
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { API } from "@/lib/constants";
+import { parentDirectory, saveBase64AsFile } from "@/lib/file-download";
 import { artifactTypeFromExtension, languageFromExtension } from "@/lib/artifacts";
 import { useArtifactStore } from "@/stores/artifact-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -74,26 +76,6 @@ function artifactPanelType(filePath: string): ArtifactType {
   return artifactTypeFromExtension(filePath) ?? "file-preview";
 }
 
-function base64ToBlob(base64: string, mimeType: string): Blob {
-  const binary = window.atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return new Blob([bytes], { type: mimeType || "application/octet-stream" });
-}
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
 export function FileArtifactCard({
   data,
   filePath: directFilePath,
@@ -142,7 +124,11 @@ export function FileArtifactCard({
           { path: filePath, workspace },
           { timeoutMs: 120_000 },
         );
-        downloadBlob(base64ToBlob(res.content_base64, res.mime_type), res.name || fileName);
+        const saveName = res.name || fileName;
+        await saveBase64AsFile(res.content_base64, saveName, res.mime_type, parentDirectory(filePath));
+      } catch (err) {
+        console.error("Failed to download generated file", err);
+        toast.error("文件下载失败，请稍后重试");
       } finally {
         setDownloading(false);
       }

@@ -18,7 +18,7 @@ import {
   SSE_MAX_RETRIES,
 } from "./constants";
 import { getRemoteToken } from "./remote-connection";
-import { getCompanySessionToken } from "./company-auth";
+import { clearCompanySession, getCompanySessionToken } from "./company-auth";
 import type { SSEEventData } from "@/types/streaming";
 
 export type SSEEventHandler = (data: SSEEventData, id: number) => void;
@@ -256,6 +256,9 @@ export class SSEClient {
     })
       .then(async (res) => {
         if (!res.ok || !res.body) {
+          if ((res.status === 401 || res.status === 403) && getCompanySessionToken()) {
+            clearCompanySession();
+          }
           throw new Error(`SSE fetch failed: ${res.status}`);
         }
 

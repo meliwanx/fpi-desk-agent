@@ -218,6 +218,11 @@ h2 {
   opacity: .55;
 }
 
+.button.disabled {
+  pointer-events: none;
+  opacity: .55;
+}
+
 .button.outline, .button.ghost {
   border-color: var(--border);
   background: #fff;
@@ -290,6 +295,61 @@ label {
 .checkbox-row input {
   width: 16px;
   height: 16px;
+}
+
+.update-asset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.update-asset-panel {
+  display: grid;
+  gap: 10px;
+  min-height: 188px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+
+.update-asset-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.update-asset-head strong {
+  font-size: 14px;
+}
+
+.update-asset-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.update-asset-meta {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.update-asset-meta b {
+  color: var(--foreground);
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.file-button {
+  width: fit-content;
+  min-width: 96px;
+}
+
+.file-button input {
+  display: none;
 }
 
 .split {
@@ -496,6 +556,55 @@ pre {
 
 .tool-input-cell {
   min-width: 260px;
+}
+
+.feedback-list {
+  display: grid;
+  gap: 12px;
+}
+
+.feedback-item {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 14px;
+}
+
+.feedback-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.feedback-description {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #1f2937;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.feedback-file {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f9fafb;
+  padding: 9px 10px;
+}
+
+.feedback-file span {
+  color: #111827;
+  font-size: 13px;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.feedback-file small {
+  color: var(--muted);
 }
 
 .badge, .pill {

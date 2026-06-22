@@ -13,7 +13,7 @@
 ; locked files cleanly.
 
 !macro NSIS_HOOK_PREINSTALL
-  DetailPrint "Terminating fpi-agent backend process if running..."
+  DetailPrint "正在关闭已运行的 fpi-agent 后台进程..."
 
   ; Kill the backend sidecar. Try current-user first (matches our default
   ; per-user install), then fall back to the machine-wide variant so this
@@ -44,5 +44,6 @@
 
   ; Give Windows a moment to release the file handles the killed
   ; processes were holding before we start overwriting files.
+  DetailPrint "正在等待 Windows 释放文件占用..."
   Sleep 1000
 !macroend

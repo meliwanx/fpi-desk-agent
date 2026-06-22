@@ -213,6 +213,25 @@ test.describe("OpenYak UI preflight", () => {
       .toBe(false);
   });
 
+  test("company login path: invalid saved session returns to login", async ({
+    page,
+  }) => {
+    await page.route("**/api/company-auth/session", (route) =>
+      route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "Company login required" }),
+      }),
+    );
+
+    await page.goto("/c/new");
+
+    await expect(
+      page.getByRole("heading", { name: "聚光办公助理" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("账号")).toBeVisible();
+  });
+
   test("desktop chat path: landing, mode switch, attachments, mentions, send, workspace panel", async ({
     page,
   }) => {

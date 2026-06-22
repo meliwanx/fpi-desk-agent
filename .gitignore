@@ -54,6 +54,13 @@ backend/ollama/
 
 # === Bundled Node.js runtime (downloaded by scripts/download_node.py) ===
 backend/resources/nodejs/
+resources/nodejs/
+
+# === Accidental root pnpm lock (workspace uses package-lock at repo root) ===
+/pnpm-lock.yaml
+
+# === Local planning artifacts ===
+docs/superpowers/
 
 # === OpenClaw local install ===
 backend/openclaw/

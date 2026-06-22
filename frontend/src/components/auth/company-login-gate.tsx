@@ -8,6 +8,8 @@ import { apiErrorMessage } from "@/lib/api";
 import { API } from "@/lib/constants";
 import { enterpriseApi } from "@/lib/enterprise-api";
 import {
+  COMPANY_SESSION_CHANGED_EVENT,
+  COMPANY_SESSION_STORAGE_KEY,
   type CompanyLoginResponse,
   type CompanySessionPayload,
   clearCompanySession,
@@ -29,10 +31,26 @@ export function CompanyLoginGate({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
+    const syncFromStorage = () => {
+      if (!mounted) return;
+      setSession(readCompanySession());
+      setChecking(false);
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === COMPANY_SESSION_STORAGE_KEY) syncFromStorage();
+    };
+
+    window.addEventListener(COMPANY_SESSION_CHANGED_EVENT, syncFromStorage);
+    window.addEventListener("storage", handleStorage);
+
     const existing = readCompanySession();
     if (!existing) {
       setChecking(false);
-      return;
+      return () => {
+        mounted = false;
+        window.removeEventListener(COMPANY_SESSION_CHANGED_EVENT, syncFromStorage);
+        window.removeEventListener("storage", handleStorage);
+      };
     }
 
     enterpriseApi
@@ -51,6 +69,8 @@ export function CompanyLoginGate({ children }: { children: ReactNode }) {
 
     return () => {
       mounted = false;
+      window.removeEventListener(COMPANY_SESSION_CHANGED_EVENT, syncFromStorage);
+      window.removeEventListener("storage", handleStorage);
     };
   }, []);
 

@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+from starlette.responses import FileResponse
+
+from app.dependencies import SettingsDep
 
 router = APIRouter()
 
@@ -46,15 +50,52 @@ def _compare_versions(left: str, right: str) -> int:
     return -1 if lhs < rhs else 1
 
 
-def _download_url_for_platform(policy: Any, platform: str) -> str:
+def _normalized_platform(platform: str) -> str:
     normalized = (platform or "").lower()
     if normalized in {"darwin", "mac", "macos", "osx"}:
-        return str(_policy_value(policy, "macos_download_url") or _policy_value(policy, "default_download_url") or "")
+        return "macos"
     if normalized in {"windows", "win", "win32", "win64"}:
-        return str(_policy_value(policy, "windows_download_url") or _policy_value(policy, "default_download_url") or "")
+        return "windows"
     if normalized in {"linux", "linux-x64", "ubuntu", "debian"}:
+        return "linux"
+    return "default"
+
+
+def _legacy_download_url_for_platform(policy: Any, platform: str) -> str:
+    normalized = _normalized_platform(platform)
+    if normalized == "macos":
+        return str(_policy_value(policy, "macos_download_url") or _policy_value(policy, "default_download_url") or "")
+    if normalized == "windows":
+        return str(_policy_value(policy, "windows_download_url") or _policy_value(policy, "default_download_url") or "")
+    if normalized == "linux":
         return str(_policy_value(policy, "linux_download_url") or _policy_value(policy, "default_download_url") or "")
     return str(_policy_value(policy, "default_download_url") or "")
+
+
+def _asset_id_for_platform(policy: Any, platform: str) -> str:
+    normalized = _normalized_platform(platform)
+    if normalized == "macos":
+        asset_id = _policy_value(policy, "macos_asset_id")
+    elif normalized == "windows":
+        asset_id = _policy_value(policy, "windows_asset_id")
+    elif normalized == "linux":
+        asset_id = _policy_value(policy, "linux_asset_id")
+    else:
+        asset_id = ""
+    return str(asset_id or _policy_value(policy, "default_asset_id") or "")
+
+
+async def _local_download_url_for_platform(request: Request, policy: Any, platform: str) -> str:
+    asset_id = _asset_id_for_platform(policy, platform)
+    if not asset_id:
+        return ""
+    store = _company_store(request)
+    if not hasattr(store, "get_update_asset"):
+        return ""
+    asset = await store.get_update_asset(asset_id)
+    if asset is None:
+        return ""
+    return str(request.url_for("download_app_update_asset", asset_id=asset.id))
 
 
 def build_update_response(
@@ -62,6 +103,7 @@ def build_update_response(
     *,
     current_version: str,
     platform: str,
+    download_url: str | None = None,
 ) -> AppUpdatePolicyResponse:
     enabled = bool(_policy_value(policy, "enabled", False))
     latest_version = str(_policy_value(policy, "latest_version", "") or "").strip()
@@ -80,7 +122,7 @@ def build_update_response(
         update_available=update_available,
         force_update=force_update,
         release_notes=str(_policy_value(policy, "release_notes", "") or ""),
-        download_url=_download_url_for_platform(policy, platform),
+        download_url=download_url if download_url is not None else _legacy_download_url_for_platform(policy, platform),
         checked_at=datetime.now(timezone.utc).isoformat(),
     )
 
@@ -101,4 +143,39 @@ async def get_app_update_policy(
 ) -> AppUpdatePolicyResponse:
     del arch
     policy = await _company_store(request).get_update_policy()
-    return build_update_response(policy, current_version=current_version, platform=platform)
+    local_download_url = await _local_download_url_for_platform(request, policy, platform)
+    download_url = local_download_url or _legacy_download_url_for_platform(policy, platform)
+    return build_update_response(
+        policy,
+        current_version=current_version,
+        platform=platform,
+        download_url=download_url,
+    )
+
+
+@router.get("/app/update-download/{asset_id}", name="download_app_update_asset")
+async def download_app_update_asset(
+    request: Request,
+    settings: SettingsDep,
+    asset_id: str,
+) -> FileResponse:
+    store = _company_store(request)
+    if not hasattr(store, "get_update_asset"):
+        raise HTTPException(status_code=404, detail="Update asset not found")
+    asset = await store.get_update_asset(asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Update asset not found")
+
+    storage_dir = Path(settings.update_asset_storage_dir).expanduser()
+    file_path = storage_dir / Path(asset.stored_filename).name
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Update asset file not found")
+
+    if hasattr(store, "increment_update_asset_download_count"):
+        await store.increment_update_asset_download_count(asset.id)
+
+    return FileResponse(
+        file_path,
+        media_type=asset.mime_type or "application/octet-stream",
+        filename=asset.original_filename or file_path.name,
+    )

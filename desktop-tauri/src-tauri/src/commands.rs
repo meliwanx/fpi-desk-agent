@@ -82,6 +82,7 @@ pub async fn download_and_save(
     url: Option<String>,
     data: Option<Vec<u8>>,
     default_name: String,
+    default_directory: Option<String>,
 ) -> Result<bool, String> {
     use tauri_plugin_dialog::DialogExt;
 
@@ -93,15 +94,23 @@ pub async fn download_and_save(
         .to_string();
     let label = ext.to_uppercase();
 
-    // Show native save dialog
+    // Show native save dialog. When exporting a generated workspace file,
+    // start in that file's directory so the default save location stays
+    // close to the active workspace instead of the OS downloads folder.
     let (tx, rx) = tokio::sync::oneshot::channel();
-    app.dialog()
+    let mut dialog = app.dialog()
         .file()
         .set_file_name(&default_name)
-        .add_filter(&label, &[&ext])
-        .save_file(move |path| {
-            let _ = tx.send(path);
-        });
+        .add_filter(&label, &[&ext]);
+    if let Some(default_directory) = default_directory.as_deref().filter(|s| !s.trim().is_empty()) {
+        let directory = std::path::Path::new(default_directory);
+        if directory.is_dir() {
+            dialog = dialog.set_directory(directory);
+        }
+    }
+    dialog.save_file(move |path| {
+        let _ = tx.send(path);
+    });
 
     let file_path = rx.await.map_err(|e| format!("Dialog error: {e}"))?;
     let path = match file_path {

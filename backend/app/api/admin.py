@@ -6,6 +6,7 @@ import hashlib
 import json
 import mimetypes
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,13 @@ from sqlalchemy.orm.attributes import flag_modified
 from starlette.responses import FileResponse
 
 from app.company_auth.model_policy_sync import sync_company_model_policy
-from app.company_auth.store import CompanyModelPolicy, CompanyUpdatePolicy, CompanyUser
+from app.company_auth.store import (
+    CompanyFeedback,
+    CompanyModelPolicy,
+    CompanyUpdateAsset,
+    CompanyUpdatePolicy,
+    CompanyUser,
+)
 from app.config import Settings
 from app.dependencies import DbDep, SettingsDep
 from app.models.audit import (
@@ -100,10 +107,30 @@ class AdminUpdatePolicyRequest(BaseModel):
     min_supported_version: str = ""
     force_update: bool = False
     release_notes: str = ""
+    macos_asset_id: str = ""
+    windows_asset_id: str = ""
+    linux_asset_id: str = ""
+    default_asset_id: str = ""
     macos_download_url: str = ""
     windows_download_url: str = ""
     linux_download_url: str = ""
     default_download_url: str = ""
+
+
+class AdminUpdateAssetResponse(BaseModel):
+    id: str
+    platform: str
+    version: str
+    original_filename: str
+    mime_type: str
+    size_bytes: int
+    sha256: str
+    uploaded_by_user_id: str
+    uploaded_by_email: str
+    uploaded_by_display_name: str
+    download_count: int
+    time_created: datetime
+    time_updated: datetime
 
 
 class AdminUpdatePolicyResponse(BaseModel):
@@ -112,10 +139,37 @@ class AdminUpdatePolicyResponse(BaseModel):
     min_supported_version: str
     force_update: bool
     release_notes: str
+    macos_asset_id: str
+    windows_asset_id: str
+    linux_asset_id: str
+    default_asset_id: str
+    macos_asset: AdminUpdateAssetResponse | None = None
+    windows_asset: AdminUpdateAssetResponse | None = None
+    linux_asset: AdminUpdateAssetResponse | None = None
+    default_asset: AdminUpdateAssetResponse | None = None
     macos_download_url: str
     windows_download_url: str
     linux_download_url: str
     default_download_url: str
+
+
+class AdminFeedbackResponse(BaseModel):
+    id: str
+    user_id: str
+    user_email: str
+    user_display_name: str
+    description: str
+    image_original_filename: str
+    image_mime_type: str
+    image_size_bytes: int
+    image_sha256: str
+    image_download_url: str | None = None
+    time_created: datetime
+    time_updated: datetime
+
+
+class AdminFeedbackListResponse(BaseModel):
+    items: list[AdminFeedbackResponse]
 
 
 class AuditIngestSession(BaseModel):
@@ -203,13 +257,53 @@ def _update_policy_value(policy: CompanyUpdatePolicy | dict[str, Any], key: str,
     return getattr(policy, key, default)
 
 
-def _public_update_policy(policy: CompanyUpdatePolicy | dict[str, Any]) -> AdminUpdatePolicyResponse:
+def _public_update_asset(asset: CompanyUpdateAsset) -> AdminUpdateAssetResponse:
+    return AdminUpdateAssetResponse(
+        id=asset.id,
+        platform=asset.platform,
+        version=asset.version,
+        original_filename=asset.original_filename,
+        mime_type=asset.mime_type,
+        size_bytes=asset.size_bytes,
+        sha256=asset.sha256,
+        uploaded_by_user_id=asset.uploaded_by_user_id,
+        uploaded_by_email=asset.uploaded_by_email,
+        uploaded_by_display_name=asset.uploaded_by_display_name,
+        download_count=asset.download_count,
+        time_created=asset.time_created,
+        time_updated=asset.time_updated,
+    )
+
+
+async def _policy_asset(store: Any, asset_id: str) -> AdminUpdateAssetResponse | None:
+    if not asset_id or not hasattr(store, "get_update_asset"):
+        return None
+    asset = await store.get_update_asset(asset_id)
+    return _public_update_asset(asset) if asset is not None else None
+
+
+async def _public_update_policy(
+    policy: CompanyUpdatePolicy | dict[str, Any],
+    store: Any,
+) -> AdminUpdatePolicyResponse:
+    macos_asset_id = str(_update_policy_value(policy, "macos_asset_id", "") or "")
+    windows_asset_id = str(_update_policy_value(policy, "windows_asset_id", "") or "")
+    linux_asset_id = str(_update_policy_value(policy, "linux_asset_id", "") or "")
+    default_asset_id = str(_update_policy_value(policy, "default_asset_id", "") or "")
     return AdminUpdatePolicyResponse(
         enabled=bool(_update_policy_value(policy, "enabled", False)),
         latest_version=str(_update_policy_value(policy, "latest_version", "") or ""),
         min_supported_version=str(_update_policy_value(policy, "min_supported_version", "") or ""),
         force_update=bool(_update_policy_value(policy, "force_update", False)),
         release_notes=str(_update_policy_value(policy, "release_notes", "") or ""),
+        macos_asset_id=macos_asset_id,
+        windows_asset_id=windows_asset_id,
+        linux_asset_id=linux_asset_id,
+        default_asset_id=default_asset_id,
+        macos_asset=await _policy_asset(store, macos_asset_id),
+        windows_asset=await _policy_asset(store, windows_asset_id),
+        linux_asset=await _policy_asset(store, linux_asset_id),
+        default_asset=await _policy_asset(store, default_asset_id),
         macos_download_url=str(_update_policy_value(policy, "macos_download_url", "") or ""),
         windows_download_url=str(_update_policy_value(policy, "windows_download_url", "") or ""),
         linux_download_url=str(_update_policy_value(policy, "linux_download_url", "") or ""),
@@ -231,6 +325,14 @@ def _safe_filename(name: str | None) -> str:
 
 def _audit_storage_dir(settings: Settings) -> Path:
     return Path(settings.audit_file_storage_dir).expanduser()
+
+
+def _update_asset_storage_dir(settings: Settings) -> Path:
+    return Path(settings.update_asset_storage_dir).expanduser()
+
+
+def _feedback_storage_dir(settings: Settings) -> Path:
+    return Path(settings.feedback_storage_dir).expanduser()
 
 
 def _json_text(value: Any) -> str:
@@ -406,8 +508,9 @@ async def update_admin_model_policy(
 @router.get("/admin/update-policy", response_model=AdminUpdatePolicyResponse)
 async def get_admin_update_policy(request: Request) -> AdminUpdatePolicyResponse:
     _require_admin(request)
-    policy = await _company_store(request).get_update_policy()
-    return _public_update_policy(policy)
+    store = _company_store(request)
+    policy = await store.get_update_policy()
+    return await _public_update_policy(policy, store)
 
 
 @router.put("/admin/update-policy", response_model=AdminUpdatePolicyResponse)
@@ -416,13 +519,18 @@ async def update_admin_update_policy(
     body: AdminUpdatePolicyRequest,
 ) -> AdminUpdatePolicyResponse:
     _require_admin(request)
+    store = _company_store(request)
     try:
-        policy = await _company_store(request).update_update_policy(
+        policy = await store.update_update_policy(
             enabled=body.enabled,
             latest_version=body.latest_version,
             min_supported_version=body.min_supported_version,
             force_update=body.force_update,
             release_notes=body.release_notes,
+            macos_asset_id=body.macos_asset_id,
+            windows_asset_id=body.windows_asset_id,
+            linux_asset_id=body.linux_asset_id,
+            default_asset_id=body.default_asset_id,
             macos_download_url=body.macos_download_url,
             windows_download_url=body.windows_download_url,
             linux_download_url=body.linux_download_url,
@@ -430,7 +538,117 @@ async def update_admin_update_policy(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _public_update_policy(policy)
+    return await _public_update_policy(policy, store)
+
+
+@router.post("/admin/update-assets/upload", response_model=AdminUpdateAssetResponse)
+async def upload_admin_update_asset(
+    request: Request,
+    settings: SettingsDep,
+    platform: str = Form(...),
+    version: str = Form(...),
+    file: UploadFile = File(...),
+) -> AdminUpdateAssetResponse:
+    user = _require_admin(request)
+    store = _company_store(request)
+    original_filename = _safe_filename(file.filename)
+    storage_dir = _update_asset_storage_dir(settings)
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    stored_filename = f"{generate_ulid()}-{original_filename}"
+    target = storage_dir / stored_filename
+
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        with target.open("wb") as handle:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                digest.update(chunk)
+                handle.write(chunk)
+    except Exception:
+        if target.exists():
+            target.unlink(missing_ok=True)
+        raise
+
+    if size == 0:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Update asset file cannot be empty")
+
+    mime_type = file.content_type or mimetypes.guess_type(original_filename)[0] or "application/octet-stream"
+    try:
+        asset = await store.create_update_asset(
+            platform=platform,
+            version=version,
+            original_filename=original_filename,
+            stored_filename=stored_filename,
+            mime_type=mime_type,
+            size_bytes=size,
+            sha256=digest.hexdigest(),
+            uploaded_by_user_id=user.id,
+            uploaded_by_email=user.email,
+            uploaded_by_display_name=user.display_name,
+        )
+    except ValueError as exc:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return _public_update_asset(asset)
+
+
+def _public_feedback(request: Request, feedback: CompanyFeedback) -> AdminFeedbackResponse:
+    image_download_url = None
+    if feedback.image_stored_filename:
+        image_download_url = str(request.url_for("download_admin_feedback_image", feedback_id=feedback.id))
+    return AdminFeedbackResponse(
+        id=feedback.id,
+        user_id=feedback.user_id,
+        user_email=feedback.user_email,
+        user_display_name=feedback.user_display_name,
+        description=feedback.description,
+        image_original_filename=feedback.image_original_filename,
+        image_mime_type=feedback.image_mime_type,
+        image_size_bytes=feedback.image_size_bytes,
+        image_sha256=feedback.image_sha256,
+        image_download_url=image_download_url,
+        time_created=feedback.time_created,
+        time_updated=feedback.time_updated,
+    )
+
+
+@router.get("/admin/feedback", response_model=AdminFeedbackListResponse)
+async def list_admin_feedback(request: Request) -> AdminFeedbackListResponse:
+    _require_admin(request)
+    store = _company_store(request)
+    if not hasattr(store, "list_feedback"):
+        return AdminFeedbackListResponse(items=[])
+    items = await store.list_feedback()
+    return AdminFeedbackListResponse(items=[_public_feedback(request, item) for item in items])
+
+
+@router.get("/admin/feedback/{feedback_id}/image", name="download_admin_feedback_image")
+async def download_admin_feedback_image(
+    request: Request,
+    settings: SettingsDep,
+    feedback_id: str,
+) -> FileResponse:
+    _require_admin(request)
+    store = _company_store(request)
+    if not hasattr(store, "get_feedback"):
+        raise HTTPException(status_code=404, detail="Feedback not found")
+    feedback = await store.get_feedback(feedback_id)
+    if feedback is None or not feedback.image_stored_filename:
+        raise HTTPException(status_code=404, detail="Feedback image not found")
+    file_path = _feedback_storage_dir(settings) / Path(feedback.image_stored_filename).name
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Feedback image file not found")
+    return FileResponse(
+        file_path,
+        media_type=feedback.image_mime_type or "application/octet-stream",
+        filename=feedback.image_original_filename or file_path.name,
+    )
 
 
 async def _upsert_audit_session(

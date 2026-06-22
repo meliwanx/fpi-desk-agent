@@ -11,7 +11,7 @@ import {
   type ModelPolicy,
 } from "./modelPolicy";
 
-type Tab = "overview" | "sessions" | "risks" | "tools" | "users" | "models" | "updates";
+type Tab = "overview" | "sessions" | "risks" | "tools" | "feedback" | "users" | "models" | "updates";
 
 interface UserInfo {
   id: string;
@@ -83,6 +83,21 @@ interface ToolCallItem {
   time_updated: string;
 }
 
+interface FeedbackItem {
+  id: string;
+  user_id: string;
+  user_email: string;
+  user_display_name: string;
+  description: string;
+  image_original_filename: string;
+  image_mime_type: string;
+  image_size_bytes: number;
+  image_sha256: string;
+  image_download_url: string | null;
+  time_created: string;
+  time_updated: string;
+}
+
 interface TranscriptPart {
   id: string;
   type: string;
@@ -142,11 +157,50 @@ interface UpdatePolicy {
   min_supported_version: string;
   force_update: boolean;
   release_notes: string;
+  macos_asset_id: string;
+  windows_asset_id: string;
+  linux_asset_id: string;
+  default_asset_id: string;
+  macos_asset: UpdateAsset | null;
+  windows_asset: UpdateAsset | null;
+  linux_asset: UpdateAsset | null;
+  default_asset: UpdateAsset | null;
   macos_download_url: string;
   windows_download_url: string;
   linux_download_url: string;
   default_download_url: string;
 }
+
+interface UpdateAsset {
+  id: string;
+  platform: string;
+  version: string;
+  original_filename: string;
+  mime_type: string;
+  size_bytes: number;
+  sha256: string;
+  uploaded_by_user_id: string;
+  uploaded_by_email: string;
+  uploaded_by_display_name: string;
+  download_count: number;
+  time_created: string;
+  time_updated: string;
+}
+
+type UpdateAssetIdKey = "macos_asset_id" | "windows_asset_id" | "linux_asset_id" | "default_asset_id";
+type UpdateAssetKey = "macos_asset" | "windows_asset" | "linux_asset" | "default_asset";
+
+const UPDATE_ASSET_SLOTS: Array<{
+  platform: string;
+  label: string;
+  assetIdKey: UpdateAssetIdKey;
+  assetKey: UpdateAssetKey;
+}> = [
+  { platform: "macos", label: "macOS", assetIdKey: "macos_asset_id", assetKey: "macos_asset" },
+  { platform: "windows", label: "Windows", assetIdKey: "windows_asset_id", assetKey: "windows_asset" },
+  { platform: "linux", label: "Linux", assetIdKey: "linux_asset_id", assetKey: "linux_asset" },
+  { platform: "default", label: "默认包", assetIdKey: "default_asset_id", assetKey: "default_asset" },
+];
 
 const SESSION_KEY = "fpi-admin-session";
 
@@ -353,6 +407,7 @@ export function App() {
             ["sessions", "会话审计"],
             ["risks", "风险发现"],
             ["tools", "工具调用"],
+            ["feedback", "问题反馈"],
             ["users", "员工管理"],
             ["models", "模型管控"],
             ["updates", "版本更新"],
@@ -385,6 +440,7 @@ export function App() {
         {tab === "sessions" && <Sessions api={api} token={token} />}
         {tab === "risks" && <Risks api={api} />}
         {tab === "tools" && <ToolCalls api={api} />}
+        {tab === "feedback" && <FeedbackPanel api={api} token={token} />}
         {tab === "users" && <Users api={api} />}
         {tab === "models" && <ModelPolicyPanel api={api} />}
         {tab === "updates" && <UpdatePolicyPanel api={api} />}
@@ -399,6 +455,7 @@ function tabTitle(tab: Tab): string {
     sessions: "会话审计",
     risks: "风险发现",
     tools: "工具调用",
+    feedback: "问题反馈",
     users: "员工管理",
     models: "模型管控",
     updates: "版本更新",
@@ -411,6 +468,7 @@ function tabSubtitle(tab: Tab): string {
     sessions: "按员工、工作区查看每一条对话记录和上传文件。",
     risks: "集中处理敏感内容、密钥、订阅链接等风险线索。",
     tools: "审计模型调用的本地工具、输入、输出和状态。",
+    feedback: "查看员工提交的问题描述和截图。",
     users: "创建员工账号、查看角色和启用状态。",
     models: "统一控制客户端可见模型和默认模型。",
     updates: "发布客户端版本策略，控制是否强制员工升级。",
@@ -655,6 +713,63 @@ function ToolCalls({ api }: { api: ReturnType<typeof useApi> }) {
   );
 }
 
+function FeedbackPanel({ api, token }: { api: ReturnType<typeof useApi>; token: string }) {
+  const [items, setItems] = useState<FeedbackItem[]>([]);
+  const [error, setError] = useState("");
+
+  async function loadFeedback() {
+    setError("");
+    try {
+      const data = await api<{ items: FeedbackItem[] }>("/api/admin/feedback");
+      setItems(data.items);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "反馈加载失败");
+    }
+  }
+
+  useEffect(() => {
+    void loadFeedback();
+  }, []);
+
+  if (error) return <section className="card error">{error}</section>;
+
+  return (
+    <section className="card">
+      {items.length === 0 ? (
+        <p className="muted">暂无反馈</p>
+      ) : (
+        <div className="feedback-list">
+          {items.map((item) => (
+            <article className="feedback-item" key={item.id}>
+              <div className="feedback-head">
+                <div>
+                  <strong>{item.user_display_name || item.user_email || "未知员工"}</strong>
+                  <div className="muted">{item.user_email || "-"} · {compactDate(item.time_created)}</div>
+                </div>
+                {item.image_download_url && (
+                  <button
+                    className="button outline"
+                    onClick={() => void downloadFile(item.image_download_url!, token)}
+                  >
+                    下载附图
+                  </button>
+                )}
+              </div>
+              <p className="feedback-description">{item.description}</p>
+              {item.image_original_filename && (
+                <div className="feedback-file">
+                  <span>{item.image_original_filename}</span>
+                  <small>{item.image_mime_type || "image"} · {formatNumber(item.image_size_bytes)} bytes · {item.image_sha256.slice(0, 16)}...</small>
+                </div>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function Users({ api }: { api: ReturnType<typeof useApi> }) {
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [email, setEmail] = useState("");
@@ -835,6 +950,7 @@ function ModelPolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
 function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
   const [policy, setPolicy] = useState<UpdatePolicy | null>(null);
   const [message, setMessage] = useState("");
+  const [uploadingSlot, setUploadingSlot] = useState<string | null>(null);
 
   async function loadPolicy() {
     const data = await api<UpdatePolicy>("/api/admin/update-policy");
@@ -856,12 +972,59 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
     try {
       const saved = await api<UpdatePolicy>("/api/admin/update-policy", {
         method: "PUT",
-        body: JSON.stringify(policy),
+        body: JSON.stringify({
+          enabled: policy.enabled,
+          latest_version: policy.latest_version,
+          min_supported_version: policy.min_supported_version,
+          force_update: policy.force_update,
+          release_notes: policy.release_notes,
+          macos_asset_id: policy.macos_asset_id,
+          windows_asset_id: policy.windows_asset_id,
+          linux_asset_id: policy.linux_asset_id,
+          default_asset_id: policy.default_asset_id,
+          macos_download_url: policy.macos_download_url,
+          windows_download_url: policy.windows_download_url,
+          linux_download_url: policy.linux_download_url,
+          default_download_url: policy.default_download_url,
+        }),
       });
       setPolicy(saved);
       setMessage("已保存，员工客户端启动或下次检查更新时生效");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存失败");
+    }
+  }
+
+  async function uploadAsset(slot: (typeof UPDATE_ASSET_SLOTS)[number], file: File | null) {
+    if (!policy || !file) return;
+    const version = policy.latest_version.trim();
+    if (!version) {
+      setMessage("请先填写最新版号，再上传安装包");
+      return;
+    }
+
+    const form = new FormData();
+    form.set("platform", slot.platform);
+    form.set("version", version);
+    form.set("file", file);
+
+    setMessage("");
+    setUploadingSlot(slot.platform);
+    try {
+      const asset = await api<UpdateAsset>("/api/admin/update-assets/upload", {
+        method: "POST",
+        body: form,
+      });
+      setPolicy({
+        ...policy,
+        [slot.assetIdKey]: asset.id,
+        [slot.assetKey]: asset,
+      });
+      setMessage(`${slot.label} 安装包已上传，请保存策略后生效`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "上传失败");
+    } finally {
+      setUploadingSlot(null);
     }
   }
 
@@ -890,7 +1053,7 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
           <button className="button" onClick={() => void savePolicy()}>保存策略</button>
         </div>
         <div className="hint">
-          把安装包放到服务器、对象存储或 CDN 后，将下载地址填到对应平台。最低可用版本以下的客户端会被强制更新；非强制更新时，旧版本仍可继续使用。
+          直接上传各平台安装包，服务器会作为文件存储提供下载。最低可用版本以下的客户端会被强制更新；非强制更新时，旧版本仍可继续使用。
         </div>
         <div className="form-grid update-form">
           <label className="model-field">
@@ -911,42 +1074,47 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
               onChange={(event) => updatePolicy({ min_supported_version: event.target.value })}
             />
           </label>
-          <label className="model-field model-field-wide">
-            <span>macOS 下载地址</span>
-            <input
-              className="input"
-              placeholder="https://example.com/fpi-agent-1.4.0.dmg"
-              value={policy.macos_download_url}
-              onChange={(event) => updatePolicy({ macos_download_url: event.target.value })}
-            />
-          </label>
-          <label className="model-field model-field-wide">
-            <span>Windows 下载地址</span>
-            <input
-              className="input"
-              placeholder="https://example.com/fpi-agent-1.4.0.exe"
-              value={policy.windows_download_url}
-              onChange={(event) => updatePolicy({ windows_download_url: event.target.value })}
-            />
-          </label>
-          <label className="model-field model-field-wide">
-            <span>Linux 下载地址</span>
-            <input
-              className="input"
-              placeholder="https://example.com/fpi-agent-1.4.0.deb"
-              value={policy.linux_download_url}
-              onChange={(event) => updatePolicy({ linux_download_url: event.target.value })}
-            />
-          </label>
-          <label className="model-field model-field-wide">
-            <span>默认下载地址</span>
-            <input
-              className="input"
-              placeholder="https://example.com/fpi-agent-1.4.0.zip"
-              value={policy.default_download_url}
-              onChange={(event) => updatePolicy({ default_download_url: event.target.value })}
-            />
-          </label>
+          <div className="model-field model-field-wide">
+            <span>安装包文件</span>
+            <div className="update-asset-grid">
+              {UPDATE_ASSET_SLOTS.map((slot) => {
+                const asset = policy[slot.assetKey];
+                const isUploading = uploadingSlot === slot.platform;
+                return (
+                  <div className="update-asset-panel" key={slot.platform}>
+                    <div className="update-asset-head">
+                      <strong>{slot.label}</strong>
+                      <span>{asset ? `v${asset.version}` : "未上传"}</span>
+                    </div>
+                    {asset ? (
+                      <div className="update-asset-meta">
+                        <b>{asset.original_filename}</b>
+                        <span>{asset.mime_type || "文件"} · {formatNumber(asset.size_bytes)} bytes</span>
+                        <span>上传人：{asset.uploaded_by_display_name || asset.uploaded_by_email || "-"}</span>
+                        <span>上传时间：{compactDate(asset.time_created)}</span>
+                        <span>下载次数：{formatNumber(asset.download_count)}</span>
+                        <span>SHA-256：{asset.sha256.slice(0, 16)}...</span>
+                      </div>
+                    ) : (
+                      <p className="muted">员工端匹配不到该平台包时会使用默认包。</p>
+                    )}
+                    <label className={`button outline file-button ${isUploading ? "disabled" : ""}`}>
+                      <input
+                        type="file"
+                        disabled={isUploading}
+                        onChange={(event) => {
+                          const selected = event.currentTarget.files?.[0] ?? null;
+                          event.currentTarget.value = "";
+                          void uploadAsset(slot, selected);
+                        }}
+                      />
+                      {isUploading ? "上传中..." : asset ? "替换文件" : "上传文件"}
+                    </label>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
           <label className="model-field model-field-wide">
             <span>更新说明</span>
             <textarea
