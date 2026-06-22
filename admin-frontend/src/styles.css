@@ -587,6 +587,35 @@ pre {
   line-height: 1.65;
 }
 
+.feedback-preview {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f9fafb;
+}
+
+.feedback-preview-image {
+  display: block;
+  width: 100%;
+  max-height: 520px;
+  object-fit: contain;
+  background: #fff;
+}
+
+.feedback-preview-loading,
+.feedback-preview-error {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f9fafb;
+  padding: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.feedback-preview-error {
+  color: #b91c1c;
+}
+
 .feedback-file {
   display: grid;
   gap: 3px;

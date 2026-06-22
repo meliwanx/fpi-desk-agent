@@ -46,6 +46,7 @@ from app.provider.registry import ProviderRegistry
 from app.skill.registry import SkillRegistry
 from app.storage.database import create_engine, create_session_factory
 from app.tool.registry import ToolRegistry
+from app.website import router as website_router
 
 logger = logging.getLogger(__name__)
 
@@ -754,6 +755,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Mount routers
     app.include_router(health_router)
+    app.include_router(website_router)
     app.include_router(api_router, prefix="/api")
     app.include_router(openai_compat_router, tags=["openai-compat"])
 

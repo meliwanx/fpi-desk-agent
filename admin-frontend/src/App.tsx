@@ -746,16 +746,15 @@ function FeedbackPanel({ api, token }: { api: ReturnType<typeof useApi>; token: 
                   <strong>{item.user_display_name || item.user_email || "未知员工"}</strong>
                   <div className="muted">{item.user_email || "-"} · {compactDate(item.time_created)}</div>
                 </div>
-                {item.image_download_url && (
-                  <button
-                    className="button outline"
-                    onClick={() => void downloadFile(item.image_download_url!, token)}
-                  >
-                    下载附图
-                  </button>
-                )}
               </div>
               <p className="feedback-description">{item.description}</p>
+              {item.image_download_url && (
+                <FeedbackImagePreview
+                  url={item.image_download_url}
+                  token={token}
+                  alt={item.image_original_filename || "反馈附图"}
+                />
+              )}
               {item.image_original_filename && (
                 <div className="feedback-file">
                   <span>{item.image_original_filename}</span>
@@ -767,6 +766,45 @@ function FeedbackPanel({ api, token }: { api: ReturnType<typeof useApi>; token: 
         </div>
       )}
     </section>
+  );
+}
+
+function FeedbackImagePreview({ url, token, alt }: { url: string; token: string; alt: string }) {
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl = "";
+    setPreviewUrl("");
+    setError("");
+
+    async function loadImage() {
+      try {
+        const response = await fetch(url, { headers: { "X-FPI-Session": token } });
+        if (!response.ok) throw new Error(await response.text());
+        const blob = await response.blob();
+        objectUrl = URL.createObjectURL(blob);
+        if (!cancelled) setPreviewUrl(objectUrl);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "附图加载失败");
+      }
+    }
+
+    void loadImage();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [url, token]);
+
+  if (error) return <div className="feedback-preview-error">{error}</div>;
+  if (!previewUrl) return <div className="feedback-preview-loading">附图加载中...</div>;
+
+  return (
+    <div className="feedback-preview">
+      <img className="feedback-preview-image" src={previewUrl} alt={alt} />
+    </div>
   );
 }
 
