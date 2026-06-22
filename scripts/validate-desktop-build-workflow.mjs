@@ -7,6 +7,8 @@ const workflowPath = resolve(".github/workflows/desktop-build.yml");
 const workflow = readFileSync(workflowPath, "utf8");
 const releaseWorkflowPath = resolve(".github/workflows/release.yml");
 const releaseWorkflow = readFileSync(releaseWorkflowPath, "utf8");
+const signingScriptPath = resolve("scripts/sign-macos-app.sh");
+const signingScript = readFileSync(signingScriptPath, "utf8");
 
 function getJobSection(source, jobName) {
   const marker = `\n  ${jobName}:`;
@@ -50,6 +52,7 @@ for (const [label, snippet] of [
   ["desktop macOS Apple ID secret", "APPLE_ID: ${{ secrets.APPLE_ID }}"],
   ["desktop macOS notarization password secret", "APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}"],
   ["desktop macOS certificate install", "Install Apple certificate"],
+  ["desktop macOS deterministic signing script", "scripts/sign-macos-app.sh \"$APP_PATH\" \"$SIGNING_IDENTITY\""],
   ["desktop macOS app notarization", "xcrun notarytool submit \"$ZIP_PATH\""],
   ["desktop macOS DMG notarization", "xcrun notarytool submit \"$BUNDLE_DIR/dmg/$DMG_NAME\""],
 ]) {
@@ -93,6 +96,7 @@ for (const [label, snippet] of [
 
 for (const [label, snippet] of [
   ["release workflow dynamic product name", "APP_NAME=$(node -e"],
+  ["release workflow deterministic signing script", "scripts/sign-macos-app.sh \"$APP_PATH\" \"$SIGNING_IDENTITY\""],
   ["release workflow app notarization", "xcrun notarytool submit \"$ZIP_PATH\""],
   ["release workflow DMG notarization", "xcrun notarytool submit \"$BUNDLE_DIR/dmg/$DMG_NAME\""],
   ["release workflow stapler validation", "xcrun stapler validate"],
@@ -102,5 +106,28 @@ for (const [label, snippet] of [
   assert(
     releaseMacosJob.includes(snippet),
     `release workflow missing ${label}: ${snippet}`,
+  );
+}
+
+for (const [label, snippet] of [
+  ["remove stale nested signatures", "codesign --remove-signature"],
+  ["remove stale bundle resource seal", "Contents/_CodeSignature"],
+  ["secure timestamp verification", "Timestamp="],
+  ["Developer ID authority verification", "Authority=Developer ID Application"],
+  ["strict nested code verification", "verify_macho_signature"],
+]) {
+  assert(
+    signingScript.includes(snippet),
+    `macOS signing script missing ${label}: ${snippet}`,
+  );
+}
+
+for (const [label, snippet] of [
+  ["deep recursive app signing", "codesign --force --deep"],
+  ["deep recursive app verification", "codesign -vvv --strict --deep"],
+]) {
+  assert(
+    !workflow.includes(snippet) && !releaseWorkflow.includes(snippet),
+    `workflows should not use ${label}: ${snippet}`,
   );
 }

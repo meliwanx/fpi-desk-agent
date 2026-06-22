@@ -237,43 +237,13 @@ jobs:
             --target ${{ matrix.target }} \
             --config '{"build":{"beforeBuildCommand":""},"bundle":{"targets":["dmg","app"],"createUpdaterArtifacts":true}}'
 
-      - name: Sign app bundle nested binaries
+      - name: Sign and verify app bundle
         run: |
           set -euo pipefail
           APP_NAME=$(node -e "const fs=require('node:fs'); const c=JSON.parse(fs.readFileSync('desktop-tauri/src-tauri/tauri.conf.json','utf8')); console.log(c.productName)")
-          BINARY_NAME=$(python3 -c "import tomllib; print(tomllib.load(open('desktop-tauri/src-tauri/Cargo.toml','rb'))['package']['name'])")
           SIGNING_IDENTITY=$(node -e "const fs=require('node:fs'); const c=JSON.parse(fs.readFileSync('desktop-tauri/src-tauri/tauri.conf.json','utf8')); console.log(c.bundle.macOS.signingIdentity)")
           APP_PATH="desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos/${APP_NAME}.app"
-          BUNDLE_BACKEND="$APP_PATH/Contents/Resources/backend"
-
-          if [ -d "$BUNDLE_BACKEND/_internal/Python.framework" ]; then
-            FW_PATH="$BUNDLE_BACKEND/_internal/Python.framework"
-            rm -rf "$FW_PATH/_CodeSignature"
-            if [ -f "$FW_PATH/Python" ] && [ ! -L "$FW_PATH/Python" ]; then
-              rm "$FW_PATH/Python"
-              if [ ! -L "$FW_PATH/Versions/Current" ]; then
-                (cd "$FW_PATH/Versions" && ln -s 3.12 Current)
-              fi
-              ln -s Versions/Current/Python "$FW_PATH/Python"
-            fi
-          fi
-
-          if [ -f "$BUNDLE_BACKEND/_internal/Python" ] && [ ! -L "$BUNDLE_BACKEND/_internal/Python" ]; then
-            rm "$BUNDLE_BACKEND/_internal/Python"
-            ln -s Python.framework/Versions/Current/Python "$BUNDLE_BACKEND/_internal/Python"
-          fi
-
-          if [ -d "$BUNDLE_BACKEND" ]; then
-            find "$BUNDLE_BACKEND" -type f -print0 | while IFS= read -r -d '' binary; do
-              if file "$binary" | grep -q 'Mach-O'; then
-                codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$binary"
-              fi
-            done
-          fi
-
-          codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP_PATH/Contents/MacOS/$BINARY_NAME"
-          codesign --force --deep --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP_PATH"
-          codesign -vvv --strict --deep "$APP_PATH"
+          scripts/sign-macos-app.sh "$APP_PATH" "$SIGNING_IDENTITY"
 
       - name: Notarize and staple app
         run: |

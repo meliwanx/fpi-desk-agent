@@ -179,55 +179,8 @@ jobs:
           set -euo pipefail
           APP_NAME=$(node -e "const fs=require('node:fs'); const c=JSON.parse(fs.readFileSync('desktop-tauri/src-tauri/tauri.conf.json','utf8')); console.log(c.productName)")
           SIGNING_IDENTITY=$(node -e "const fs=require('node:fs'); const c=JSON.parse(fs.readFileSync('desktop-tauri/src-tauri/tauri.conf.json','utf8')); console.log(c.bundle.macOS.signingIdentity)")
-          BUNDLE_BACKEND="desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos/${APP_NAME}.app/Contents/Resources/backend"
-
-          # Fix Python.framework symlink structure (Tauri resolves symlinks to regular files)
-          FW_PATH="$BUNDLE_BACKEND/_internal/Python.framework"
-          if [ -d "$FW_PATH" ]; then
-            # Remove broken top-level signature
-            rm -rf "$FW_PATH/_CodeSignature"
-
-            # Restore Python symlink
-            if [ -f "$FW_PATH/Python" ] && [ ! -L "$FW_PATH/Python" ]; then
-              rm "$FW_PATH/Python"
-              # Restore Versions/Current symlink
-              if [ ! -L "$FW_PATH/Versions/Current" ]; then
-                (cd "$FW_PATH/Versions" && ln -s 3.12 Current)
-              fi
-              ln -s Versions/Current/Python "$FW_PATH/Python"
-            fi
-
-            # Sign the actual versioned binary
-            codesign --force --options runtime --timestamp \
-              --sign "$SIGNING_IDENTITY" "$FW_PATH/Versions/3.12/Python"
-          fi
-
-          # Fix _internal/Python symlink
-          PYTHON_BIN="$BUNDLE_BACKEND/_internal/Python"
-          if [ -f "$PYTHON_BIN" ] && [ ! -L "$PYTHON_BIN" ]; then
-            rm "$PYTHON_BIN"
-            ln -s Python.framework/Versions/Current/Python "$PYTHON_BIN"
-          fi
-
-          find "$BUNDLE_BACKEND" -type f -print0 | while IFS= read -r -d '' binary; do
-            if file "$binary" | grep -q 'Mach-O'; then
-              codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$binary"
-            fi
-          done
-
-      # Re-sign the .app after modifying backend binaries
-      - name: Re-sign app bundle
-        run: |
-          set -euo pipefail
-          APP_NAME=$(node -e "const fs=require('node:fs'); const c=JSON.parse(fs.readFileSync('desktop-tauri/src-tauri/tauri.conf.json','utf8')); console.log(c.productName)")
-          BINARY_NAME=$(python3 -c "import tomllib; print(tomllib.load(open('desktop-tauri/src-tauri/Cargo.toml','rb'))['package']['name'])")
-          SIGNING_IDENTITY=$(node -e "const fs=require('node:fs'); const c=JSON.parse(fs.readFileSync('desktop-tauri/src-tauri/tauri.conf.json','utf8')); console.log(c.bundle.macOS.signingIdentity)")
           APP_PATH="desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos/${APP_NAME}.app"
-          codesign --force --options runtime --timestamp \
-            --sign "$SIGNING_IDENTITY" "$APP_PATH/Contents/MacOS/$BINARY_NAME"
-          codesign --force --options runtime --timestamp \
-            --sign "$SIGNING_IDENTITY" "$APP_PATH"
-          codesign -v --deep "$APP_PATH"
+          scripts/sign-macos-app.sh "$APP_PATH" "$SIGNING_IDENTITY"
 
       # Notarize with Apple
       - name: Notarize app
