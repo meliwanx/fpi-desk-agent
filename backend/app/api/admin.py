@@ -559,6 +559,7 @@ async def list_admin_company_sessions(
     request: Request,
     user_id: str | None = None,
     include_revoked: bool = False,
+    online_only: bool = True,
     limit: int = 100,
     offset: int = 0,
 ) -> AdminCompanySessionListResponse:
@@ -573,12 +574,16 @@ async def list_admin_company_sessions(
     now = datetime.now(timezone.utc)
     presence = getattr(request.app.state, "company_presence", None)
     online_session_ids = await presence.online_session_ids() if presence is not None and presence.available else set()
+    items = [
+        _public_company_session(session, now=now, online_session_ids=online_session_ids)
+        for session in sessions
+    ]
+    if online_only:
+        items = [session for session in items if session.is_online]
+        total = len(items)
     return AdminCompanySessionListResponse(
         total=total,
-        items=[
-            _public_company_session(session, now=now, online_session_ids=online_session_ids)
-            for session in sessions
-        ],
+        items=items,
     )
 
 

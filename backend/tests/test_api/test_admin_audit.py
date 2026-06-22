@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select
@@ -383,6 +384,54 @@ async def test_admin_can_list_and_revoke_company_sessions(app_client, db, tmp_pa
         assert action_item["action"] == "revoke_company_session"
         assert action_item["target_id"] == session.id
         assert action_item["metadata"]["reason"] == "账号风险，需要重新登录"
+    finally:
+        await store.dispose()
+
+
+async def test_admin_sessions_hide_offline_sessions_by_default(app_client, tmp_path):
+    store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
+    await store.startup()
+    app_client.app.state.company_auth_store = store
+    app_client.app.middleware_stack = None
+
+    async def inject_admin(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="admin-1",
+            email="admin@example.com",
+            display_name="Admin",
+            role="admin",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_admin)
+
+    try:
+        employee = await store.create_user(
+            email="employee@example.com",
+            display_name="员工一",
+            password="EmployeePassword123!",
+            role="user",
+        )
+        online_session = await store.create_session(employee.id, device_name="在线设备")
+        offline_session = await store.create_session(employee.id, device_name="离线设备")
+        async with store.engine.begin() as conn:
+            await conn.execute(
+                store.sessions.update()
+                .where(store.sessions.c.id == offline_session.id)
+                .values(last_seen_at=datetime.now(timezone.utc) - timedelta(minutes=10))
+            )
+
+        listed = await app_client.get("/api/admin/sessions")
+        assert listed.status_code == 200
+        assert [item["id"] for item in listed.json()["items"]] == [online_session.id]
+
+        listed_with_offline = await app_client.get("/api/admin/sessions?online_only=false")
+        assert listed_with_offline.status_code == 200
+        assert {item["id"] for item in listed_with_offline.json()["items"]} == {
+            online_session.id,
+            offline_session.id,
+        }
     finally:
         await store.dispose()
 

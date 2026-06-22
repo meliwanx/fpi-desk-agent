@@ -34,6 +34,13 @@ async def login(
     user = await store.authenticate(body.email, body.password)
     if user is None:
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    if user.role.lower() != "admin":
+        await store.revoke_sessions(
+            user_ids=[user.id],
+            revoked_by_user_id="system",
+            revoked_by_email="system",
+            reason="新设备登录，旧设备自动下线",
+        )
     session = await store.create_session(
         user.id,
         device_id=request.headers.get("x-fpi-device-id", ""),
