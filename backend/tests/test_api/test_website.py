@@ -20,6 +20,8 @@ async def test_website_landing_page_is_public_and_admin_stays_on_admin_route(app
         landing = await public_client.get("/")
         assert landing.status_code == 200
         assert "聚光智能办公助手" in landing.text
+        assert "可视化发展部提供技术支持" in landing.text
+        assert "从安装到反馈，流程尽量短" in landing.text
         assert "/download-options" in landing.text
 
         admin = await public_client.get("/admin")

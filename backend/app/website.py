@@ -134,6 +134,8 @@ def _website_html() -> str:
       --soft: #f4f7fb;
       --green: #138a62;
       --amber: #ad6b00;
+      --violet: #6d5bd0;
+      --teal: #0f7b8a;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
     }
     * { box-sizing: border-box; }
@@ -182,6 +184,17 @@ def _website_html() -> str:
       color: var(--muted);
       font-size: 14px;
     }
+    .support-link {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 0 10px;
+      border: 1px solid #d7e1ef;
+      border-radius: 999px;
+      color: #41516b;
+      background: #f8fbff;
+      font-weight: 700;
+    }
     .nav-cta {
       color: #fff;
       background: var(--blue);
@@ -192,7 +205,7 @@ def _website_html() -> str:
     .hero {
       max-width: 1160px;
       margin: 0 auto;
-      padding: 72px 24px 54px;
+      padding: 68px 24px 54px;
       display: grid;
       grid-template-columns: minmax(0, 0.96fr) minmax(420px, 1.04fr);
       gap: 52px;
@@ -229,6 +242,46 @@ def _website_html() -> str:
       color: var(--muted);
       font-size: 18px;
       line-height: 1.8;
+    }
+    .hero-meta {
+      margin-top: 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .meta-pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 32px;
+      padding: 0 11px;
+      border: 1px solid #d7e1ef;
+      border-radius: 999px;
+      background: #fff;
+      color: #3c4a60;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .support-strip {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+      max-width: 640px;
+      padding: 14px 16px;
+      border: 1px solid #cfe0ff;
+      border-radius: 8px;
+      background: #f5f9ff;
+    }
+    .support-strip strong {
+      color: var(--blue-dark);
+      font-size: 14px;
+      white-space: nowrap;
+    }
+    .support-strip span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.7;
     }
     .download-panel {
       margin-top: 32px;
@@ -412,6 +465,28 @@ def _website_html() -> str:
       font-size: 12px;
       font-weight: 700;
     }
+    .ops-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .ops-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfcfe;
+    }
+    .ops-card b {
+      display: block;
+      margin-bottom: 6px;
+      color: #26344a;
+      font-size: 13px;
+    }
+    .ops-card span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
     .task-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -459,6 +534,12 @@ def _website_html() -> str:
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 16px;
     }
+    .section-kicker {
+      margin: 0 0 10px;
+      color: var(--teal);
+      font-size: 13px;
+      font-weight: 800;
+    }
     .feature {
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -486,6 +567,45 @@ def _website_html() -> str:
       color: var(--muted);
       line-height: 1.7;
       font-size: 14px;
+    }
+    .workflow-band {
+      border-top: 1px solid rgba(21, 32, 51, 0.08);
+      background: #fbfcfe;
+    }
+    .workflow-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .workflow-step {
+      min-height: 174px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .workflow-step .num {
+      display: inline-grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      margin-bottom: 18px;
+      background: #eef6f2;
+      color: var(--green);
+      font-size: 13px;
+      font-weight: 900;
+    }
+    .workflow-step h3 {
+      margin: 0 0 10px;
+      font-size: 17px;
+      letter-spacing: 0;
+    }
+    .workflow-step p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
     }
     .security-band {
       background: var(--soft);
@@ -518,12 +638,34 @@ def _website_html() -> str:
       color: var(--muted);
       font-size: 13px;
     }
+    .support-panel {
+      margin-top: 18px;
+      padding: 18px;
+      border: 1px solid #d7e1ef;
+      border-radius: 8px;
+      background: #fff;
+    }
+    .support-panel strong {
+      display: block;
+      color: var(--blue-dark);
+      margin-bottom: 8px;
+    }
+    .support-panel p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+    }
     footer {
       max-width: 1160px;
       margin: 0 auto;
       padding: 24px;
       color: var(--muted);
       font-size: 13px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
     }
     @media (max-width: 920px) {
       .nav-links { display: none; }
@@ -532,10 +674,10 @@ def _website_html() -> str:
         padding-top: 44px;
       }
       h1 { font-size: 42px; }
-      .product-visual { order: -1; }
       .visual-body { grid-template-columns: 1fr; min-height: auto; }
       .mock-sidebar { display: none; }
-      .feature-grid, .security-layout { grid-template-columns: 1fr; }
+      .feature-grid, .security-layout, .workflow-grid { grid-template-columns: 1fr; }
+      .ops-row { grid-template-columns: 1fr; }
     }
     @media (max-width: 560px) {
       .hero { padding: 30px 18px 42px; gap: 28px; }
@@ -546,6 +688,7 @@ def _website_html() -> str:
       .segmented { width: 100%; }
       .task-grid, .metrics { grid-template-columns: 1fr; }
       .section-inner { padding: 42px 18px; }
+      .support-strip { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -559,7 +702,9 @@ def _website_html() -> str:
         </a>
         <div class="nav-links">
           <a href="#features">能力</a>
+          <a href="#workflow">使用方式</a>
           <a href="#security">部署</a>
+          <span class="support-link">可视化发展部提供技术支持</span>
           <a class="nav-cta" href="#download">立即下载</a>
         </div>
       </nav>
@@ -568,9 +713,18 @@ def _website_html() -> str:
     <main>
       <section class="hero">
         <div>
-          <span class="eyebrow">企业内网文件服务 · 桌面端自动更新</span>
+          <span class="eyebrow">内部办公助手 · 企业统一托管</span>
           <h1>聚光智能办公助手</h1>
-          <p class="hero-copy">面向团队日常办公的 AI 助手，把资料理解、任务推进、问题反馈和版本更新整合在一个桌面工作台里。安装包由当前服务器统一托管，团队成员打开官网即可下载适配系统的版本。</p>
+          <p class="hero-copy">为聚光同事准备的桌面 AI 工作台，把资料理解、任务推进、问题反馈和版本更新放到同一个入口。少切工具、少找文件，让日常办公更快落到结果。</p>
+          <div class="hero-meta">
+            <span class="meta-pill">公司账号登录</span>
+            <span class="meta-pill">安装包服务器托管</span>
+            <span class="meta-pill">问题反馈闭环</span>
+          </div>
+          <div class="support-strip">
+            <strong>技术支持</strong>
+            <span>可视化发展部提供技术支持，负责官网、客户端版本分发、反馈入口和后台运维能力的持续建设。</span>
+          </div>
 
           <div id="download" class="download-panel">
             <div class="download-row">
@@ -592,7 +746,7 @@ def _website_html() -> str:
         <div class="product-visual" aria-label="产品界面预览">
           <div class="window-bar">
             <div class="traffic"><i></i><i></i><i></i></div>
-            <span>工作台</span>
+            <span>内部工作台</span>
           </div>
           <div class="visual-body">
             <aside class="mock-sidebar">
@@ -604,9 +758,14 @@ def _website_html() -> str:
             </aside>
             <div class="mock-main">
               <div class="assistant-card">
-                <h2>今天需要处理的办公事项</h2>
-                <p>已汇总会议纪要、客户文件和待办任务，可继续追问、整理成文档，或提交团队问题反馈。</p>
-                <div class="chips"><span>资料问答</span><span>文件整理</span><span>版本管控</span></div>
+                <h2>今天的办公线索已经归拢</h2>
+                <p>自动整理会议纪要、客户资料和待办事项，同事可以继续追问、生成文档、提交反馈或跟进版本更新。</p>
+                <div class="chips"><span>资料问答</span><span>报告生成</span><span>问题反馈</span><span>版本更新</span></div>
+              </div>
+              <div class="ops-row">
+                <div class="ops-card"><b>使用状态</b><span>管理员可查看日活、在线设备与版本覆盖情况。</span></div>
+                <div class="ops-card"><b>安全边界</b><span>公司账号登录，员工端和后台管理分离。</span></div>
+                <div class="ops-card"><b>支持闭环</b><span>反馈附图直接进服务器文件服务，后台在线预览。</span></div>
               </div>
               <div class="task-grid">
                 <div class="task"><strong>合同要点提取</strong><span class="bar long"></span><span class="bar mid"></span><span class="bar short"></span></div>
@@ -621,11 +780,25 @@ def _website_html() -> str:
 
       <section id="features" class="sections">
         <div class="section-inner">
-          <h2 class="section-heading">为办公场景做深的桌面 AI 助手</h2>
+          <p class="section-kicker">给内部团队使用，而不是做一张漂亮下载页</p>
+          <h2 class="section-heading">把高频办公动作收进一个桌面工作台</h2>
           <div class="feature-grid">
             <article class="feature"><div class="icon">问</div><h3>资料理解与问答</h3><p>把日常文档、会议记录、客户资料集中处理，快速得到摘要、结论和下一步动作。</p></article>
-            <article class="feature"><div class="icon">办</div><h3>任务推进</h3><p>围绕项目和会话沉淀上下文，让团队从反复查找资料转向直接推进工作。</p></article>
-            <article class="feature"><div class="icon">更</div><h3>统一版本更新</h3><p>管理员上传安装包、设置版本号和强制更新策略，客户端下载时自动记录下载次数。</p></article>
+            <article class="feature"><div class="icon">写</div><h3>报告和纪要生成</h3><p>围绕已有上下文生成可继续编辑的文档内容，让同事把时间放在判断和复核上。</p></article>
+            <article class="feature"><div class="icon">管</div><h3>版本和反馈管控</h3><p>管理员统一上传安装包、设置版本号、查看反馈附图和下载次数，客户端保持一致版本节奏。</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section id="workflow" class="workflow-band">
+        <div class="section-inner">
+          <p class="section-kicker">同事打开就能理解怎么用</p>
+          <h2 class="section-heading">从安装到反馈，流程尽量短</h2>
+          <div class="workflow-grid">
+            <article class="workflow-step"><span class="num">01</span><h3>按系统下载</h3><p>官网自动识别 Mac、Windows 或 Linux，也可以手动切换安装包。</p></article>
+            <article class="workflow-step"><span class="num">02</span><h3>公司账号登录</h3><p>员工使用公司账号进入客户端，管理员后台不影响员工端登录体验。</p></article>
+            <article class="workflow-step"><span class="num">03</span><h3>处理办公任务</h3><p>围绕资料问答、内容整理、会议纪要和待办推进形成稳定工作流。</p></article>
+            <article class="workflow-step"><span class="num">04</span><h3>反馈到后台</h3><p>问题描述和附图上传到应用服务器，后台可以直接预览并跟进。</p></article>
           </div>
         </div>
       </section>
@@ -633,8 +806,13 @@ def _website_html() -> str:
       <section id="security" class="security-band">
         <div class="section-inner security-layout">
           <div>
+            <p class="section-kicker">可视化发展部提供技术支持</p>
             <h2 class="section-heading">服务器自托管，后台只走管理入口</h2>
             <p class="hero-copy">官网、反馈图片和安装包都由当前应用服务器托管。用户默认访问域名进入官网；管理员手动访问 /admin 才进入后台管理。</p>
+            <div class="support-panel">
+              <strong>面向内部持续运营</strong>
+              <p>可视化发展部会持续维护下载页、问题反馈、版本发布和后台观测能力，帮助各部门稳定使用聚光智能办公助手。</p>
+            </div>
           </div>
           <div class="metrics">
             <div class="metric"><strong>本地文件</strong><span>安装包上传到应用服务器存储</span></div>
@@ -645,7 +823,7 @@ def _website_html() -> str:
         </div>
       </section>
     </main>
-    <footer>© 聚光智能办公助手</footer>
+    <footer><span>© 聚光智能办公助手</span><span>可视化发展部提供技术支持</span></footer>
   </div>
 
   <script>
