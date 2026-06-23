@@ -1,13 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
-  mockOpenYakApi,
-  seedOpenYakStorage,
-  type OpenYakMockState,
+  mockFpiAgentApi,
+  seedFpiAgentStorage,
+  type FpiAgentMockState,
 } from "./fixtures/openyak-api";
 
-async function setupMockedApp(page: Page): Promise<OpenYakMockState> {
-  await seedOpenYakStorage(page);
-  return mockOpenYakApi(page);
+async function setupMockedApp(page: Page): Promise<FpiAgentMockState> {
+  await seedFpiAgentStorage(page);
+  return mockFpiAgentApi(page);
 }
 
 async function sendPrompt(page: Page, text: string) {
@@ -24,7 +24,7 @@ async function expectNoAppCrash(page: Page) {
   await expect(page.getByText("API 401", { exact: false })).toHaveCount(0);
 }
 
-test.describe("OpenYak conversation scale and compaction GUI workflows", () => {
+test.describe("fpi-agent conversation scale and compaction GUI workflows", () => {
   test.describe.configure({ timeout: 75_000 });
 
   test("manual compression workflow: context indicator starts compaction and persists the marker", async ({ page }) => {
@@ -49,7 +49,7 @@ test.describe("OpenYak conversation scale and compaction GUI workflows", () => {
     await setupMockedApp(page);
 
     await page.goto("/c/new");
-    await expect(page.getByRole("heading", { name: /What should (OpenYak help you do|we do in)/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /What should (fpi-agent help you do|we do in)/i })).toBeVisible();
     await sendPrompt(page, "Trigger auto compress during a long context answer");
 
     await expect(page).toHaveURL(/\/c\/session-new$/);

@@ -42,7 +42,7 @@ interface SessionRecord {
   time_archived: null;
 }
 
-export interface OpenYakMockState {
+export interface FpiAgentMockState {
   promptBodies: unknown[];
   editBodies: unknown[];
   chatResponses: unknown[];
@@ -87,7 +87,7 @@ interface ActiveJobMock {
   needs_input?: boolean;
 }
 
-export interface OpenYakMockOptions {
+export interface FpiAgentMockOptions {
   failUploads?: string[];
   promptErrors?: PromptErrorMock[];
   binaryFailures?: string[];
@@ -101,7 +101,7 @@ export interface OpenYakMockOptions {
   activeJobs?: ActiveJobMock[];
 }
 
-export interface OpenYakSeedOptions {
+export interface FpiAgentSeedOptions {
   hasCompletedOnboarding?: boolean;
   savedPermissions?: Array<{ tool: string; allow: boolean; timestamp: number }>;
   hasCompanySession?: boolean;
@@ -491,7 +491,7 @@ const naturalOfficeResponses: Record<NaturalOfficeKind, string> = {
     "Launch team follow-up\n\nRACI: Product is responsible for onboarding scope, CS is accountable for customer communication, Finance is consulted on budget variance, and Legal/Security are consulted on vendor terms.\n\n30-day agenda: Week 1 owner alignment, Week 2 evidence cleanup, Week 3 renewal decision, Week 4 board follow-up and metric review.",
 };
 
-function latestPromptText(state: OpenYakMockState) {
+function latestPromptText(state: FpiAgentMockState) {
   const latest = state.promptBodies[state.promptBodies.length - 1] as
     | Record<string, unknown>
     | undefined;
@@ -568,7 +568,7 @@ function uploadedFilePart(name: string, index: number) {
 }
 
 function applyNaturalOfficeMessagePage(
-  state: OpenYakMockState,
+  state: FpiAgentMockState,
   kind: NaturalOfficeKind,
 ) {
   const page = cloneJson(createdMessagePage);
@@ -641,7 +641,7 @@ function applyNaturalOfficeMessagePage(
   return page;
 }
 
-function createdMessagePageForState(state: OpenYakMockState) {
+function createdMessagePageForState(state: FpiAgentMockState) {
   const page = cloneJson(createdMessagePage);
   const naturalKind = naturalOfficeKindFromText(latestPromptText(state));
   if (naturalKind) return applyNaturalOfficeMessagePage(state, naturalKind);
@@ -654,7 +654,7 @@ function createdMessagePageForState(state: OpenYakMockState) {
   const assistant = page.messages[1];
   assistant.parts[0].data = {
     type: "text",
-    text: "Auto compacted answer persisted after compression.\n\nContext checkpoint\n\nOpenYak preserved the launch-review thread, compressed older turns, and kept the active decision context available for the next reply.\n\n| Area | Preserved detail | Next action |\n| --- | --- | --- |\n| Owners | Product, CS, Finance, Legal, Security | Confirm one accountable owner per risk |\n| Deadlines | Board packet, renewal window, automation savings date | Keep the critical dates in the active summary |\n| Risks | Budget variance, onboarding readiness, vendor renewal | Use the compressed summary for follow-up planning |\n\nNext decision: approve the launch only after Finance confirms the contractor exit date and Legal locks the vendor renewal window.",
+    text: "Auto compacted answer persisted after compression.\n\nContext checkpoint\n\nfpi-agent preserved the launch-review thread, compressed older turns, and kept the active decision context available for the next reply.\n\n| Area | Preserved detail | Next action |\n| --- | --- | --- |\n| Owners | Product, CS, Finance, Legal, Security | Confirm one accountable owner per risk |\n| Deadlines | Board packet, renewal window, automation savings date | Keep the critical dates in the active summary |\n| Risks | Budget variance, onboarding readiness, vendor renewal | Use the compressed summary for follow-up planning |\n\nNext decision: approve the launch only after Finance confirms the contractor exit date and Legal locks the vendor renewal window.",
   };
   assistant.parts.splice(1, 0, {
     id: "session-new-auto-compaction",
@@ -680,7 +680,7 @@ function createdMessagePageForState(state: OpenYakMockState) {
 
 function sessionMessagePageForState(
   sessionId: string,
-  state: OpenYakMockState,
+  state: FpiAgentMockState,
 ) {
   const page = cloneJson(messagePage(sessionId));
   const edit = [...state.editBodies].reverse().find((body) => {
@@ -986,7 +986,7 @@ const artifactMessagePage = {
             title: "Demo Page",
             identifier: "demo-page",
             content:
-              "<main><h1>OpenYak GUI Preflight</h1><p>End-to-end browser coverage.</p></main>",
+              "<main><h1>fpi-agent GUI Preflight</h1><p>End-to-end browser coverage.</p></main>",
           },
         ),
         artifactToolPart(
@@ -1025,7 +1025,7 @@ const artifactMessagePage = {
             title: "Logo Sketch",
             identifier: "logo-sketch",
             content:
-              '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80"><rect width="120" height="80" rx="10" fill="#0f172a"/><text x="18" y="46" fill="white" font-size="20">OpenYak</text></svg>',
+              '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80"><rect width="120" height="80" rx="10" fill="#0f172a"/><text x="18" y="46" fill="white" font-size="20">fpi-agent</text></svg>',
           },
         ),
         {
@@ -1086,7 +1086,7 @@ const artifactMessagePage = {
   ],
 };
 
-function seededSettings(options: OpenYakSeedOptions = {}) {
+function seededSettings(options: FpiAgentSeedOptions = {}) {
   return {
     state: {
       hasCompletedOnboarding: options.hasCompletedOnboarding ?? true,
@@ -1107,9 +1107,9 @@ function seededSettings(options: OpenYakSeedOptions = {}) {
   };
 }
 
-export async function seedOpenYakStorage(
+export async function seedFpiAgentStorage(
   page: Page,
-  options: OpenYakSeedOptions = {},
+  options: FpiAgentSeedOptions = {},
 ) {
   const overwrite =
     options.force === true ||
@@ -1182,7 +1182,7 @@ function makePdfBase64() {
     "<< /Type /Catalog /Pages 2 0 R >>",
     "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
     "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 420 240] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
-    "<< /Length 70 >>\nstream\nBT /F1 18 Tf 48 150 Td (OpenYak PDF workflow) Tj 0 -28 Td (Page 1) Tj ET\nendstream",
+    "<< /Length 70 >>\nstream\nBT /F1 18 Tf 48 150 Td (fpi-agent PDF workflow) Tj 0 -28 Td (Page 1) Tj ET\nendstream",
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
   ];
   let body = "%PDF-1.4\n";
@@ -1226,7 +1226,7 @@ async function makeDocxBase64() {
     xml(
       '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
         "<w:body>" +
-        "<w:p><w:r><w:t>OpenYak DOCX workflow</w:t></w:r></w:p>" +
+        "<w:p><w:r><w:t>fpi-agent DOCX workflow</w:t></w:r></w:p>" +
         "<w:p><w:r><w:t>Real Office preview path exercised by GUI preflight.</w:t></w:r></w:p>" +
         '<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr>' +
         "</w:body>" +
@@ -1305,7 +1305,7 @@ async function makePptxBase64() {
     xml(
       '<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">' +
         '<p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>' +
-        '<p:sp><p:nvSpPr><p:cNvPr id="2" name="Title 1"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="914400" y="914400"/><a:ext cx="7315200" cy="914400"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="3600"/><a:t>OpenYak PPTX workflow</a:t></a:r></a:p></p:txBody></p:sp>' +
+        '<p:sp><p:nvSpPr><p:cNvPr id="2" name="Title 1"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="914400" y="914400"/><a:ext cx="7315200" cy="914400"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="3600"/><a:t>fpi-agent PPTX workflow</a:t></a:r></a:p></p:txBody></p:sp>' +
         "</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>",
     ),
   );
@@ -1650,11 +1650,11 @@ function sseStreamBody(streamId: string) {
   ].join("\n");
 }
 
-export async function mockOpenYakApi(
+export async function mockFpiAgentApi(
   page: Page,
-  options: OpenYakMockOptions = {},
-): Promise<OpenYakMockState> {
-  const state: OpenYakMockState = {
+  options: FpiAgentMockOptions = {},
+): Promise<FpiAgentMockState> {
+  const state: FpiAgentMockState = {
     promptBodies: [],
     editBodies: [],
     chatResponses: [],
@@ -2049,7 +2049,7 @@ export async function mockOpenYakApi(
           headers: {
             "Content-Disposition": 'attachment; filename="conversation.pdf"',
           },
-          body: Buffer.from("%PDF-1.4\n% OpenYak mock export\n%%EOF\n"),
+          body: Buffer.from("%PDF-1.4\n% fpi-agent mock export\n%%EOF\n"),
         });
       }
       return route.fulfill({
@@ -2058,7 +2058,7 @@ export async function mockOpenYakApi(
         headers: {
           "Content-Disposition": 'attachment; filename="conversation.md"',
         },
-        body: "# OpenYak mock export\n\nGUI session export exercised.",
+        body: "# fpi-agent mock export\n\nGUI session export exercised.",
       });
     }
     const sessionDetailMatch = path.match(/^\/api\/sessions\/([^/]+)$/);
@@ -2514,7 +2514,7 @@ export async function mockOpenYakApi(
             name: "github",
             version: "0.1.0",
             description: "GitHub workflows",
-            author: "OpenYak",
+            author: "fpi-agent",
             enabled: true,
             source: "builtin",
             skills_count: 3,
@@ -2528,7 +2528,7 @@ export async function mockOpenYakApi(
         name: "github",
         version: "0.1.0",
         description: "GitHub workflows",
-        author: "OpenYak",
+        author: "fpi-agent",
         enabled: true,
         source: "builtin",
         skills_count: 3,

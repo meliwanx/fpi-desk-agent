@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { AnimatedOpenYakLogo } from "@/components/layout/splash-screen";
+import { AnimatedFpiAgentLogo } from "@/components/layout/splash-screen";
 import { useSettingsStore } from "@/stores/settings-store";
 
 export function OnboardingScreen() {
@@ -29,7 +29,7 @@ export function OnboardingScreen() {
         transition={{ duration: 0.4, ease: "easeOut" }}
       >
         <div className="flex flex-col items-center text-center">
-          <AnimatedOpenYakLogo size={80} />
+          <AnimatedFpiAgentLogo size={80} />
 
           <h1 className="mt-8 text-2xl font-semibold text-[var(--text-primary)] tracking-tight">
             欢迎使用聚光办公助理

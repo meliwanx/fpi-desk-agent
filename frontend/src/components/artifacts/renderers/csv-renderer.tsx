@@ -3,6 +3,7 @@
 import { useState, useMemo, useCallback } from "react";
 import { Code, Eye, Download, Copy, Check, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { saveBlobAsFile } from "@/lib/file-download";
 import Papa from "papaparse";
 
 interface CsvRendererProps {
@@ -89,12 +90,9 @@ export function CsvRenderer({ content, title }: CsvRendererProps) {
 
   const handleDownload = useCallback(() => {
     const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = title?.replace(/[/\\]/g, "_") || "data.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+    void saveBlobAsFile(blob, title?.replace(/[/\\]/g, "_") || "data.csv").catch((err) => {
+      console.error("Failed to download CSV", err);
+    });
   }, [content, title]);
 
   const isFiltered = searchQuery.trim().length > 0;

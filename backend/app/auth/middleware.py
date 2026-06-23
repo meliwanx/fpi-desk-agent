@@ -1,9 +1,9 @@
-"""Bearer-token authentication middleware for the OpenYak local API.
+"""Bearer-token authentication middleware for the fpi-agent local API.
 
 Threat model
 ------------
 
-OpenYak's FastAPI backend binds to ``127.0.0.1`` on an ephemeral port. The
+fpi-agent's FastAPI backend binds to ``127.0.0.1`` on an ephemeral port. The
 loopback interface is not a user-isolation boundary: on any Unix host
 every local user shares the same ``127.0.0.1``, and from the backend's
 perspective a request from Pepe's shell and a request from Ana's shell
@@ -20,7 +20,7 @@ a non-browser client on the host, would bypass it.
 
 This middleware therefore enforces **mandatory bearer-token auth on
 every privileged request, regardless of the source interface** — the
-session token lives in a 0600 file that only the OpenYak-running user
+session token lives in a 0600 file that only the fpi-agent-running user
 can read, and any client that cannot present the token is rejected.
 
 Pass-through paths
@@ -36,6 +36,8 @@ Currently allowed unauthenticated:
 
 * ``/livez``, ``/health`` — liveness/readiness probes consumed by the
   Tauri watchdog; contain no secrets, do not mutate state.
+* ``/``, ``/download-options``, ``/download/*`` — public product website
+  and desktop package downloads.
 * ``/favicon.svg``, ``/manifest.json`` — PWA asset serves.
 * ``/_next/*`` — Next.js static bundle (JS/CSS/fonts).
 * ``/m``, ``/m/*`` — mobile PWA HTML shells. The HTML itself is not
@@ -90,6 +92,8 @@ _LOCALHOST_IPS = frozenset({"127.0.0.1", "::1", "localhost"})
 _PUBLIC_PATHS = frozenset({
     "/livez",          # Tauri watchdog liveness probe
     "/health",         # Provider status dump, no secrets
+    "/",               # Public product website
+    "/download-options",  # Public desktop package metadata
     "/favicon.svg",    # PWA asset
     "/manifest.json",  # PWA asset
     "/m",              # Mobile PWA HTML shell (JS inside calls /api/* authed)
@@ -100,6 +104,8 @@ _PUBLIC_PATHS = frozenset({
 # static bundle and the mobile PWA's nested HTML shells fall here.
 _PUBLIC_PREFIXES: tuple[str, ...] = (
     "/_next/",  # Next.js static bundle (JS/CSS/fonts)
+    "/download/",  # Public desktop package downloads
+    "/website-assets/",  # Public website images
     "/m/",      # Mobile PWA SPA fallback pages
     "/admin/assets/",       # Enterprise admin static bundle
     "/api/company-auth/",   # Company login/session bootstrap

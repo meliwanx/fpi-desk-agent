@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Issues and PRDs for this repo live as GitHub issues in `openyak/desktop`. Use the `gh` CLI for issue operations.
+Issues and PRDs for this repo live as GitHub issues in `meliwanx/fpi-desk-agent`. Use the `gh` CLI for issue operations.
 
 ## Conventions
 

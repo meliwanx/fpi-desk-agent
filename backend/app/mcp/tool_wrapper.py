@@ -1,4 +1,4 @@
-"""MCP tool wrapper — adapts an MCP tool to the OpenYak ToolDefinition interface."""
+"""MCP tool wrapper — adapts an MCP tool to the fpi-agent ToolDefinition interface."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class McpToolWrapper(ToolDefinition):
-    """Wraps an MCP server tool as an OpenYak ToolDefinition.
+    """Wraps an MCP server tool as an fpi-agent ToolDefinition.
 
     Tool ID: ``{server_name}_{tool_name}`` (sanitised).
     """

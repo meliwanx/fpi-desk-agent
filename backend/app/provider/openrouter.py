@@ -1,6 +1,6 @@
 """OpenRouter provider.
 
-Primary provider for OpenYak. Uses OpenAI-compatible API at
+Primary provider for fpi-agent. Uses OpenAI-compatible API at
 https://openrouter.ai/api/v1 with reasoning support.
 """
 
@@ -59,7 +59,7 @@ class OpenRouterProvider(OpenAICompatProvider):
             base_url=self._base_url,
             default_headers={
                 "HTTP-Referer": "https://github.com/openyak/desktop",
-                "X-Title": "OpenYak",
+                "X-Title": "fpi-agent",
             },
         )
         self._api_key = api_key
@@ -197,7 +197,7 @@ class OpenRouterProvider(OpenAICompatProvider):
             base_url=self._base_url,
             default_headers={
                 "HTTP-Referer": "https://github.com/openyak/desktop",
-                "X-Title": "OpenYak",
+                "X-Title": "fpi-agent",
             },
         )
         self.clear_cache()

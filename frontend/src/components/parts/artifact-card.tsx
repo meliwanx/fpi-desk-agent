@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { useArtifactStore } from "@/stores/artifact-store";
 import { apiFetch } from "@/lib/api";
 import { API } from "@/lib/constants";
+import { saveBlobAsFile } from "@/lib/file-download";
 import type { ToolPart } from "@/types/message";
 import type { ArtifactType } from "@/types/artifact";
 
@@ -82,17 +83,6 @@ export function ArtifactCard({ data }: ArtifactCardProps) {
 
   const sanitizedTitle = title.replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, "_");
 
-  const downloadBlob = useCallback((blob: Blob, filename: string) => {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, []);
-
   const handleDownload = useCallback(
     async (e: React.MouseEvent) => {
       e.stopPropagation();
@@ -109,11 +99,11 @@ export function ArtifactCard({ data }: ArtifactCardProps) {
           });
           if (!res.ok) throw new Error("PDF export failed");
           const blob = await res.blob();
-          downloadBlob(blob, `${sanitizedTitle}.pdf`);
+          await saveBlobAsFile(blob, `${sanitizedTitle}.pdf`);
         } catch {
           // Fallback to .md download
           const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-          downloadBlob(blob, `${sanitizedTitle}.md`);
+          await saveBlobAsFile(blob, `${sanitizedTitle}.md`);
         } finally {
           setDownloading(false);
         }
@@ -131,9 +121,9 @@ export function ArtifactCard({ data }: ArtifactCardProps) {
       };
       const ext = extMap[artifactType] ?? "txt";
       const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-      downloadBlob(blob, `${sanitizedTitle}.${ext}`);
+      await saveBlobAsFile(blob, `${sanitizedTitle}.${ext}`);
     },
-    [content, title, sanitizedTitle, artifactType, language, downloadBlob],
+    [content, title, sanitizedTitle, artifactType, language],
   );
 
   return (

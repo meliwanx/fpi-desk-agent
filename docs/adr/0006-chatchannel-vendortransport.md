@@ -4,5 +4,5 @@ Chat-style Channels (Feishu, WeChat, Telegram, Slack, Discord, DingTalk) share ~
 
 ## Considered options
 
-- **One-verb Channel transducer** (Channel = transducer between vendor `Transport` and MessageBus, single `bind()` method). Rejected: forces interactive logins (WeChat QR) and reactions/commands through the bus, which fights OpenYak's existing patterns and adds indirection without compensating leverage.
-- **Six-protocol composition** (`WebhookVerifier`, `CredentialSource`, `MessageReceiver`, `MessageSender`, `DeltaRenderer`, `LifecycleHook` composed on a `Channel`). Rejected: per-protocol Depth is low, state fragments across protocols, and the flexibility budget only pays off if ≥3 unusual Channels (voice, RSS, batch email) actually ship — OpenYak's current trajectory does not support that bet.
+- **One-verb Channel transducer** (Channel = transducer between vendor `Transport` and MessageBus, single `bind()` method). Rejected: forces interactive logins (WeChat QR) and reactions/commands through the bus, which fights fpi-agent's existing patterns and adds indirection without compensating leverage.
+- **Six-protocol composition** (`WebhookVerifier`, `CredentialSource`, `MessageReceiver`, `MessageSender`, `DeltaRenderer`, `LifecycleHook` composed on a `Channel`). Rejected: per-protocol Depth is low, state fragments across protocols, and the flexibility budget only pays off if ≥3 unusual Channels (voice, RSS, batch email) actually ship — fpi-agent's current trajectory does not support that bet.

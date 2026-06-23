@@ -1,9 +1,9 @@
-interface OpenYakLogoProps {
+interface FpiAgentLogoProps {
   size?: number;
   className?: string;
 }
 
-export function OpenYakLogo({ size = 20, className }: OpenYakLogoProps) {
+export function FpiAgentLogo({ size = 20, className }: FpiAgentLogoProps) {
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img

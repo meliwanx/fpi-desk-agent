@@ -1,4 +1,4 @@
-"""Standalone entry point for OpenYak backend in desktop mode.
+"""Standalone entry point for fpi-agent backend in desktop mode.
 
 Usage:
     python run.py --port 8100 --data-dir /path/to/app/data
@@ -36,7 +36,7 @@ def _configure_enterprise_defaults(resource_dir: str | None) -> None:
 
     control_url = os.environ.get(
         "OPENYAK_ENTERPRISE_CONTROL_URL",
-        "http://120.26.208.161:5201",
+        "http://fpiagent.hangzhoupuyu.work",
     ).rstrip("/")
     os.environ.setdefault("OPENYAK_ENTERPRISE_CONTROL_URL", control_url)
     os.environ.setdefault("OPENYAK_AUDIT_SYNC_ENABLED", "true")
@@ -86,7 +86,7 @@ def _install_crash_reporter() -> None:
 def main() -> None:
     _install_crash_reporter()
 
-    parser = argparse.ArgumentParser(description="OpenYak backend server")
+    parser = argparse.ArgumentParser(description="fpi-agent backend server")
     parser.add_argument("--port", type=int, default=8000, help="Port to listen on")
     parser.add_argument("--data-dir", type=str, default=None, help="Data directory (for desktop mode)")
     parser.add_argument("--resource-dir", type=str, default=None, help="Resource directory (bundled assets from Tauri)")

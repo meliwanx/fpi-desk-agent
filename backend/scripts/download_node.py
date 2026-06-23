@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download a minimal Node.js 22 runtime for bundling with OpenYak desktop.
+"""Download a minimal Node.js 22 runtime for bundling with fpi-agent desktop.
 
 Usage:
     python scripts/download_node.py [--output resources/nodejs]
@@ -66,7 +66,7 @@ def _download(url: str) -> bytes:
 
     ssl_ctx = ssl.create_default_context(cafile=certifi.where())
     print(f"Downloading {url} ...")
-    req = urllib.request.Request(url, headers={"User-Agent": "OpenYak-Builder/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "fpi-agent-Builder/1.0"})
     with urllib.request.urlopen(req, timeout=120, context=ssl_ctx) as resp:
         total = int(resp.headers.get("Content-Length", 0))
         data = bytearray()

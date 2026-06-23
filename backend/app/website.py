@@ -1,0 +1,737 @@
+"""Public product website and desktop package downloads."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse
+from starlette.responses import FileResponse
+
+from app.api.app_update import _asset_id_for_platform, _company_store, _policy_value
+from app.dependencies import SettingsDep
+
+router = APIRouter(include_in_schema=False)
+
+_PLATFORMS = ("macos", "windows", "linux")
+_PLATFORM_LABELS = {
+    "macos": "Mac 版本",
+    "windows": "Windows 版本",
+    "linux": "Linux 版本",
+}
+
+
+@router.get("/", response_class=HTMLResponse)
+async def website_home() -> HTMLResponse:
+    return HTMLResponse(_website_html())
+
+
+@router.get("/download-options")
+async def website_download_options(request: Request) -> dict[str, Any]:
+    store = _company_store(request)
+    policy = await store.get_update_policy()
+    platforms = {}
+    for platform in _PLATFORMS:
+        platforms[platform] = await _public_platform_download(request, store, policy, platform)
+    return {
+        "latest_version": str(_policy_value(policy, "latest_version", "") or ""),
+        "release_notes": str(_policy_value(policy, "release_notes", "") or ""),
+        "platforms": platforms,
+    }
+
+
+@router.get("/download/{asset_id}", name="website_download_asset")
+async def website_download_asset(
+    request: Request,
+    settings: SettingsDep,
+    asset_id: str,
+) -> FileResponse:
+    store = _company_store(request)
+    if not hasattr(store, "get_update_asset"):
+        raise HTTPException(status_code=404, detail="Update asset not found")
+    asset = await store.get_update_asset(asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Update asset not found")
+
+    storage_dir = Path(settings.update_asset_storage_dir).expanduser()
+    file_path = storage_dir / Path(asset.stored_filename).name
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Update asset file not found")
+
+    if hasattr(store, "increment_update_asset_download_count"):
+        await store.increment_update_asset_download_count(asset.id)
+
+    return FileResponse(
+        file_path,
+        media_type=asset.mime_type or "application/octet-stream",
+        filename=asset.original_filename or file_path.name,
+    )
+
+
+@router.get("/website-assets/juguang-logo.png")
+async def website_logo() -> FileResponse:
+    logo_path = _find_logo_path()
+    if logo_path is None:
+        raise HTTPException(status_code=404, detail="Logo not found")
+    return FileResponse(logo_path, media_type="image/png")
+
+
+async def _public_platform_download(request: Request, store: Any, policy: Any, platform: str) -> dict[str, Any]:
+    asset_id = _asset_id_for_platform(policy, platform)
+    asset = await store.get_update_asset(asset_id) if asset_id and hasattr(store, "get_update_asset") else None
+    if asset is None:
+        return {
+            "platform": platform,
+            "label": _PLATFORM_LABELS[platform],
+            "available": False,
+            "download_url": "",
+            "filename": "",
+            "version": str(_policy_value(policy, "latest_version", "") or ""),
+            "size_bytes": 0,
+            "sha256": "",
+        }
+    return {
+        "platform": platform,
+        "label": _PLATFORM_LABELS[platform],
+        "available": True,
+        "download_url": str(request.url_for("website_download_asset", asset_id=asset.id)),
+        "filename": asset.original_filename or "",
+        "version": asset.version or str(_policy_value(policy, "latest_version", "") or ""),
+        "size_bytes": int(asset.size_bytes or 0),
+        "sha256": asset.sha256 or "",
+    }
+
+
+def _find_logo_path() -> Path | None:
+    candidates = [
+        Path(__file__).parent / "website_static" / "juguang-logo.png",
+        Path(__file__).parent.parent.parent / "frontend" / "public" / "juguang-logo.png",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _website_html() -> str:
+    return """<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>聚光智能办公助手</title>
+  <meta name="description" content="聚光智能办公助手，面向团队的桌面 AI 办公助手，支持安全私有部署、资料整理、智能问答和自动更新。" />
+  <style>
+    :root {
+      color-scheme: light;
+      --blue: #1768e8;
+      --blue-dark: #0d3f9f;
+      --ink: #152033;
+      --muted: #5d6a7c;
+      --line: #d9e1ee;
+      --panel: #ffffff;
+      --soft: #f4f7fb;
+      --green: #138a62;
+      --amber: #ad6b00;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #f8fafd;
+      letter-spacing: 0;
+    }
+    a { color: inherit; text-decoration: none; }
+    .page-shell { min-height: 100vh; }
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid rgba(21, 32, 51, 0.08);
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(14px);
+    }
+    .nav {
+      max-width: 1160px;
+      margin: 0 auto;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .brand img {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      box-shadow: 0 8px 20px rgba(23, 104, 232, 0.18);
+    }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .nav-cta {
+      color: #fff;
+      background: var(--blue);
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-weight: 700;
+    }
+    .hero {
+      max-width: 1160px;
+      margin: 0 auto;
+      padding: 72px 24px 54px;
+      display: grid;
+      grid-template-columns: minmax(0, 0.96fr) minmax(420px, 1.04fr);
+      gap: 52px;
+      align-items: center;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--blue-dark);
+      background: #eaf2ff;
+      border: 1px solid #cfe0ff;
+      padding: 7px 10px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .eyebrow::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--green);
+    }
+    h1 {
+      margin: 22px 0 18px;
+      font-size: 56px;
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+    .hero-copy {
+      margin: 0;
+      max-width: 660px;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.8;
+    }
+    .download-panel {
+      margin-top: 32px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 18px 48px rgba(30, 49, 80, 0.10);
+    }
+    .download-row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .download-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 48px;
+      padding: 0 22px;
+      border-radius: 8px;
+      border: 1px solid var(--blue);
+      background: var(--blue);
+      color: #fff;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .download-button[aria-disabled="true"] {
+      pointer-events: none;
+      border-color: #a7b3c5;
+      background: #a7b3c5;
+    }
+    .version-text {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .segmented {
+      margin-top: 16px;
+      display: inline-grid;
+      grid-template-columns: repeat(3, minmax(86px, 1fr));
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #f7f9fc;
+    }
+    .segmented button {
+      appearance: none;
+      border: 0;
+      border-right: 1px solid var(--line);
+      background: transparent;
+      color: var(--muted);
+      min-height: 38px;
+      padding: 0 12px;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .segmented button:last-child { border-right: 0; }
+    .segmented button.active {
+      color: var(--blue-dark);
+      background: #eaf2ff;
+    }
+    .segmented button.unavailable {
+      color: #9aa6b6;
+      background: #f1f4f8;
+    }
+    .release-note {
+      margin: 14px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .product-visual {
+      border: 1px solid #cdd7e6;
+      border-radius: 8px;
+      background: #ffffff;
+      box-shadow: 0 24px 70px rgba(34, 47, 72, 0.16);
+      overflow: hidden;
+    }
+    .window-bar {
+      height: 42px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      color: #718096;
+      font-size: 13px;
+      background: #f5f7fb;
+    }
+    .traffic {
+      display: flex;
+      gap: 7px;
+    }
+    .traffic i {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: block;
+    }
+    .traffic i:nth-child(1) { background: #ff6259; }
+    .traffic i:nth-child(2) { background: #ffbd2e; }
+    .traffic i:nth-child(3) { background: #28c840; }
+    .visual-body {
+      display: grid;
+      grid-template-columns: 164px minmax(0, 1fr);
+      min-height: 430px;
+    }
+    .mock-sidebar {
+      border-right: 1px solid var(--line);
+      background: #f7f9fc;
+      padding: 18px 14px;
+    }
+    .mock-logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 800;
+      font-size: 14px;
+    }
+    .mock-logo img {
+      width: 26px;
+      height: 26px;
+      border-radius: 7px;
+    }
+    .mock-nav {
+      margin-top: 22px;
+      display: grid;
+      gap: 9px;
+    }
+    .mock-nav span {
+      display: block;
+      height: 32px;
+      border-radius: 8px;
+      background: #eef3fa;
+    }
+    .mock-nav span:first-child {
+      background: #dfeaff;
+      border: 1px solid #c9dcff;
+    }
+    .mock-main {
+      padding: 20px;
+      display: grid;
+      gap: 16px;
+      align-content: start;
+    }
+    .assistant-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      background: #ffffff;
+    }
+    .assistant-card h2 {
+      margin: 0 0 10px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+    .assistant-card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.7;
+      font-size: 14px;
+    }
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .chips span {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 0 9px;
+      border-radius: 999px;
+      background: #eef6f2;
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .task-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .task {
+      min-height: 92px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfcfe;
+    }
+    .task strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+    .bar {
+      display: block;
+      height: 8px;
+      margin-top: 7px;
+      border-radius: 999px;
+      background: #dde6f2;
+    }
+    .bar.short { width: 58%; }
+    .bar.mid { width: 76%; }
+    .bar.long { width: 92%; }
+    .sections {
+      border-top: 1px solid rgba(21, 32, 51, 0.08);
+      background: #ffffff;
+    }
+    .section-inner {
+      max-width: 1160px;
+      margin: 0 auto;
+      padding: 58px 24px;
+    }
+    .section-heading {
+      margin: 0 0 26px;
+      font-size: 32px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .feature {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 20px;
+      background: #fbfcfe;
+    }
+    .feature .icon {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      background: #eaf2ff;
+      color: var(--blue-dark);
+      font-weight: 900;
+      margin-bottom: 16px;
+    }
+    .feature h3 {
+      margin: 0 0 10px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+    .feature p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.7;
+      font-size: 14px;
+    }
+    .security-band {
+      background: var(--soft);
+      border-top: 1px solid rgba(21, 32, 51, 0.08);
+    }
+    .security-layout {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 28px;
+      align-items: start;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 18px;
+    }
+    .metric strong {
+      display: block;
+      color: var(--blue-dark);
+      font-size: 24px;
+      margin-bottom: 6px;
+    }
+    .metric span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    footer {
+      max-width: 1160px;
+      margin: 0 auto;
+      padding: 24px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    @media (max-width: 920px) {
+      .nav-links { display: none; }
+      .hero {
+        grid-template-columns: 1fr;
+        padding-top: 44px;
+      }
+      h1 { font-size: 42px; }
+      .product-visual { order: -1; }
+      .visual-body { grid-template-columns: 1fr; min-height: auto; }
+      .mock-sidebar { display: none; }
+      .feature-grid, .security-layout { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 560px) {
+      .hero { padding: 30px 18px 42px; gap: 28px; }
+      .nav { padding: 12px 18px; }
+      h1 { font-size: 34px; }
+      .hero-copy { font-size: 16px; }
+      .download-button { width: 100%; }
+      .segmented { width: 100%; }
+      .task-grid, .metrics { grid-template-columns: 1fr; }
+      .section-inner { padding: 42px 18px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page-shell">
+    <header class="site-header">
+      <nav class="nav" aria-label="主导航">
+        <a class="brand" href="/">
+          <img src="/website-assets/juguang-logo.png" alt="" onerror="this.style.display='none'" />
+          <span>聚光智能办公助手</span>
+        </a>
+        <div class="nav-links">
+          <a href="#features">能力</a>
+          <a href="#security">部署</a>
+          <a class="nav-cta" href="#download">立即下载</a>
+        </div>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div>
+          <span class="eyebrow">企业内网文件服务 · 桌面端自动更新</span>
+          <h1>聚光智能办公助手</h1>
+          <p class="hero-copy">面向团队日常办公的 AI 助手，把资料理解、任务推进、问题反馈和版本更新整合在一个桌面工作台里。安装包由当前服务器统一托管，团队成员打开官网即可下载适配系统的版本。</p>
+
+          <div id="download" class="download-panel">
+            <div class="download-row">
+              <a id="downloadButton" class="download-button" href="#" aria-disabled="true">正在获取下载版本</a>
+              <div class="version-text">
+                <div id="versionText">检测当前系统中...</div>
+                <div id="fileText">你也可以手动切换下载版本</div>
+              </div>
+            </div>
+            <div class="segmented" role="tablist" aria-label="选择下载版本">
+              <button type="button" data-platform="macos">Mac</button>
+              <button type="button" data-platform="windows">Windows</button>
+              <button type="button" data-platform="linux">Linux</button>
+            </div>
+            <p id="releaseNote" class="release-note"></p>
+          </div>
+        </div>
+
+        <div class="product-visual" aria-label="产品界面预览">
+          <div class="window-bar">
+            <div class="traffic"><i></i><i></i><i></i></div>
+            <span>工作台</span>
+          </div>
+          <div class="visual-body">
+            <aside class="mock-sidebar">
+              <div class="mock-logo">
+                <img src="/website-assets/juguang-logo.png" alt="" onerror="this.style.display='none'" />
+                <span>聚光</span>
+              </div>
+              <div class="mock-nav"><span></span><span></span><span></span><span></span></div>
+            </aside>
+            <div class="mock-main">
+              <div class="assistant-card">
+                <h2>今天需要处理的办公事项</h2>
+                <p>已汇总会议纪要、客户文件和待办任务，可继续追问、整理成文档，或提交团队问题反馈。</p>
+                <div class="chips"><span>资料问答</span><span>文件整理</span><span>版本管控</span></div>
+              </div>
+              <div class="task-grid">
+                <div class="task"><strong>合同要点提取</strong><span class="bar long"></span><span class="bar mid"></span><span class="bar short"></span></div>
+                <div class="task"><strong>会议纪要生成</strong><span class="bar mid"></span><span class="bar long"></span><span class="bar short"></span></div>
+                <div class="task"><strong>内部知识检索</strong><span class="bar long"></span><span class="bar mid"></span><span class="bar mid"></span></div>
+                <div class="task"><strong>问题反馈追踪</strong><span class="bar mid"></span><span class="bar short"></span><span class="bar long"></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" class="sections">
+        <div class="section-inner">
+          <h2 class="section-heading">为办公场景做深的桌面 AI 助手</h2>
+          <div class="feature-grid">
+            <article class="feature"><div class="icon">问</div><h3>资料理解与问答</h3><p>把日常文档、会议记录、客户资料集中处理，快速得到摘要、结论和下一步动作。</p></article>
+            <article class="feature"><div class="icon">办</div><h3>任务推进</h3><p>围绕项目和会话沉淀上下文，让团队从反复查找资料转向直接推进工作。</p></article>
+            <article class="feature"><div class="icon">更</div><h3>统一版本更新</h3><p>管理员上传安装包、设置版本号和强制更新策略，客户端下载时自动记录下载次数。</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section id="security" class="security-band">
+        <div class="section-inner security-layout">
+          <div>
+            <h2 class="section-heading">服务器自托管，后台只走管理入口</h2>
+            <p class="hero-copy">官网、反馈图片和安装包都由当前应用服务器托管。用户默认访问域名进入官网；管理员手动访问 /admin 才进入后台管理。</p>
+          </div>
+          <div class="metrics">
+            <div class="metric"><strong>本地文件</strong><span>安装包上传到应用服务器存储</span></div>
+            <div class="metric"><strong>公开下载</strong><span>官网无需登录即可获取客户端</span></div>
+            <div class="metric"><strong>后台管理</strong><span>版本、强更、反馈内容集中维护</span></div>
+            <div class="metric"><strong>统计追踪</strong><span>下载次数与上传人持续记录</span></div>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer>© 聚光智能办公助手</footer>
+  </div>
+
+  <script>
+    const labels = { macos: "Mac 版本", windows: "Windows 版本", linux: "Linux 版本" };
+    const shortLabels = { macos: "Mac", windows: "Windows", linux: "Linux" };
+    let downloadOptions = { platforms: {} };
+    let selectedPlatform = "macos";
+
+    function detectPlatform() {
+      const source = [
+        navigator.userAgentData && navigator.userAgentData.platform,
+        navigator.platform,
+        navigator.userAgent
+      ].filter(Boolean).join(" ").toLowerCase();
+      if (source.includes("win")) return "windows";
+      if (source.includes("mac") || source.includes("darwin")) return "macos";
+      if (source.includes("linux")) return "linux";
+      return "macos";
+    }
+
+    function formatBytes(value) {
+      if (!value) return "";
+      const units = ["B", "KB", "MB", "GB"];
+      let size = Number(value);
+      let index = 0;
+      while (size >= 1024 && index < units.length - 1) {
+        size = size / 1024;
+        index += 1;
+      }
+      return `${size.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+    }
+
+    function firstAvailablePlatform(preferred) {
+      if (downloadOptions.platforms[preferred]?.available) return preferred;
+      return ["macos", "windows", "linux"].find((key) => downloadOptions.platforms[key]?.available) || preferred;
+    }
+
+    function selectPlatform(platform) {
+      selectedPlatform = platform;
+      const item = downloadOptions.platforms[platform] || {};
+      document.querySelectorAll("[data-platform]").forEach((button) => {
+        const key = button.dataset.platform;
+        button.classList.toggle("active", key === platform);
+        button.classList.toggle("unavailable", downloadOptions.platforms[key] && !downloadOptions.platforms[key].available);
+      });
+
+      const button = document.getElementById("downloadButton");
+      const versionText = document.getElementById("versionText");
+      const fileText = document.getElementById("fileText");
+      const releaseNote = document.getElementById("releaseNote");
+      const version = item.version || downloadOptions.latest_version || "";
+      const size = formatBytes(item.size_bytes);
+
+      if (item.available && item.download_url) {
+        button.href = item.download_url;
+        button.removeAttribute("aria-disabled");
+        button.textContent = `下载${labels[platform]}`;
+        versionText.textContent = version ? `最新版 v${String(version).replace(/^v/i, "")}` : "已配置下载包";
+        fileText.textContent = [item.filename, size].filter(Boolean).join(" · ");
+      } else {
+        button.href = "#download";
+        button.setAttribute("aria-disabled", "true");
+        button.textContent = `${labels[platform]}暂未配置`;
+        versionText.textContent = "当前版本暂未开放下载";
+        fileText.textContent = "请在后台上传安装包后再访问官网";
+      }
+      releaseNote.textContent = downloadOptions.release_notes ? `更新说明：${downloadOptions.release_notes}` : "";
+    }
+
+    async function loadDownloadOptions() {
+      const preferred = detectPlatform();
+      selectedPlatform = preferred;
+      try {
+        const response = await fetch("/download-options", { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        downloadOptions = await response.json();
+      } catch (error) {
+        downloadOptions = { platforms: {} };
+      }
+      selectPlatform(firstAvailablePlatform(preferred));
+    }
+
+    document.querySelectorAll("[data-platform]").forEach((button) => {
+      button.addEventListener("click", () => selectPlatform(button.dataset.platform));
+    });
+    loadDownloadOptions();
+  </script>
+</body>
+</html>"""

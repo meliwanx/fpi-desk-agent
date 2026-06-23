@@ -46,6 +46,7 @@ from app.provider.registry import ProviderRegistry
 from app.skill.registry import SkillRegistry
 from app.storage.database import create_engine, create_session_factory
 from app.tool.registry import ToolRegistry
+from app.website import router as website_router
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +118,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await conn.run_sync(Base.metadata.create_all)
         # Add any missing columns to existing tables (lightweight auto-migration)
         await conn.run_sync(_add_missing_columns)
+        await conn.run_sync(_migrate_sqlite_timestamps_to_shanghai)
 
     app.state.engine = engine
     app.state.session_factory = session_factory
@@ -126,6 +128,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     company_auth_store = None
     if settings.company_auth_enabled:
         from app.company_auth.store import CompanyAuthStore
+        from app.company_auth.presence import CompanyPresenceStore
 
         company_auth_store = CompanyAuthStore(
             get_company_auth_database_url(settings),
@@ -142,9 +145,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
         app.state.company_auth_store = company_auth_store
         set_company_auth_store(company_auth_store)
+        if settings.redis_enabled:
+            app.state.company_presence = await CompanyPresenceStore.from_url(
+                settings.redis_url,
+                prefix=settings.redis_prefix,
+                ttl_seconds=settings.redis_presence_ttl_seconds,
+            )
+        else:
+            app.state.company_presence = CompanyPresenceStore(redis=None)
         logger.info("Company auth enabled for %s", settings.company_auth_bootstrap_email)
     else:
         app.state.company_auth_store = None
+        app.state.company_presence = None
         set_company_auth_store(None)
 
     # Provider registry
@@ -382,7 +394,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     connector_registry = ConnectorRegistry(project_dir=settings.project_dir)
 
-    # Plugin loader (Claude knowledge-work-plugins → OpenYak registries)
+    # Plugin loader (Claude knowledge-work-plugins → fpi-agent registries)
     from app.plugin import load_plugins_by_source
     from app.plugin.manager import PluginManager
 
@@ -565,6 +577,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     company_auth_store = getattr(app.state, "company_auth_store", None)
     if company_auth_store is not None:
         await company_auth_store.dispose()
+    company_presence = getattr(app.state, "company_presence", None)
+    if company_presence is not None:
+        await company_presence.close()
 
     from app.sandbox.manager import reset_sandbox_manager
 
@@ -655,6 +670,75 @@ def _add_missing_columns(connection) -> None:
             connection.execute(text(sql))
 
 
+def _migrate_sqlite_timestamps_to_shanghai(connection) -> None:
+    """One-time SQLite migration from UTC wall-clock timestamps to Shanghai time."""
+    from datetime import datetime, timedelta
+
+    from sqlalchemy import DateTime, inspect as sa_inspect, select, text
+
+    from app.utils.timezone import shanghai_now
+
+    if connection.dialect.name != "sqlite":
+        return
+
+    migration_key = "timezone_migrated_to_shanghai_v1"
+    connection.execute(
+        text(
+            'CREATE TABLE IF NOT EXISTS "_app_migrations" ('
+            '"key" TEXT PRIMARY KEY, '
+            '"applied_at" TEXT NOT NULL'
+            ")"
+        )
+    )
+    existing = connection.execute(
+        text('SELECT "key" FROM "_app_migrations" WHERE "key" = :key'),
+        {"key": migration_key},
+    ).first()
+    if existing is not None:
+        return
+
+    inspector = sa_inspect(connection)
+    for table in Base.metadata.sorted_tables:
+        if not inspector.has_table(table.name):
+            continue
+        primary_key = next(iter(table.primary_key.columns), None)
+        if primary_key is None:
+            continue
+        datetime_columns = [
+            column
+            for column in table.columns
+            if isinstance(column.type, DateTime)
+        ]
+        if not datetime_columns:
+            continue
+
+        rows = connection.execute(select(primary_key, *datetime_columns)).mappings().all()
+        for row in rows:
+            values = {}
+            for column in datetime_columns:
+                value = row[column.name]
+                if value is None:
+                    continue
+                if isinstance(value, str):
+                    try:
+                        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                    except ValueError:
+                        continue
+                values[column.name] = value + timedelta(hours=8)
+            if not values:
+                continue
+            connection.execute(
+                table.update()
+                .where(primary_key == row[primary_key.name])
+                .values(**values)
+            )
+
+    connection.execute(
+        text('INSERT INTO "_app_migrations" ("key", "applied_at") VALUES (:key, :applied_at)'),
+        {"key": migration_key, "applied_at": shanghai_now().isoformat()},
+    )
+
+
 def _find_frontend_dir() -> Path | None:
     """Locate the frontend static build (out/) directory.
 
@@ -689,14 +773,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings = Settings()
 
     app = FastAPI(
-        title="OpenYak",
+        title="fpi-agent",
         version="0.0.1",
         lifespan=lifespan,
     )
     app.state.settings = settings
     set_settings(settings)
 
-    # CORS — restricted to the OpenYak frontend origins. Wildcard would let
+    # CORS — restricted to the fpi-agent frontend origins. Wildcard would let
     # any webpage read responses from this local server cross-origin, which
     # is a PII-leak vector on top of the CSRF risk handled below.
     #   - Tauri desktop shell: tauri://localhost (macOS/Linux) and
@@ -754,6 +838,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Mount routers
     app.include_router(health_router)
+    app.include_router(website_router)
     app.include_router(api_router, prefix="/api")
     app.include_router(openai_compat_router, tags=["openai-compat"])
 

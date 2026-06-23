@@ -85,6 +85,7 @@ pub fn run() {
             commands::get_platform,
             commands::open_external,
             commands::download_and_save,
+            commands::download_update_and_open,
             commands::update_tray_recents,
         ])
         // -- Setup --

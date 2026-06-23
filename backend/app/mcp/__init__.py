@@ -1,7 +1,7 @@
 """MCP (Model Context Protocol) integration.
 
 Connects to external MCP servers (local stdio or remote HTTP/SSE)
-and exposes their tools as OpenYak ToolDefinitions.
+and exposes their tools as fpi-agent ToolDefinitions.
 """
 
 from app.mcp.manager import McpManager

@@ -87,9 +87,9 @@ def _build_font_candidates() -> tuple[list[tuple[Path, bool]], list[tuple[Path, 
 
 _BODY_FONT_CANDIDATES, _MONO_FONT_CANDIDATES = _build_font_candidates()
 
-_BODY_FAMILY = "OpenYakBody"
+_BODY_FAMILY = "FpiAgentBody"
 _BODY_CSS_NAME = "openyakbody"  # CSS font-family name (lowercase for xhtml2pdf)
-_MONO_FAMILY = "OpenYakMono"
+_MONO_FAMILY = "FpiAgentMono"
 _MONO_CSS_NAME = "openyakmono"
 
 _fonts_registered = False

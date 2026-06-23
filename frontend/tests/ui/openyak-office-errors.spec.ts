@@ -1,14 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
-  mockOpenYakApi,
-  seedOpenYakStorage,
-  type OpenYakMockOptions,
-  type OpenYakMockState,
+  mockFpiAgentApi,
+  seedFpiAgentStorage,
+  type FpiAgentMockOptions,
+  type FpiAgentMockState,
 } from "./fixtures/openyak-api";
 
-async function setupMockedApp(page: Page, options?: OpenYakMockOptions): Promise<OpenYakMockState> {
-  await seedOpenYakStorage(page);
-  return mockOpenYakApi(page, options);
+async function setupMockedApp(page: Page, options?: FpiAgentMockOptions): Promise<FpiAgentMockState> {
+  await seedFpiAgentStorage(page);
+  return mockFpiAgentApi(page, options);
 }
 
 async function expectNoAppCrash(page: Page) {
@@ -29,7 +29,7 @@ async function closeArtifactPanel(page: Page) {
   await panelButtons.last().click();
 }
 
-test.describe("OpenYak Office artifact and error-state GUI workflows", () => {
+test.describe("fpi-agent Office artifact and error-state GUI workflows", () => {
   test.describe.configure({ timeout: 75_000 });
 
   test("office artifact workflow: preview DOCX, XLSX, PDF, and PPTX from real binary files", async ({ page }) => {
@@ -39,7 +39,7 @@ test.describe("OpenYak Office artifact and error-state GUI workflows", () => {
     await expect(page.getByText("Artifact showcase").first()).toBeVisible();
 
     await openArtifactFile(page, "office-brief.docx");
-    await expect(page.getByText("OpenYak DOCX workflow")).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText("fpi-agent DOCX workflow")).toBeVisible({ timeout: 20_000 });
     await closeArtifactPanel(page);
 
     await openArtifactFile(page, "office-matrix.xlsx");
@@ -77,7 +77,7 @@ test.describe("OpenYak Office artifact and error-state GUI workflows", () => {
     const state = await setupMockedApp(page, { failUploads: ["broken-upload.txt"] });
 
     await page.goto("/c/new");
-    await expect(page.getByRole("heading", { name: /What should (OpenYak help you do|we do in)/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /What should (fpi-agent help you do|we do in)/i })).toBeVisible();
     await page.locator('input[type="file"]').setInputFiles({
       name: "broken-upload.txt",
       mimeType: "text/plain",
@@ -118,11 +118,11 @@ test.describe("OpenYak Office artifact and error-state GUI workflows", () => {
   });
 
   test("mobile remote error workflow: invalid token fails without entering the task flow", async ({ page }) => {
-    await seedOpenYakStorage(page);
+    await seedFpiAgentStorage(page);
     await page.addInitScript(() => {
       window.localStorage.removeItem("openyak_remote_config");
     });
-    await mockOpenYakApi(page, { healthStatus: 401 });
+    await mockFpiAgentApi(page, { healthStatus: 401 });
 
     await page.goto("/m/settings");
     await expect(page.getByRole("heading", { name: "Connection" })).toBeVisible();

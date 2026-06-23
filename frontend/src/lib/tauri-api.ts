@@ -12,13 +12,29 @@ export interface TrayRecent {
   title: string | null;
 }
 
+export interface UpdateDownloadProgress {
+  downloaded: number;
+  total?: number | null;
+  progress: number;
+}
+
 export interface DesktopAPI {
   getBackendUrl: () => Promise<string>;
   getBackendToken: () => Promise<string>;
   getPendingNavigation: () => Promise<string | null>;
   getPlatform: () => Promise<string>;
   openExternal: (url: string) => Promise<void>;
-  downloadAndSave: (opts: { url?: string; data?: number[]; defaultName: string }) => Promise<boolean>;
+  downloadAndSave: (opts: {
+    url?: string;
+    data?: number[];
+    defaultName: string;
+    defaultDirectory?: string | null;
+  }) => Promise<boolean>;
+  downloadUpdateAndOpen: (opts: {
+    url: string;
+    defaultName: string;
+    expectedSha256?: string | null;
+  }) => Promise<string>;
   minimize: () => Promise<void>;
   maximize: () => Promise<void>;
   close: () => Promise<void>;
@@ -31,6 +47,7 @@ export interface DesktopAPI {
   onNavigate: (callback: (path: string) => void) => () => void;
   onToggleSidebar: (callback: () => void) => () => void;
   onCheckForUpdates: (callback: () => void) => () => void;
+  onUpdateDownloadProgress: (callback: (progress: UpdateDownloadProgress) => void) => () => void;
   onOpenSearch: (callback: () => void) => () => void;
 }
 
@@ -62,7 +79,10 @@ export const desktopAPI: DesktopAPI = {
   getPendingNavigation: () => invoke<string | null>("get_pending_navigation"),
   getPlatform: () => invoke<string>("get_platform"),
   openExternal: (url) => invoke("open_external", { url }),
-  downloadAndSave: ({ url, data, defaultName }) => invoke<boolean>("download_and_save", { url, data, defaultName }),
+  downloadAndSave: ({ url, data, defaultName, defaultDirectory }) =>
+    invoke<boolean>("download_and_save", { url, data, defaultName, defaultDirectory }),
+  downloadUpdateAndOpen: ({ url, defaultName, expectedSha256 }) =>
+    invoke<string>("download_update_and_open", { url, defaultName, expectedSha256 }),
   minimize: () => invoke("window_minimize"),
   maximize: () => invoke("window_maximize"),
   close: () => invoke("window_close"),
@@ -79,5 +99,7 @@ export const desktopAPI: DesktopAPI = {
   onNavigate: (callback) => listenSync<string>("navigate", callback),
   onToggleSidebar: (callback) => listenSync<void>("toggle-sidebar", callback),
   onCheckForUpdates: (callback) => listenSync<void>("check-for-updates", callback),
+  onUpdateDownloadProgress: (callback) =>
+    listenSync<UpdateDownloadProgress>("update-download-progress", callback),
   onOpenSearch: (callback) => listenSync<void>("open-search", callback),
 };

@@ -5,6 +5,7 @@ import { Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api, apiErrorMessage } from "@/lib/api";
 import { API } from "@/lib/constants";
+import { parentDirectory, saveBlobAsFile } from "@/lib/file-download";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
 const PDF_DOCUMENT_OPTIONS = {
@@ -100,13 +101,10 @@ export function PdfRenderer({ filePath }: PdfRendererProps) {
 
   const handleDownload = useCallback(() => {
     if (!blobRef.current) return;
-    const url = URL.createObjectURL(blobRef.current);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileName || "document.pdf";
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [fileName]);
+    void saveBlobAsFile(blobRef.current, fileName || "document.pdf", parentDirectory(filePath)).catch((err) => {
+      console.error("Failed to download PDF", err);
+    });
+  }, [fileName, filePath]);
 
   const onDocumentLoadSuccess = useCallback(({ numPages: n }: { numPages: number }) => {
     setNumPages(n);

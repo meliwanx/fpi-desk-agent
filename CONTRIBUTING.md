@@ -1,4 +1,4 @@
-# Contributing to OpenYak
+# Contributing to fpi-agent
 
 Thanks for your interest in contributing! This guide covers the workflow and conventions for the project.
 
@@ -6,8 +6,8 @@ Thanks for your interest in contributing! This guide covers the workflow and con
 
 ```bash
 # Clone and install
-git clone https://github.com/openyak/openyak.git
-cd openyak
+git clone https://github.com/meliwanx/fpi-desk-agent.git
+cd fpi-desk-agent
 npm install
 cd backend && pip install -e ".[dev]" && cd ..
 
@@ -21,7 +21,7 @@ See [README.md](README.md) for detailed setup instructions.
 
 ### 1. Pick an Issue
 
-- Browse [open issues](https://github.com/openyak/openyak/issues)
+- Browse [open issues](https://github.com/meliwanx/fpi-desk-agent/issues)
 - Issues labeled `good first issue` are great starting points
 - Comment on the issue to let others know you're working on it
 
@@ -102,7 +102,7 @@ Fixes #42
 
 ## Community Guidelines
 
-OpenYak uses issue templates and moderation tools to keep project discussions useful for contributors and users.
+fpi-agent uses issue templates and moderation tools to keep project discussions useful for contributors and users.
 
 - Follow the [Code of Conduct](CODE_OF_CONDUCT.md)
 - Keep issues specific, respectful, and actionable
@@ -137,7 +137,7 @@ OpenYak uses issue templates and moderation tools to keep project discussions us
 
 ## Reporting Bugs
 
-Use the [Bug Report template](https://github.com/openyak/openyak/issues/new?template=bug_report.yml). A good bug report includes:
+Use the [Bug Report template](https://github.com/meliwanx/fpi-desk-agent/issues/new?template=bug_report.yml). A good bug report includes:
 
 1. Clear description of what happened
 2. Steps to reproduce
@@ -146,7 +146,7 @@ Use the [Bug Report template](https://github.com/openyak/openyak/issues/new?temp
 
 ## Requesting Features
 
-Use the [Feature Request template](https://github.com/openyak/openyak/issues/new?template=feature_request.yml). Explain the problem before the solution — understanding *why* helps us design the right approach.
+Use the [Feature Request template](https://github.com/meliwanx/fpi-desk-agent/issues/new?template=feature_request.yml). Explain the problem before the solution — understanding *why* helps us design the right approach.
 
 ## Project Structure
 

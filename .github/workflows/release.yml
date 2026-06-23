@@ -74,9 +74,6 @@ jobs:
           - target: aarch64-apple-darwin
             arch: aarch64
             node_platform: Darwin-arm64
-          - target: x86_64-apple-darwin
-            arch: x64
-            node_platform: Darwin-x86_64
     steps:
       - uses: actions/checkout@v4
 
@@ -97,6 +94,26 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: desktop-tauri/src-tauri
+
+      - name: Validate Apple signing secrets
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID TAURI_SIGNING_PRIVATE_KEY; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing GitHub Actions secrets required for a warning-free notarized macOS package: ${missing[*]}"
+            exit 1
+          fi
 
       - name: Install Apple certificate
         env:
@@ -154,63 +171,16 @@ jobs:
           cd desktop-tauri
           npx @tauri-apps/cli build \
             --target ${{ matrix.target }} \
-            --config '{"build":{"beforeBuildCommand":""},"bundle":{"targets":["dmg","app"]}}'
+            --config '{"build":{"beforeBuildCommand":""},"bundle":{"targets":["dmg","app"],"macOS":{"signingIdentity":null}}}'
 
       # Sign all PyInstaller backend binaries inside the .app bundle
       - name: Sign backend binaries in bundle
-        env:
-          SIGNING_IDENTITY: "Developer ID Application: wangzhang wu (46KF5Z549N)"
         run: |
-          BUNDLE_BACKEND="desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos/OpenYak.app/Contents/Resources/backend"
-
-          # Sign all .dylib and .so files
-          find "$BUNDLE_BACKEND" -type f \( -name "*.dylib" -o -name "*.so" \) \
-            -exec codesign --force --options runtime --timestamp \
-            --sign "$SIGNING_IDENTITY" {} \;
-
-          # Sign backend executable
-          codesign --force --options runtime --timestamp \
-            --sign "$SIGNING_IDENTITY" "$BUNDLE_BACKEND/openyak-backend"
-
-          # Fix Python.framework symlink structure (Tauri resolves symlinks to regular files)
-          FW_PATH="$BUNDLE_BACKEND/_internal/Python.framework"
-          if [ -d "$FW_PATH" ]; then
-            # Remove broken top-level signature
-            rm -rf "$FW_PATH/_CodeSignature"
-
-            # Restore Python symlink
-            if [ -f "$FW_PATH/Python" ] && [ ! -L "$FW_PATH/Python" ]; then
-              rm "$FW_PATH/Python"
-              # Restore Versions/Current symlink
-              if [ ! -L "$FW_PATH/Versions/Current" ]; then
-                (cd "$FW_PATH/Versions" && ln -s 3.12 Current)
-              fi
-              ln -s Versions/Current/Python "$FW_PATH/Python"
-            fi
-
-            # Sign the actual versioned binary
-            codesign --force --options runtime --timestamp \
-              --sign "$SIGNING_IDENTITY" "$FW_PATH/Versions/3.12/Python"
-          fi
-
-          # Fix _internal/Python symlink
-          PYTHON_BIN="$BUNDLE_BACKEND/_internal/Python"
-          if [ -f "$PYTHON_BIN" ] && [ ! -L "$PYTHON_BIN" ]; then
-            rm "$PYTHON_BIN"
-            ln -s Python.framework/Versions/Current/Python "$PYTHON_BIN"
-          fi
-
-      # Re-sign the .app after modifying backend binaries
-      - name: Re-sign app bundle
-        env:
-          SIGNING_IDENTITY: "Developer ID Application: wangzhang wu (46KF5Z549N)"
-        run: |
-          APP_PATH="desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos/OpenYak.app"
-          codesign --force --options runtime --timestamp \
-            --sign "$SIGNING_IDENTITY" "$APP_PATH/Contents/MacOS/openyak-desktop"
-          codesign --force --options runtime --timestamp \
-            --sign "$SIGNING_IDENTITY" "$APP_PATH"
-          codesign -v --deep "$APP_PATH"
+          set -euo pipefail
+          APP_NAME=$(node -e "const fs=require('node:fs'); const c=JSON.parse(fs.readFileSync('desktop-tauri/src-tauri/tauri.conf.json','utf8')); console.log(c.productName)")
+          SIGNING_IDENTITY=$(node -e "const fs=require('node:fs'); const c=JSON.parse(fs.readFileSync('desktop-tauri/src-tauri/tauri.conf.json','utf8')); console.log(c.bundle.macOS.signingIdentity)")
+          APP_PATH="desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos/${APP_NAME}.app"
+          scripts/sign-macos-app.sh "$APP_PATH" "$SIGNING_IDENTITY"
 
       # Notarize with Apple
       - name: Notarize app
@@ -219,14 +189,19 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          APP_PATH="desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos/OpenYak.app"
-          ditto -c -k --keepParent "$APP_PATH" /tmp/OpenYak-notarize.zip
-          xcrun notarytool submit /tmp/OpenYak-notarize.zip \
+          set -euo pipefail
+          APP_NAME=$(node -e "const fs=require('node:fs'); const c=JSON.parse(fs.readFileSync('desktop-tauri/src-tauri/tauri.conf.json','utf8')); console.log(c.productName)")
+          APP_PATH="desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos/${APP_NAME}.app"
+          ZIP_PATH="$RUNNER_TEMP/${APP_NAME}-notarize.zip"
+          ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
+          xcrun notarytool submit "$ZIP_PATH" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
             --wait
           xcrun stapler staple "$APP_PATH"
+          xcrun stapler validate "$APP_PATH"
+          spctl -a -vvv -t exec "$APP_PATH"
 
       - name: Verify backend inside signed .app
         env:
@@ -235,27 +210,34 @@ jobs:
           # full smoke test against the unsigned copy.
           VERIFY_BUNDLE_SKIP_SMOKE: "1"
         run: |
-          APP_BACKEND="desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos/OpenYak.app/Contents/Resources/backend"
+          APP_NAME=$(node -e "const fs=require('node:fs'); const c=JSON.parse(fs.readFileSync('desktop-tauri/src-tauri/tauri.conf.json','utf8')); console.log(c.productName)")
+          APP_BACKEND="desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos/${APP_NAME}.app/Contents/Resources/backend"
           node scripts/verify-bundle.mjs "$APP_BACKEND"
 
       # Regenerate updater archive and DMG from notarized app
       - name: Regenerate artifacts
         env:
-          SIGNING_IDENTITY: "Developer ID Application: wangzhang wu (46KF5Z549N)"
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          set -euo pipefail
+          APP_NAME=$(node -e "const fs=require('node:fs'); const c=JSON.parse(fs.readFileSync('desktop-tauri/src-tauri/tauri.conf.json','utf8')); console.log(c.productName)")
+          SIGNING_IDENTITY=$(node -e "const fs=require('node:fs'); const c=JSON.parse(fs.readFileSync('desktop-tauri/src-tauri/tauri.conf.json','utf8')); console.log(c.bundle.macOS.signingIdentity)")
           BUNDLE_DIR="desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle"
-          VERSION=$(python3 -c "import json; print(json.load(open('package.json'))['version'])")
+          VERSION=$(node -p "require('./package.json').version")
           ARCH="${{ matrix.arch }}"
-          TAR_NAME="OpenYak_${VERSION}_${ARCH}.app.tar.gz"
+          TAR_NAME="${APP_NAME}_${VERSION}_${ARCH}.app.tar.gz"
+          DMG_NAME="${APP_NAME}_${VERSION}_${ARCH}.dmg"
 
           # Regenerate updater tar.gz with a versioned filename so each
           # release has its own artifact on the CDN. Previously we shipped
-          # "OpenYak.app.tar.gz" for every version, which meant a new
+          # a stable app tarball name for every version, which meant a new
           # upload silently broke the in-place signature in latest.json.
           cd "$BUNDLE_DIR/macos"
-          rm -f OpenYak.app.tar.gz OpenYak.app.tar.gz.sig \
-                OpenYak_*.app.tar.gz OpenYak_*.app.tar.gz.sig
-          tar -czf "$TAR_NAME" OpenYak.app
+          rm -f "${APP_NAME}.app.tar.gz" "${APP_NAME}.app.tar.gz.sig" \
+                "${APP_NAME}"_*.app.tar.gz "${APP_NAME}"_*.app.tar.gz.sig
+          tar -czf "$TAR_NAME" "${APP_NAME}.app"
           cd $GITHUB_WORKSPACE
 
           # Sign tar.gz with Tauri updater key — signature binds to THIS file
@@ -264,15 +246,23 @@ jobs:
           # Regenerate DMG with Applications shortcut
           rm -f "$BUNDLE_DIR/dmg/"*.dmg
           DMG_STAGING=$(mktemp -d)
-          cp -R "$BUNDLE_DIR/macos/OpenYak.app" "$DMG_STAGING/"
+          cp -R "$BUNDLE_DIR/macos/${APP_NAME}.app" "$DMG_STAGING/"
           ln -s /Applications "$DMG_STAGING/Applications"
-          hdiutil create -volname "OpenYak" \
+          hdiutil create -volname "$APP_NAME" \
             -srcfolder "$DMG_STAGING" \
             -ov -format UDZO \
-            "$BUNDLE_DIR/dmg/OpenYak_${VERSION}_${ARCH}.dmg"
+            "$BUNDLE_DIR/dmg/$DMG_NAME"
           rm -rf "$DMG_STAGING"
           codesign --force --timestamp \
-            --sign "$SIGNING_IDENTITY" "$BUNDLE_DIR/dmg/"*.dmg
+            --sign "$SIGNING_IDENTITY" "$BUNDLE_DIR/dmg/$DMG_NAME"
+          xcrun notarytool submit "$BUNDLE_DIR/dmg/$DMG_NAME" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$BUNDLE_DIR/dmg/$DMG_NAME"
+          xcrun stapler validate "$BUNDLE_DIR/dmg/$DMG_NAME"
+          spctl -a -vvv -t open --context context:primary-signature "$BUNDLE_DIR/dmg/$DMG_NAME"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -280,8 +270,8 @@ jobs:
           name: macos-${{ matrix.arch }}-bundle
           path: |
             desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
-            desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos/OpenYak_*.app.tar.gz
-            desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos/OpenYak_*.app.tar.gz.sig
+            desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
+            desktop-tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig
 
   build-linux:
     runs-on: ubuntu-22.04
@@ -394,7 +384,6 @@ jobs:
           files: |
             artifacts/windows-bundle/**/*
             artifacts/macos-aarch64-bundle/**/*
-            artifacts/macos-x64-bundle/**/*
             artifacts/linux-x64-bundle/**/*
 
       - name: Generate update manifest
@@ -406,13 +395,11 @@ jobs:
           # Read signatures (artifacts have subdirectories: macos/, dmg/, etc.)
           WIN_SIG=$(find artifacts/windows-bundle -name '*.exe.sig' -exec cat {} \; 2>/dev/null || true)
           AARCH64_SIG=$(find artifacts/macos-aarch64-bundle -name '*.app.tar.gz.sig' -exec cat {} \; 2>/dev/null || true)
-          X64_SIG=$(find artifacts/macos-x64-bundle -name '*.app.tar.gz.sig' -exec cat {} \; 2>/dev/null || true)
 
           # Find artifact filenames (versioned since 1.0.8 — so each release
           # has its own file on the CDN and the signature stays valid forever)
           WIN_EXE=$(find artifacts/windows-bundle -name '*.exe' ! -name '*.sig' -exec basename {} \; | head -1)
-          AARCH64_TAR=$(find artifacts/macos-aarch64-bundle -name 'OpenYak_*.app.tar.gz' ! -name '*.sig' -exec basename {} \; | head -1)
-          X64_TAR=$(find artifacts/macos-x64-bundle -name 'OpenYak_*.app.tar.gz' ! -name '*.sig' -exec basename {} \; | head -1)
+          AARCH64_TAR=$(find artifacts/macos-aarch64-bundle -name '*.app.tar.gz' ! -name '*.sig' -exec basename {} \; | head -1)
 
           # Fail loud if anything is missing — a broken manifest silently
           # blocks every client's auto-update, which is exactly how 1.0.7
@@ -422,8 +409,6 @@ jobs:
           [[ -n "$WIN_EXE"     ]] || missing+=("windows installer exe")
           [[ -n "$AARCH64_SIG" ]] || missing+=("macOS aarch64 signature")
           [[ -n "$AARCH64_TAR" ]] || missing+=("macOS aarch64 tar.gz")
-          [[ -n "$X64_SIG"     ]] || missing+=("macOS x86_64 signature")
-          [[ -n "$X64_TAR"     ]] || missing+=("macOS x86_64 tar.gz")
           if (( ${#missing[@]} > 0 )); then
             echo "::error::cannot generate latest.json — missing: ${missing[*]}"
             find artifacts -type f | sort
@@ -445,10 +430,6 @@ jobs:
               "darwin-aarch64": {
                 "signature": "${AARCH64_SIG}",
                 "url": "${DOWNLOAD_BASE}/${AARCH64_TAR}"
-              },
-              "darwin-x86_64": {
-                "signature": "${X64_SIG}",
-                "url": "${DOWNLOAD_BASE}/${X64_TAR}"
               }
             }
           }

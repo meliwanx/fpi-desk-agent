@@ -1,15 +1,15 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
-  mockOpenYakApi,
-  seedOpenYakStorage,
-  type OpenYakMockState,
+  mockFpiAgentApi,
+  seedFpiAgentStorage,
+  type FpiAgentMockState,
 } from "./fixtures/openyak-api";
 
-let mockState: OpenYakMockState;
+let mockState: FpiAgentMockState;
 
 test.beforeEach(async ({ page }) => {
-  await seedOpenYakStorage(page);
-  mockState = await mockOpenYakApi(page);
+  await seedFpiAgentStorage(page);
+  mockState = await mockFpiAgentApi(page);
 });
 
 async function openNewChat(page: Page, workspace = false) {
@@ -20,7 +20,7 @@ async function openNewChat(page: Page, workspace = false) {
   await expect(
     page
       .getByRole("heading", {
-        name: /What should (OpenYak help you do|we do in)/i,
+        name: /What should (fpi-agent help you do|we do in)/i,
       })
       .first(),
   ).toBeVisible();
@@ -189,28 +189,41 @@ async function installTauriDragDropMock(page: Page) {
   });
 }
 
-test.describe("OpenYak UI preflight", () => {
-  test("company login path: uses 聚光 logo and starts in light theme", async ({
+test.describe("fpi-agent UI preflight", () => {
+  test("company login path: shows branded login page and starts in light theme", async ({
     page,
   }) => {
-    await seedOpenYakStorage(page, {
+    await seedFpiAgentStorage(page, {
       force: true,
       hasCompanySession: false,
     });
 
     await page.goto("/c/new");
 
-    await expect(
-      page.getByRole("img", { name: "聚光科技" }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "聚光办公助理" }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "欢迎登录" })).toBeVisible();
+    await expect(page.getByPlaceholder("请输入账号")).toBeVisible();
     await expect
       .poll(() =>
         page.evaluate(() => document.documentElement.classList.contains("dark")),
       )
       .toBe(false);
+  });
+
+  test("company login path: invalid saved session returns to login", async ({
+    page,
+  }) => {
+    await page.route("**/api/company-auth/session", (route) =>
+      route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "Company login required" }),
+      }),
+    );
+
+    await page.goto("/c/new");
+
+    await expect(page.getByRole("heading", { name: "欢迎登录" })).toBeVisible();
+    await expect(page.getByLabel("账号")).toBeVisible();
   });
 
   test("desktop chat path: landing, mode switch, attachments, mentions, send, workspace panel", async ({
@@ -350,7 +363,7 @@ test.describe("OpenYak UI preflight", () => {
     page,
   }) => {
     await installTauriDragDropMock(page);
-    await seedOpenYakStorage(page, { force: true });
+    await seedFpiAgentStorage(page, { force: true });
     await openNewChat(page);
     await expect
       .poll(() =>
@@ -467,7 +480,7 @@ test.describe("OpenYak UI preflight", () => {
 
     await page.getByRole("button", { name: /Demo Page/i }).click();
     await expect(
-      page.frameLocator("iframe").getByText("OpenYak GUI Preflight"),
+      page.frameLocator("iframe").getByText("fpi-agent GUI Preflight"),
     ).toBeVisible();
 
     await page.getByRole("button", { name: /Coverage Matrix/i }).click();
@@ -760,7 +773,7 @@ test.describe("OpenYak UI preflight", () => {
   test("settings permissions path: remembered choices can be reviewed and cleared", async ({
     page,
   }) => {
-    await seedOpenYakStorage(page, {
+    await seedFpiAgentStorage(page, {
       force: true,
       savedPermissions: [
         {
@@ -932,7 +945,7 @@ test.describe("OpenYak UI preflight", () => {
   });
 });
 
-test.describe("OpenYak mobile remote preflight", () => {
+test.describe("fpi-agent mobile remote preflight", () => {
   test.use({ viewport: { width: 393, height: 852 }, isMobile: true });
 
   test("mobile settings path: connection and provider selection", async ({
@@ -955,7 +968,7 @@ test.describe("OpenYak mobile remote preflight", () => {
 
   test("mobile task path: task list, new task, submit", async ({ page }) => {
     await page.goto("/m?token=remote-token");
-    await expect(page.getByRole("heading", { name: "OpenYak" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "fpi-agent" })).toBeVisible();
     await expect(page.getByText("Quarterly planning notes")).toBeVisible();
 
     await page.getByRole("button", { name: "New task" }).click({ force: true });
@@ -963,12 +976,12 @@ test.describe("OpenYak mobile remote preflight", () => {
     await expect(page.locator("select")).toContainText("Claude Sonnet 4.5");
 
     await page
-      .getByPlaceholder("What should OpenYak do?")
+      .getByPlaceholder("What should fpi-agent do?")
       .fill("Check the release notes from my phone");
     const promptResponse = page.waitForResponse(
       (res) => res.url().includes("/api/chat/prompt") && res.status() === 200,
     );
-    await page.getByPlaceholder("What should OpenYak do?").press("Enter");
+    await page.getByPlaceholder("What should fpi-agent do?").press("Enter");
     await promptResponse;
   });
 });

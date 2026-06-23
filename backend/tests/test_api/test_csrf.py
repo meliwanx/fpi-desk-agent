@@ -111,7 +111,7 @@ class TestOriginAllowlist:
     @pytest.mark.asyncio
     async def test_null_origin_blocked(self):
         """Sandboxed iframes and opaque-origin contexts send Origin: null —
-        never a legitimate OpenYak client, always rejected."""
+        never a legitimate fpi-agent client, always rejected."""
         app = _make_app()
         async with await _client(app) as c:
             r = await c.post(
@@ -166,9 +166,9 @@ class TestOriginAllowlist:
                 "/api/echo",
                 json={"x": 1},
                 headers={
-                    "host": "120.26.208.161:5201",
-                    "origin": "http://120.26.208.161:5201",
-                    "referer": "http://120.26.208.161:5201/admin",
+                    "host": "fpiagent.hangzhoupuyu.work",
+                    "origin": "http://fpiagent.hangzhoupuyu.work",
+                    "referer": "http://fpiagent.hangzhoupuyu.work/admin",
                 },
             )
         assert r.status_code == 200, r.text

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Verify a PyInstaller bundle of the OpenYak backend.
+ * Verify a PyInstaller bundle of the fpi-agent backend.
  *
  * This is the single source of truth for "what must ship inside
  * backend/dist/openyak-backend/" — shared by local dev and CI so the
@@ -9,7 +9,7 @@
  * Usage:
  *   node scripts/verify-bundle.mjs [dist-dir]
  *   node scripts/verify-bundle.mjs backend/dist/openyak-backend
- *   node scripts/verify-bundle.mjs path/to/OpenYak.app/Contents/Resources/backend
+ *   node scripts/verify-bundle.mjs path/to/fpi-agent.app/Contents/Resources/backend
  *
  * Exits non-zero (with a loud message) if anything critical is missing.
  * Why this exists: 1.0.7 shipped without `frontend_out` because the

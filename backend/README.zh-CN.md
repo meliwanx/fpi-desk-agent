@@ -1,6 +1,6 @@
 [English](README.md)
 
-# OpenYak 后端
+# fpi-agent 后端
 
 Python FastAPI 后端，复刻 OpenCode 完整 agent 架构，让开源模型（通过 OpenRouter）拥有 Claude Code 级别的 agentic 能力。
 
@@ -12,7 +12,7 @@ pip install -e ".[dev]"
 
 # 2. 配置环境变量
 cp .env.example .env
-# 编辑 .env，填入 OPENYAK_OPENROUTER_API_KEY
+# 编辑 .env，填入 FPI_AGENT_OPENROUTER_API_KEY
 
 # 3. 启动服务
 uvicorn app.main:app --reload
@@ -281,7 +281,7 @@ app/
 | 硅基流动（SiliconFlow） | BYOK | |
 | Xiaomi MiMo | BYOK | |
 
-所有 BYOK 提供者密钥遵循 `OPENYAK_{PROVIDER}_API_KEY` 格式。
+所有 BYOK 提供者密钥遵循 `FPI_AGENT_{PROVIDER}_API_KEY` 格式。
 
 ## 使用示例
 
@@ -324,26 +324,26 @@ curl http://localhost:8000/api/agents
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `OPENYAK_OPENROUTER_API_KEY` | OpenRouter API 密钥 | （可选） |
-| `OPENYAK_DATABASE_URL` | 数据库连接字符串 | `sqlite+aiosqlite:///./data/openyak.db` |
-| `OPENYAK_HOST` | 监听地址 | `0.0.0.0` |
-| `OPENYAK_PORT` | 监听端口 | `8000` |
-| `OPENYAK_DEBUG` | 调试模式 | `false` |
-| `OPENYAK_PROJECT_DIR` | 工作区根目录（文件操作用） | `.` |
-| `OPENYAK_COMPACTION_AUTO` | 自动上下文压缩 | `true` |
-| `OPENYAK_DAILY_SEARCH_LIMIT` | 每日网页搜索配额 | `20` |
-| `OPENYAK_FTS_ENABLED` | 全文搜索索引 | `true` |
-| `OPENYAK_OLLAMA_BASE_URL` | Ollama 服务地址（setup 自动设置） | `` |
-| `OPENYAK_OLLAMA_AUTO_START` | 启动时自动启动托管的 Ollama | `true` |
-| `OPENYAK_OLLAMA_LAST_MODEL` | 上次使用的模型（用于启动预热） | `` |
-| `OPENYAK_RAPID_MLX_BASE_URL` | Rapid-MLX OpenAI-compatible endpoint | `` |
-| `OPENYAK_RAPID_MLX_MODEL` | 上次选择的 Rapid-MLX 模型 alias | `` |
-| `OPENYAK_OPENCLAW_ENABLED` | 启用 OpenClaw IM 桥接 | `false` |
-| `OPENYAK_OPENCLAW_URL` | OpenClaw WebSocket 地址 | `ws://127.0.0.1:18789` |
-| `OPENYAK_PROXY_URL` | 托管工具代理地址（可选） | `` |
-| `OPENYAK_PROXY_TOKEN` | 代理认证 JWT | `` |
-| `OPENYAK_BRAVE_SEARCH_API_KEY` | Brave Search API 密钥（增强网页搜索） | `` |
-| `OPENYAK_REMOTE_ACCESS_ENABLED` | 启用远程隧道访问 | `false` |
+| `FPI_AGENT_OPENROUTER_API_KEY` | OpenRouter API 密钥 | （可选） |
+| `FPI_AGENT_DATABASE_URL` | 数据库连接字符串 | `sqlite+aiosqlite:///./data/fpi-agent.db` |
+| `FPI_AGENT_HOST` | 监听地址 | `0.0.0.0` |
+| `FPI_AGENT_PORT` | 监听端口 | `8000` |
+| `FPI_AGENT_DEBUG` | 调试模式 | `false` |
+| `FPI_AGENT_PROJECT_DIR` | 工作区根目录（文件操作用） | `.` |
+| `FPI_AGENT_COMPACTION_AUTO` | 自动上下文压缩 | `true` |
+| `FPI_AGENT_DAILY_SEARCH_LIMIT` | 每日网页搜索配额 | `20` |
+| `FPI_AGENT_FTS_ENABLED` | 全文搜索索引 | `true` |
+| `FPI_AGENT_OLLAMA_BASE_URL` | Ollama 服务地址（setup 自动设置） | `` |
+| `FPI_AGENT_OLLAMA_AUTO_START` | 启动时自动启动托管的 Ollama | `true` |
+| `FPI_AGENT_OLLAMA_LAST_MODEL` | 上次使用的模型（用于启动预热） | `` |
+| `FPI_AGENT_RAPID_MLX_BASE_URL` | Rapid-MLX OpenAI-compatible endpoint | `` |
+| `FPI_AGENT_RAPID_MLX_MODEL` | 上次选择的 Rapid-MLX 模型 alias | `` |
+| `FPI_AGENT_OPENCLAW_ENABLED` | 启用 OpenClaw IM 桥接 | `false` |
+| `FPI_AGENT_OPENCLAW_URL` | OpenClaw WebSocket 地址 | `ws://127.0.0.1:18789` |
+| `FPI_AGENT_PROXY_URL` | 托管工具代理地址（可选） | `` |
+| `FPI_AGENT_PROXY_TOKEN` | 代理认证 JWT | `` |
+| `FPI_AGENT_BRAVE_SEARCH_API_KEY` | Brave Search API 密钥（增强网页搜索） | `` |
+| `FPI_AGENT_REMOTE_ACCESS_ENABLED` | 启用远程隧道访问 | `false` |
 
 ## 构建与部署
 
@@ -355,6 +355,6 @@ uvicorn app.main:app --reload
 python run.py --port 8100 --data-dir /path/to/app/data
 
 # 生产构建（PyInstaller 打包）
-pyinstaller openyak.spec
-./dist/openyak
+pyinstaller fpi-agent.spec
+./dist/fpi-agent
 ```

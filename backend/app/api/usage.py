@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import statistics
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import get_db
 from app.models.message import Message
 from app.models.session import Session
+from app.utils.timezone import shanghai_now
 
 router = APIRouter()
 
@@ -92,7 +93,7 @@ async def get_usage_stats(
     days: int = Query(default=30, ge=1, le=365),
 ) -> UsageStats:
     """Aggregate usage statistics from message data."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff = shanghai_now() - timedelta(days=days)
 
     # --- Total cost and tokens from assistant messages ---
     totals_stmt = (

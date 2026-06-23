@@ -1,10 +1,14 @@
 "use client";
 
-import { getCompanySessionToken } from "./company-auth";
+import {
+  clearCompanySession,
+  getCompanySessionToken,
+  isCompanyAuthFailure,
+} from "./company-auth";
 import i18n from "@/i18n/config";
 
 export const ENTERPRISE_CONTROL_URL = (
-  process.env.NEXT_PUBLIC_ENTERPRISE_CONTROL_URL || "http://120.26.208.161:5201"
+  process.env.NEXT_PUBLIC_ENTERPRISE_CONTROL_URL || "https://fpiagent.hangzhoupuyu.work"
 ).replace(/\/+$/, "");
 
 class EnterpriseApiError extends Error {
@@ -37,7 +41,10 @@ async function request<T>(
     ...fetchOptions
   } = options ?? {};
   const headers = new Headers(fetchOptions.headers);
-  headers.set("Content-Type", headers.get("Content-Type") || "application/json");
+  const isMultipart = typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
+  if (!isMultipart && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
   headers.set("Accept-Language", headers.get("Accept-Language") || i18n.language || "zh-CN");
 
   const companyToken = includeCompanySession ? getCompanySessionToken() : null;
@@ -61,6 +68,7 @@ async function request<T>(
       } catch {
         body = raw;
       }
+      if (isCompanyAuthFailure(response.status, body)) clearCompanySession();
       throw new EnterpriseApiError(response.status, response.statusText, body);
     }
     if (response.status === 204) return undefined as T;
@@ -81,6 +89,12 @@ export const enterpriseApi = {
     request<T>(path, {
       method: "POST",
       body: data ? JSON.stringify(data) : undefined,
+      ...options,
+    }),
+  postForm: <T>(path: string, data: FormData, options?: EnterpriseRequestInit) =>
+    request<T>(path, {
+      method: "POST",
+      body: data,
       ...options,
     }),
 };

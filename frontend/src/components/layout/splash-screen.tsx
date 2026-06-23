@@ -9,7 +9,7 @@ let splashHasBeenShown = false;
 /**
  * Animated logo component with fade-in effect
  */
-export function AnimatedOpenYakLogo({ size = 80 }: { size?: number }) {
+export function AnimatedFpiAgentLogo({ size = 80 }: { size?: number }) {
   return (
     <motion.img
       src="/favicon.svg"
@@ -80,7 +80,7 @@ export function SplashScreen() {
               opacity: { duration: 0.3 }
             }}
           >
-            <AnimatedOpenYakLogo size={120} />
+            <AnimatedFpiAgentLogo size={120} />
           </motion.div>
 
           {/* App name - fades in after logo animation */}

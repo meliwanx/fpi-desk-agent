@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller spec for the OpenYak backend.
+PyInstaller spec for the fpi-agent backend.
 
 Build with:
     cd backend

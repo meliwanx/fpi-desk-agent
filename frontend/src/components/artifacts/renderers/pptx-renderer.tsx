@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api, apiErrorMessage } from "@/lib/api";
 import { API } from "@/lib/constants";
+import { parentDirectory, saveBlobAsFile } from "@/lib/file-download";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import type { PPTXData } from "@kandiforge/pptx-renderer";
 
@@ -139,13 +140,10 @@ export function PptxRenderer({ filePath }: PptxRendererProps) {
 
   const handleDownload = useCallback(() => {
     if (!blobRef.current) return;
-    const url = URL.createObjectURL(blobRef.current);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileName || "presentation.pptx";
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [fileName]);
+    void saveBlobAsFile(blobRef.current, fileName || "presentation.pptx", parentDirectory(filePath)).catch((err) => {
+      console.error("Failed to download presentation", err);
+    });
+  }, [fileName, filePath]);
 
   const slideMetrics = useMemo(() => {
     if (!pptxData || viewportSize.width === 0 || viewportSize.height === 0) {

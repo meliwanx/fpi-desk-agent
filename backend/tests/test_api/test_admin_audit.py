@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-import pytest
+import hashlib
+from datetime import datetime, timedelta, timezone
 
-from app.company_auth.store import CompanyModelEntry, CompanyModelPolicy, CompanyUser
+import pytest
+from sqlalchemy import select
+
+from app.company_auth.store import CompanyAuthStore, CompanyModelEntry, CompanyModelPolicy, CompanyUser
 from app.models.audit import (
     AuditAdminAction,
     AuditFile,
@@ -42,6 +46,10 @@ class _FakeCompanyStore:
             "min_supported_version": "",
             "force_update": False,
             "release_notes": "",
+            "macos_asset_id": "",
+            "windows_asset_id": "",
+            "linux_asset_id": "",
+            "default_asset_id": "",
             "macos_download_url": "",
             "windows_download_url": "",
             "linux_download_url": "",
@@ -235,6 +243,291 @@ async def test_admin_can_update_company_app_update_policy(app_client):
     assert loaded.json()["macos_download_url"].endswith(".dmg")
 
 
+async def test_admin_can_upload_update_asset_and_bind_policy(app_client, tmp_path):
+    store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
+    await store.startup()
+    app_client.app.state.company_auth_store = store
+    app_client.app.state.settings.update_asset_storage_dir = str(tmp_path / "update_assets")
+    app_client.app.middleware_stack = None
+
+    async def inject_admin(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="admin-1",
+            email="admin@example.com",
+            display_name="Admin",
+            role="admin",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_admin)
+
+    try:
+        uploaded = await app_client.post(
+            "/api/admin/update-assets/upload",
+            data={
+                "platform": "macos",
+                "version": "v1.4.0",
+                "signature": "signed-updater-package-signature",
+            },
+            files={
+                "file": (
+                    "FPI Agent 1.4.0.dmg",
+                    b"installer-bytes",
+                    "application/x-apple-diskimage",
+                )
+            },
+        )
+
+        assert uploaded.status_code == 200
+        asset = uploaded.json()
+        assert asset["platform"] == "macos"
+        assert asset["version"] == "1.4.0"
+        assert asset["original_filename"] == "FPI Agent 1.4.0.dmg"
+        assert asset["size_bytes"] == len(b"installer-bytes")
+        assert asset["download_count"] == 0
+        assert asset["uploaded_by_email"] == "admin@example.com"
+        assert len(asset["sha256"]) == 64
+        assert asset["signature"] == "signed-updater-package-signature"
+
+        saved_asset = await store.get_update_asset(asset["id"])
+        assert saved_asset is not None
+        stored_file = tmp_path / "update_assets" / saved_asset.stored_filename
+        assert stored_file.read_bytes() == b"installer-bytes"
+
+        updated = await app_client.put(
+            "/api/admin/update-policy",
+            json={
+                "enabled": True,
+                "latest_version": "1.4.0",
+                "min_supported_version": "1.3.0",
+                "force_update": True,
+                "release_notes": "本地上传安装包",
+                "macos_asset_id": asset["id"],
+                "windows_asset_id": "",
+                "linux_asset_id": "",
+                "default_asset_id": "",
+            },
+        )
+
+        assert updated.status_code == 200
+        policy = updated.json()
+        assert policy["macos_asset_id"] == asset["id"]
+        assert policy["macos_asset"]["id"] == asset["id"]
+        assert policy["macos_asset"]["uploaded_by_display_name"] == "Admin"
+        assert policy["macos_asset"]["signature"] == "signed-updater-package-signature"
+    finally:
+        await store.dispose()
+
+
+async def test_admin_can_list_and_revoke_company_sessions(app_client, db, tmp_path):
+    store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
+    await store.startup()
+    app_client.app.state.company_auth_store = store
+    app_client.app.middleware_stack = None
+
+    admin = CompanyUser(
+        id="admin-1",
+        email="admin@example.com",
+        display_name="Admin",
+        role="admin",
+        is_active=True,
+    )
+
+    async def inject_admin(request, call_next):
+        request.state.company_user = admin
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_admin)
+
+    try:
+        employee = await store.create_user(
+            email="employee@example.com",
+            display_name="员工一",
+            password="EmployeePassword123!",
+            role="user",
+        )
+        session = await store.create_session(
+            employee.id,
+            device_id="desktop-001",
+            device_name="财务部电脑",
+            platform="windows",
+            app_version="1.4.0",
+            ip_address="203.0.113.10",
+            user_agent="fpi-agent/1.4.0",
+        )
+
+        listed = await app_client.get("/api/admin/sessions")
+        assert listed.status_code == 200
+        payload = listed.json()
+        assert payload["total"] == 1
+        item = payload["items"][0]
+        assert item["id"] == session.id
+        assert item["user_email"] == "employee@example.com"
+        assert item["device_name"] == "财务部电脑"
+        assert item["platform"] == "windows"
+        assert item["app_version"] == "1.4.0"
+        assert item["is_online"] is True
+
+        revoked = await app_client.post(
+            f"/api/admin/sessions/{session.id}/revoke",
+            json={"reason": "账号风险，需要重新登录"},
+        )
+        assert revoked.status_code == 200
+        assert revoked.json()["revoked_count"] == 1
+        assert await store.get_session_user(session.token) is None
+
+        actions = (await db.execute(select(AuditAdminAction))).scalars().all()
+        assert [(action.action, action.target_type, action.target_id) for action in actions] == [
+            ("revoke_company_session", "company_session", session.id)
+        ]
+        assert actions[0].metadata_json["reason"] == "账号风险，需要重新登录"
+
+        action_log = await app_client.get("/api/admin/audit/admin-actions")
+        assert action_log.status_code == 200
+        action_item = action_log.json()["items"][0]
+        assert action_item["actor_email"] == "admin@example.com"
+        assert action_item["action"] == "revoke_company_session"
+        assert action_item["target_id"] == session.id
+        assert action_item["metadata"]["reason"] == "账号风险，需要重新登录"
+    finally:
+        await store.dispose()
+
+
+async def test_admin_sessions_hide_offline_sessions_by_default(app_client, tmp_path):
+    store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
+    await store.startup()
+    app_client.app.state.company_auth_store = store
+    app_client.app.middleware_stack = None
+
+    async def inject_admin(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="admin-1",
+            email="admin@example.com",
+            display_name="Admin",
+            role="admin",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_admin)
+
+    try:
+        employee = await store.create_user(
+            email="employee@example.com",
+            display_name="员工一",
+            password="EmployeePassword123!",
+            role="user",
+        )
+        online_session = await store.create_session(employee.id, device_name="在线设备")
+        offline_session = await store.create_session(employee.id, device_name="离线设备")
+        async with store.engine.begin() as conn:
+            await conn.execute(
+                store.sessions.update()
+                .where(store.sessions.c.id == offline_session.id)
+                .values(last_seen_at=datetime.now(timezone.utc) - timedelta(minutes=10))
+            )
+
+        listed = await app_client.get("/api/admin/sessions")
+        assert listed.status_code == 200
+        assert [item["id"] for item in listed.json()["items"]] == [online_session.id]
+
+        listed_with_offline = await app_client.get("/api/admin/sessions?online_only=false")
+        assert listed_with_offline.status_code == 200
+        assert {item["id"] for item in listed_with_offline.json()["items"]} == {
+            online_session.id,
+            offline_session.id,
+        }
+    finally:
+        await store.dispose()
+
+
+async def test_admin_can_bulk_revoke_user_sessions(app_client, tmp_path):
+    store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
+    await store.startup()
+    app_client.app.state.company_auth_store = store
+    app_client.app.middleware_stack = None
+
+    async def inject_admin(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="admin-1",
+            email="admin@example.com",
+            display_name="Admin",
+            role="admin",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_admin)
+
+    try:
+        first = await store.create_user(
+            email="first@example.com",
+            display_name="员工一",
+            password="Password123!",
+            role="user",
+        )
+        second = await store.create_user(
+            email="second@example.com",
+            display_name="员工二",
+            password="Password123!",
+            role="user",
+        )
+        first_session = await store.create_session(first.id)
+        second_session = await store.create_session(second.id)
+
+        response = await app_client.post(
+            "/api/admin/sessions/revoke-bulk",
+            json={"user_ids": [first.id, second.id], "reason": "批量安全复核"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["revoked_count"] == 2
+        assert await store.get_session_user(first_session.token) is None
+        assert await store.get_session_user(second_session.token) is None
+    finally:
+        await store.dispose()
+
+
+async def test_admin_summary_includes_activity_and_online_metrics(app_client, tmp_path):
+    store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
+    await store.startup()
+    app_client.app.state.company_auth_store = store
+    app_client.app.middleware_stack = None
+
+    async def inject_admin(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="admin-1",
+            email="admin@example.com",
+            display_name="Admin",
+            role="admin",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_admin)
+
+    try:
+        employee = await store.create_user(
+            email="employee@example.com",
+            display_name="员工一",
+            password="Password123!",
+            role="user",
+        )
+        await store.create_session(employee.id, platform="macos", app_version="1.4.0")
+
+        response = await app_client.get("/api/admin/audit/summary")
+
+        assert response.status_code == 200
+        activity = response.json()["activity"]
+        assert activity["daily_active_users"] == 1
+        assert activity["online_users"] == 1
+        assert activity["online_sessions"] == 1
+        assert activity["series"][-1]["active_users"] == 1
+    finally:
+        await store.dispose()
+
+
 async def test_employee_update_policy_marks_force_update_for_unsupported_version(app_client):
     class FakeCompanyStore(_FakeCompanyStore):
         async def get_update_policy(self):
@@ -315,6 +608,319 @@ async def test_employee_update_policy_allows_current_version(app_client):
     assert payload["update_available"] is False
     assert payload["force_update"] is False
     assert payload["download_url"].endswith(".exe")
+
+
+async def test_employee_update_policy_serves_local_asset_and_counts_downloads(app_client, tmp_path):
+    store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
+    await store.startup()
+    app_client.app.state.company_auth_store = store
+    app_client.app.state.settings.update_asset_storage_dir = str(tmp_path / "update_assets")
+    app_client.app.middleware_stack = None
+
+    async def inject_employee(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="employee-1",
+            email="10001",
+            display_name="员工一",
+            role="user",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_employee)
+
+    storage_dir = tmp_path / "update_assets"
+    storage_dir.mkdir()
+    windows_bytes = b"windows-installer"
+    default_bytes = b"default-installer"
+    (storage_dir / "windows.exe").write_bytes(windows_bytes)
+    (storage_dir / "default.zip").write_bytes(default_bytes)
+
+    try:
+        windows_asset = await store.create_update_asset(
+            platform="windows",
+            version="1.4.0",
+            original_filename="FPI Agent Setup.exe",
+            stored_filename="windows.exe",
+            mime_type="application/vnd.microsoft.portable-executable",
+            size_bytes=len(windows_bytes),
+            sha256=hashlib.sha256(windows_bytes).hexdigest(),
+            uploaded_by_user_id="admin-1",
+            uploaded_by_email="admin@example.com",
+            uploaded_by_display_name="Admin",
+        )
+        default_asset = await store.create_update_asset(
+            platform="default",
+            version="1.4.0",
+            original_filename="FPI Agent.zip",
+            stored_filename="default.zip",
+            mime_type="application/zip",
+            size_bytes=len(default_bytes),
+            sha256=hashlib.sha256(default_bytes).hexdigest(),
+            uploaded_by_user_id="admin-1",
+            uploaded_by_email="admin@example.com",
+            uploaded_by_display_name="Admin",
+        )
+        await store.update_update_policy(
+            enabled=True,
+            latest_version="1.4.0",
+            min_supported_version="1.2.0",
+            force_update=False,
+            release_notes="本地包",
+            windows_asset_id=windows_asset.id,
+            default_asset_id=default_asset.id,
+        )
+
+        response = await app_client.get(
+            "/api/app/update-policy?current_version=1.3.0&platform=windows&arch=x64"
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["update_available"] is True
+        assert f"/download/{windows_asset.id}" in payload["download_url"]
+        assert payload["download_filename"] == "FPI Agent Setup.exe"
+        assert payload["download_sha256"] == hashlib.sha256(windows_bytes).hexdigest()
+
+        download = await app_client.get(payload["download_url"])
+        assert download.status_code == 200
+        assert download.content == windows_bytes
+        assert (await store.get_update_asset(windows_asset.id)).download_count == 1
+
+        fallback = await app_client.get(
+            "/api/app/update-policy?current_version=1.3.0&platform=linux&arch=x64"
+        )
+        assert fallback.status_code == 200
+        assert f"/download/{default_asset.id}" in fallback.json()["download_url"]
+    finally:
+        await store.dispose()
+
+
+async def test_employee_update_manifest_serves_signed_tauri_assets(app_client, tmp_path):
+    store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
+    await store.startup()
+    app_client.app.state.company_auth_store = store
+    app_client.app.state.settings.update_asset_storage_dir = str(tmp_path / "update_assets")
+    app_client.app.middleware_stack = None
+
+    async def inject_employee(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="employee-1",
+            email="10001",
+            display_name="员工一",
+            role="user",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_employee)
+
+    storage_dir = tmp_path / "update_assets"
+    storage_dir.mkdir()
+    mac_bytes = b"macos-updater-archive"
+    windows_bytes = b"windows-updater-installer"
+    (storage_dir / "fpi-agent.app.tar.gz").write_bytes(mac_bytes)
+    (storage_dir / "fpi-agent-setup.exe").write_bytes(windows_bytes)
+
+    try:
+        mac_asset = await store.create_update_asset(
+            platform="macos",
+            version="1.4.0",
+            original_filename="fpi-agent_1.4.0_arm64.app.tar.gz",
+            stored_filename="fpi-agent.app.tar.gz",
+            mime_type="application/gzip",
+            size_bytes=len(mac_bytes),
+            sha256=hashlib.sha256(mac_bytes).hexdigest(),
+            signature="macos-updater-signature",
+            uploaded_by_user_id="admin-1",
+            uploaded_by_email="admin@example.com",
+            uploaded_by_display_name="Admin",
+        )
+        windows_asset = await store.create_update_asset(
+            platform="windows",
+            version="1.4.0",
+            original_filename="fpi-agent_1.4.0_x64-setup.exe",
+            stored_filename="fpi-agent-setup.exe",
+            mime_type="application/vnd.microsoft.portable-executable",
+            size_bytes=len(windows_bytes),
+            sha256=hashlib.sha256(windows_bytes).hexdigest(),
+            signature="windows-updater-signature",
+            uploaded_by_user_id="admin-1",
+            uploaded_by_email="admin@example.com",
+            uploaded_by_display_name="Admin",
+        )
+        await store.update_update_policy(
+            enabled=True,
+            latest_version="1.4.0",
+            min_supported_version="1.2.0",
+            force_update=True,
+            release_notes="应用内更新包",
+            macos_asset_id=mac_asset.id,
+            windows_asset_id=windows_asset.id,
+        )
+
+        response = await app_client.get(
+            "/api/app/update-manifest/darwin/aarch64/1.3.0?bundle=app"
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["version"] == "1.4.0"
+        assert payload["notes"] == "应用内更新包"
+        assert payload["pub_date"]
+        assert payload["platforms"]["darwin-aarch64-app"]["signature"] == "macos-updater-signature"
+        assert mac_asset.id in payload["platforms"]["darwin-aarch64-app"]["url"]
+        assert payload["platforms"]["darwin-aarch64"]["signature"] == "macos-updater-signature"
+        assert payload["platforms"]["windows-x86_64-nsis"]["signature"] == "windows-updater-signature"
+        assert windows_asset.id in payload["platforms"]["windows-x86_64-nsis"]["url"]
+
+        current = await app_client.get(
+            "/api/app/update-manifest/darwin/aarch64/1.4.0?bundle=app"
+        )
+        assert current.status_code == 204
+    finally:
+        await store.dispose()
+
+
+async def test_employee_update_policy_uses_platform_asset_version_when_policy_is_newer(app_client, tmp_path):
+    store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
+    await store.startup()
+    app_client.app.state.company_auth_store = store
+    app_client.app.state.settings.update_asset_storage_dir = str(tmp_path / "update_assets")
+    app_client.app.middleware_stack = None
+
+    async def inject_employee(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="employee-1",
+            email="10001",
+            display_name="员工一",
+            role="user",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_employee)
+
+    storage_dir = tmp_path / "update_assets"
+    storage_dir.mkdir()
+    windows_bytes = b"windows-installer"
+    (storage_dir / "windows.exe").write_bytes(windows_bytes)
+
+    try:
+        windows_asset = await store.create_update_asset(
+            platform="windows",
+            version="1.3.0",
+            original_filename="FPI Agent Setup.exe",
+            stored_filename="windows.exe",
+            mime_type="application/vnd.microsoft.portable-executable",
+            size_bytes=len(windows_bytes),
+            sha256=hashlib.sha256(windows_bytes).hexdigest(),
+            uploaded_by_user_id="admin-1",
+            uploaded_by_email="admin@example.com",
+            uploaded_by_display_name="Admin",
+        )
+        await store.update_update_policy(
+            enabled=True,
+            latest_version="1.4.0",
+            min_supported_version="",
+            force_update=True,
+            release_notes="macOS already moved ahead",
+            windows_asset_id=windows_asset.id,
+        )
+
+        response = await app_client.get(
+            "/api/app/update-policy?current_version=1.3.0&platform=windows&arch=x64"
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["latest_version"] == "1.3.0"
+        assert payload["update_available"] is False
+        assert payload["force_update"] is False
+    finally:
+        await store.dispose()
+
+
+async def test_employee_can_submit_feedback_and_admin_can_review_image(app_client, tmp_path):
+    store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
+    await store.startup()
+    app_client.app.state.company_auth_store = store
+    app_client.app.state.settings.feedback_storage_dir = str(tmp_path / "feedback_uploads")
+    app_client.app.middleware_stack = None
+
+    async def inject_company_user(request, call_next):
+        role = request.headers.get("x-test-company-role", "user")
+        request.state.company_user = CompanyUser(
+            id=f"{role}-1",
+            email=f"{role}@example.com",
+            display_name="管理员" if role == "admin" else "员工一",
+            role=role,
+            is_active=True,
+        )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_company_user)
+
+    image_bytes = b"\x89PNG\r\nfeedback-image"
+    try:
+        created = await app_client.post(
+            "/api/feedback",
+            data={"description": "聊天窗口无法上传截图"},
+            files={"image": ("screen.png", image_bytes, "image/png")},
+        )
+
+        assert created.status_code == 200
+        payload = created.json()
+        assert payload["description"] == "聊天窗口无法上传截图"
+        assert payload["user_email"] == "user@example.com"
+        assert payload["image_original_filename"] == "screen.png"
+        assert payload["image_size_bytes"] == len(image_bytes)
+
+        listed = await app_client.get(
+            "/api/admin/feedback",
+            headers={"x-test-company-role": "admin"},
+        )
+        assert listed.status_code == 200
+        items = listed.json()["items"]
+        assert len(items) == 1
+        assert items[0]["id"] == payload["id"]
+        assert items[0]["user_display_name"] == "员工一"
+        assert items[0]["description"] == "聊天窗口无法上传截图"
+        assert items[0]["image_download_url"].endswith(f"/api/admin/feedback/{payload['id']}/image")
+
+        image = await app_client.get(
+            items[0]["image_download_url"],
+            headers={"x-test-company-role": "admin"},
+        )
+        assert image.status_code == 200
+        assert image.content == image_bytes
+    finally:
+        await store.dispose()
+
+
+async def test_feedback_requires_description(app_client, tmp_path):
+    store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
+    await store.startup()
+    app_client.app.state.company_auth_store = store
+    app_client.app.state.settings.feedback_storage_dir = str(tmp_path / "feedback_uploads")
+    app_client.app.middleware_stack = None
+
+    async def inject_employee(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="user-1",
+            email="user@example.com",
+            display_name="员工一",
+            role="user",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_employee)
+
+    try:
+        response = await app_client.post("/api/feedback", data={"description": "   "})
+
+        assert response.status_code == 400
+        assert "description" in response.text
+    finally:
+        await store.dispose()
 
 
 async def test_audit_ingest_and_admin_query(app_client, session_factory, tmp_path):

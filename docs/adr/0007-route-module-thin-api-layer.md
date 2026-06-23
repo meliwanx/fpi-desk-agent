@@ -4,7 +4,7 @@ Endpoints in `backend/app/api/` are written with a `Route` decorator family — 
 
 ## Considered options
 
-- **Pluggable Concern stack** (per-route `@with_concerns(AuthConcern, PermissionConcern, AuditConcern, ...)`). Rejected: streaming SSE breaks the `before/after` model — Audit fires before stream completion, Idempotency-on-stream is fundamentally broken — and the cognitive cost only pays off above ~5 cross-cutting concerns, while OpenYak has 4 today and no concrete future ones. Future concerns (per-Workspace quota, idempotency) will arrive as named kwargs on the existing decorators (`quota="generation"`, `idempotent=True`), not as a generic plug-in seam — that would be a hypothetical seam (one-adapter rule).
+- **Pluggable Concern stack** (per-route `@with_concerns(AuthConcern, PermissionConcern, AuditConcern, ...)`). Rejected: streaming SSE breaks the `before/after` model — Audit fires before stream completion, Idempotency-on-stream is fundamentally broken — and the cognitive cost only pays off above ~5 cross-cutting concerns, while fpi-agent has 4 today and no concrete future ones. Future concerns (per-Workspace quota, idempotency) will arrive as named kwargs on the existing decorators (`quota="generation"`, `idempotent=True`), not as a generic plug-in seam — that would be a hypothetical seam (one-adapter rule).
 - **Minimalist `route` + `raw` escape hatch** (unusual endpoints drop entirely out of the kernel onto a raw FastAPI router). Rejected: ~15% of routes (multipart uploads, PDF/Markdown exports, native dialogs) are exactly the routes that most need uniform audit and error mapping — letting them escape outside the seam breaks Locality at the wrong 20%.
 
 ## Consequences

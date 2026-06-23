@@ -1,4 +1,4 @@
-"""Lightweight async task scheduler for OpenYak.
+"""Lightweight async task scheduler for fpi-agent.
 
 Runs a single background asyncio task that polls the database every 30 seconds
 for tasks whose next_run_at has passed. Uses croniter for cron expression parsing.
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
 from croniter import croniter
@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.models.scheduled_task import ScheduledTask
 from app.scheduler.executor import execute_scheduled_task
 from app.utils.id import generate_ulid
+from app.utils.timezone import shanghai_naive_now
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +127,7 @@ class TaskScheduler:
 
     async def _check_and_execute(self) -> None:
         """Find due tasks and launch execution for each."""
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = shanghai_naive_now()
         async with self._session_factory() as db:
             async with db.begin():
                 result = await db.execute(
@@ -191,7 +192,7 @@ class TaskScheduler:
                     select(ScheduledTask).where(ScheduledTask.enabled == True)  # noqa: E712
                 )
                 tasks = result.scalars().all()
-                now = datetime.now(timezone.utc).replace(tzinfo=None)
+                now = shanghai_naive_now()
                 for task in tasks:
                     next_run = self._compute_next_run(task.schedule_config)
                     # Only update if next_run_at is stale or missing
@@ -203,7 +204,7 @@ class TaskScheduler:
 
     async def _catchup_missed(self) -> None:
         """Execute tasks that were due while the app was closed (within grace)."""
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = shanghai_naive_now()
         grace_cutoff = now - timedelta(hours=_MISSED_GRACE_HOURS)
         async with self._session_factory() as db:
             async with db.begin():
@@ -240,9 +241,9 @@ class TaskScheduler:
     def _compute_next_run(schedule_config: dict) -> datetime | None:
         """Compute the next run time from a schedule config.
 
-        Returns a naive UTC datetime (no tzinfo) for SQLite compatibility.
+        Returns a naive Shanghai datetime (no tzinfo) for SQLite compatibility.
         """
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = shanghai_naive_now()
         stype = schedule_config.get("type")
         if stype == "cron":
             cron_expr = schedule_config.get("cron")

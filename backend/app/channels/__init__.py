@@ -1,4 +1,4 @@
-"""Nanobot-based messaging channels for OpenYak.
+"""Nanobot-based messaging channels for fpi-agent.
 
 Ported from https://github.com/HKUDS/nanobot (MIT license).
 Provides a pluggable channel system for Telegram, Discord, Slack, WhatsApp,

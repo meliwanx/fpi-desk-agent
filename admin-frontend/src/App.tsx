@@ -11,7 +11,7 @@ import {
   type ModelPolicy,
 } from "./modelPolicy";
 
-type Tab = "overview" | "sessions" | "risks" | "tools" | "users" | "models" | "updates";
+type Tab = "overview" | "sessions" | "risks" | "tools" | "feedback" | "users" | "actions" | "models" | "updates";
 
 interface UserInfo {
   id: string;
@@ -32,6 +32,20 @@ interface Summary {
   files: { total: number; uploaded: number };
   tool_calls: { total: number };
   risks: { total: number; open: number };
+  activity: {
+    daily_active_users: number;
+    online_users: number;
+    online_sessions: number;
+    redis?: {
+      enabled: boolean;
+      available: boolean;
+    };
+    series: Array<{
+      date: string;
+      active_users: number;
+      session_count: number;
+    }>;
+  };
   usage: {
     input_tokens: number;
     output_tokens: number;
@@ -41,6 +55,28 @@ interface Summary {
     total_tokens: number;
     cost: number;
   };
+}
+
+interface CompanySession {
+  id: string;
+  user_id: string;
+  user_email: string;
+  user_display_name: string;
+  user_role: string;
+  user_is_active: boolean;
+  device_id: string;
+  device_name: string;
+  platform: string;
+  app_version: string;
+  ip_address: string;
+  user_agent: string;
+  is_online: boolean;
+  expires_at: string;
+  revoked_at: string | null;
+  time_created: string;
+  last_seen_at: string;
+  revoked_by_email: string;
+  revoked_reason: string;
 }
 
 interface AuditSession {
@@ -80,6 +116,34 @@ interface ToolCallItem {
   workspace: string;
   session_title: string;
   employee: { display_name: string; email: string } | null;
+  time_updated: string;
+}
+
+interface AdminActionItem {
+  id: string;
+  actor_user_id: string;
+  actor_email: string;
+  actor_display_name: string;
+  action: string;
+  target_type: string;
+  target_id: string;
+  metadata: Record<string, unknown>;
+  time_created: string;
+  time_updated: string;
+}
+
+interface FeedbackItem {
+  id: string;
+  user_id: string;
+  user_email: string;
+  user_display_name: string;
+  description: string;
+  image_original_filename: string;
+  image_mime_type: string;
+  image_size_bytes: number;
+  image_sha256: string;
+  image_download_url: string | null;
+  time_created: string;
   time_updated: string;
 }
 
@@ -142,11 +206,51 @@ interface UpdatePolicy {
   min_supported_version: string;
   force_update: boolean;
   release_notes: string;
+  macos_asset_id: string;
+  windows_asset_id: string;
+  linux_asset_id: string;
+  default_asset_id: string;
+  macos_asset: UpdateAsset | null;
+  windows_asset: UpdateAsset | null;
+  linux_asset: UpdateAsset | null;
+  default_asset: UpdateAsset | null;
   macos_download_url: string;
   windows_download_url: string;
   linux_download_url: string;
   default_download_url: string;
 }
+
+interface UpdateAsset {
+  id: string;
+  platform: string;
+  version: string;
+  original_filename: string;
+  mime_type: string;
+  size_bytes: number;
+  sha256: string;
+  signature: string;
+  uploaded_by_user_id: string;
+  uploaded_by_email: string;
+  uploaded_by_display_name: string;
+  download_count: number;
+  time_created: string;
+  time_updated: string;
+}
+
+type UpdateAssetIdKey = "macos_asset_id" | "windows_asset_id" | "linux_asset_id" | "default_asset_id";
+type UpdateAssetKey = "macos_asset" | "windows_asset" | "linux_asset" | "default_asset";
+
+const UPDATE_ASSET_SLOTS: Array<{
+  platform: string;
+  label: string;
+  assetIdKey: UpdateAssetIdKey;
+  assetKey: UpdateAssetKey;
+}> = [
+  { platform: "macos", label: "macOS", assetIdKey: "macos_asset_id", assetKey: "macos_asset" },
+  { platform: "windows", label: "Windows", assetIdKey: "windows_asset_id", assetKey: "windows_asset" },
+  { platform: "linux", label: "Linux", assetIdKey: "linux_asset_id", assetKey: "linux_asset" },
+  { platform: "default", label: "默认包", assetIdKey: "default_asset_id", assetKey: "default_asset" },
+];
 
 const SESSION_KEY = "fpi-admin-session";
 
@@ -353,7 +457,9 @@ export function App() {
             ["sessions", "会话审计"],
             ["risks", "风险发现"],
             ["tools", "工具调用"],
+            ["feedback", "问题反馈"],
             ["users", "员工管理"],
+            ["actions", "管控日志"],
             ["models", "模型管控"],
             ["updates", "版本更新"],
           ].map(([key, label]) => (
@@ -385,7 +491,9 @@ export function App() {
         {tab === "sessions" && <Sessions api={api} token={token} />}
         {tab === "risks" && <Risks api={api} />}
         {tab === "tools" && <ToolCalls api={api} />}
+        {tab === "feedback" && <FeedbackPanel api={api} token={token} />}
         {tab === "users" && <Users api={api} />}
+        {tab === "actions" && <AdminActions api={api} />}
         {tab === "models" && <ModelPolicyPanel api={api} />}
         {tab === "updates" && <UpdatePolicyPanel api={api} />}
       </main>
@@ -399,7 +507,9 @@ function tabTitle(tab: Tab): string {
     sessions: "会话审计",
     risks: "风险发现",
     tools: "工具调用",
+    feedback: "问题反馈",
     users: "员工管理",
+    actions: "管控日志",
     models: "模型管控",
     updates: "版本更新",
   }[tab];
@@ -411,7 +521,9 @@ function tabSubtitle(tab: Tab): string {
     sessions: "按员工、工作区查看每一条对话记录和上传文件。",
     risks: "集中处理敏感内容、密钥、订阅链接等风险线索。",
     tools: "审计模型调用的本地工具、输入、输出和状态。",
+    feedback: "查看员工提交的问题描述和截图。",
     users: "创建员工账号、查看角色和启用状态。",
+    actions: "追踪管理员的下载、踢号、批量管控等关键动作。",
     models: "统一控制客户端可见模型和默认模型。",
     updates: "发布客户端版本策略，控制是否强制员工升级。",
   }[tab];
@@ -486,6 +598,9 @@ function Overview({ api }: { api: ReturnType<typeof useApi> }) {
   if (!summary) return <div className="card muted">加载中...</div>;
 
   const cards = [
+    ["今日活跃", summary.activity.daily_active_users],
+    ["在线员工", summary.activity.online_users],
+    ["在线设备", summary.activity.online_sessions],
     ["会话", summary.sessions.total],
     ["消息", summary.messages.total],
     ["工具调用", summary.tool_calls.total],
@@ -512,6 +627,20 @@ function Overview({ api }: { api: ReturnType<typeof useApi> }) {
           <span>缓存写：{formatNumber(summary.usage.cache_write_tokens)}</span>
           <span>成本：${summary.usage.cost.toFixed(4)}</span>
         </div>
+      </div>
+      <div className="card wide">
+        <h2>近 30 天活跃</h2>
+        <div className="activity-strip">
+          {summary.activity.series.slice(-14).map((item) => (
+            <div className="activity-day" key={item.date}>
+              <strong>{formatNumber(item.active_users)}</strong>
+              <span>{item.date.slice(5)}</span>
+            </div>
+          ))}
+        </div>
+        <p className="muted">
+          Redis 在线态：{summary.activity.redis?.available ? "已启用" : "未启用或不可用"}，数据库 last_seen 作为兜底。
+        </p>
       </div>
     </div>
   );
@@ -655,17 +784,189 @@ function ToolCalls({ api }: { api: ReturnType<typeof useApi> }) {
   );
 }
 
+function adminActionLabel(action: string): string {
+  return {
+    "audit.file.download": "下载审计文件",
+    revoke_company_session: "踢单个会话",
+    revoke_company_user_sessions: "踢员工全部设备",
+    revoke_company_sessions_bulk: "批量踢号",
+  }[action] || action || "-";
+}
+
+function AdminActions({ api }: { api: ReturnType<typeof useApi> }) {
+  const [items, setItems] = useState<AdminActionItem[]>([]);
+  const [actionFilter, setActionFilter] = useState("");
+  const [error, setError] = useState("");
+
+  async function loadActions() {
+    setError("");
+    const query = actionFilter ? `?action=${encodeURIComponent(actionFilter)}` : "";
+    try {
+      const data = await api<{ items: AdminActionItem[] }>(`/api/admin/audit/admin-actions${query}`);
+      setItems(data.items);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "管控日志加载失败");
+    }
+  }
+
+  useEffect(() => {
+    void loadActions();
+  }, []);
+
+  return (
+    <section className="card">
+      <div className="toolbar">
+        <select className="input action-filter" value={actionFilter} onChange={(event) => setActionFilter(event.target.value)}>
+          <option value="">全部动作</option>
+          <option value="audit.file.download">下载审计文件</option>
+          <option value="revoke_company_session">踢单个会话</option>
+          <option value="revoke_company_user_sessions">踢员工全部设备</option>
+          <option value="revoke_company_sessions_bulk">批量踢号</option>
+        </select>
+        <button className="button" onClick={() => void loadActions()}>查询</button>
+      </div>
+      {error && <p className="error">{error}</p>}
+      <table>
+        <thead><tr><th>时间</th><th>管理员</th><th>动作</th><th>目标</th><th>详情</th></tr></thead>
+        <tbody>
+          {items.map((item) => (
+            <tr key={item.id}>
+              <td>{compactDate(item.time_created)}</td>
+              <td>
+                <strong>{item.actor_display_name || item.actor_email}</strong>
+                <div className="muted">{item.actor_email}</div>
+              </td>
+              <td><span className="pill">{adminActionLabel(item.action)}</span></td>
+              <td className="mono">{item.target_type}:{item.target_id}</td>
+              <td className="mono">{compactAuditValue(item.metadata, 240)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {items.length === 0 && !error && <p className="muted empty-state">暂无管控日志</p>}
+    </section>
+  );
+}
+
+function FeedbackPanel({ api, token }: { api: ReturnType<typeof useApi>; token: string }) {
+  const [items, setItems] = useState<FeedbackItem[]>([]);
+  const [error, setError] = useState("");
+
+  async function loadFeedback() {
+    setError("");
+    try {
+      const data = await api<{ items: FeedbackItem[] }>("/api/admin/feedback");
+      setItems(data.items);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "反馈加载失败");
+    }
+  }
+
+  useEffect(() => {
+    void loadFeedback();
+  }, []);
+
+  if (error) return <section className="card error">{error}</section>;
+
+  return (
+    <section className="card">
+      {items.length === 0 ? (
+        <p className="muted">暂无反馈</p>
+      ) : (
+        <div className="feedback-list">
+          {items.map((item) => (
+            <article className="feedback-item" key={item.id}>
+              <div className="feedback-head">
+                <div>
+                  <strong>{item.user_display_name || item.user_email || "未知员工"}</strong>
+                  <div className="muted">{item.user_email || "-"} · {compactDate(item.time_created)}</div>
+                </div>
+              </div>
+              <p className="feedback-description">{item.description}</p>
+              {item.image_download_url && (
+                <FeedbackImagePreview
+                  url={item.image_download_url}
+                  token={token}
+                  alt={item.image_original_filename || "反馈附图"}
+                />
+              )}
+              {item.image_original_filename && (
+                <div className="feedback-file">
+                  <span>{item.image_original_filename}</span>
+                  <small>{item.image_mime_type || "image"} · {formatNumber(item.image_size_bytes)} bytes · {item.image_sha256.slice(0, 16)}...</small>
+                </div>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function FeedbackImagePreview({ url, token, alt }: { url: string; token: string; alt: string }) {
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl = "";
+    setPreviewUrl("");
+    setError("");
+
+    async function loadImage() {
+      try {
+        const response = await fetch(url, { headers: { "X-FPI-Session": token } });
+        if (!response.ok) throw new Error(await response.text());
+        const blob = await response.blob();
+        objectUrl = URL.createObjectURL(blob);
+        if (!cancelled) setPreviewUrl(objectUrl);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "附图加载失败");
+      }
+    }
+
+    void loadImage();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [url, token]);
+
+  if (error) return <div className="feedback-preview-error">{error}</div>;
+  if (!previewUrl) return <div className="feedback-preview-loading">附图加载中...</div>;
+
+  return (
+    <div className="feedback-preview">
+      <img className="feedback-preview-image" src={previewUrl} alt={alt} />
+    </div>
+  );
+}
+
 function Users({ api }: { api: ReturnType<typeof useApi> }) {
   const [users, setUsers] = useState<UserInfo[]>([]);
+  const [sessions, setSessions] = useState<CompanySession[]>([]);
+  const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("user");
+  const [revokeReason, setRevokeReason] = useState("管理员强制重新登录");
+  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
   async function loadUsers() {
     const data = await api<UserInfo[]>("/api/admin/users");
     setUsers(data);
+  }
+
+  async function loadSessions() {
+    const data = await api<{ items: CompanySession[] }>("/api/admin/sessions");
+    setSessions(data.items);
+  }
+
+  async function loadAll() {
+    await Promise.all([loadUsers(), loadSessions()]);
   }
 
   async function createUser() {
@@ -678,14 +979,58 @@ function Users({ api }: { api: ReturnType<typeof useApi> }) {
       setEmail("");
       setDisplayName("");
       setPassword("");
-      await loadUsers();
+      await loadAll();
     } catch {
       setError("新增员工失败");
     }
   }
 
+  function toggleSession(sessionId: string, checked: boolean) {
+    setSelectedSessionIds((current) =>
+      checked ? Array.from(new Set([...current, sessionId])) : current.filter((id) => id !== sessionId),
+    );
+  }
+
+  function sessionsForUser(userId: string) {
+    return sessions.filter((session) => session.user_id === userId);
+  }
+
+  async function revokeSession(sessionId: string) {
+    setMessage("");
+    await api(`/api/admin/sessions/${encodeURIComponent(sessionId)}/revoke`, {
+      method: "POST",
+      body: JSON.stringify({ reason: revokeReason }),
+    });
+    setSelectedSessionIds((current) => current.filter((id) => id !== sessionId));
+    setMessage("已踢下线，用户下次请求会回到登录页");
+    await loadSessions();
+  }
+
+  async function revokeUserSessions(userId: string) {
+    setMessage("");
+    await api(`/api/admin/users/${encodeURIComponent(userId)}/revoke-sessions`, {
+      method: "POST",
+      body: JSON.stringify({ reason: revokeReason }),
+    });
+    setSelectedSessionIds([]);
+    setMessage("已踢下线该员工的全部设备");
+    await loadSessions();
+  }
+
+  async function revokeSelectedSessions() {
+    if (selectedSessionIds.length === 0) return;
+    setMessage("");
+    await api("/api/admin/sessions/revoke-bulk", {
+      method: "POST",
+      body: JSON.stringify({ session_ids: selectedSessionIds, reason: revokeReason }),
+    });
+    setSelectedSessionIds([]);
+    setMessage(`已批量踢下线 ${selectedSessionIds.length} 个会话`);
+    await loadSessions();
+  }
+
   useEffect(() => {
-    void loadUsers();
+    void loadAll();
   }, []);
 
   return (
@@ -705,11 +1050,66 @@ function Users({ api }: { api: ReturnType<typeof useApi> }) {
         {error && <p className="error">{error}</p>}
       </section>
       <section className="card">
+        <div className="toolbar">
+          <h2>在线与踢号</h2>
+          <input
+            className="input"
+            placeholder="踢号原因"
+            value={revokeReason}
+            onChange={(event) => setRevokeReason(event.target.value)}
+          />
+          <button className="button outline" onClick={() => void loadSessions()}>刷新在线状态</button>
+          <button
+            className="button danger"
+            disabled={selectedSessionIds.length === 0}
+            onClick={() => void revokeSelectedSessions()}
+          >
+            批量踢下线
+          </button>
+        </div>
+        {message && <p className="success">{message}</p>}
         <table>
-          <thead><tr><th>账号</th><th>姓名</th><th>角色</th><th>状态</th></tr></thead>
+          <thead><tr><th></th><th>员工</th><th>设备</th><th>平台</th><th>版本</th><th>IP</th><th>状态</th><th>最近活跃</th><th>操作</th></tr></thead>
+          <tbody>
+            {sessions.map((session) => (
+              <tr key={session.id}>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={selectedSessionIds.includes(session.id)}
+                    onChange={(event) => toggleSession(session.id, event.target.checked)}
+                  />
+                </td>
+                <td>{session.user_display_name || session.user_email}</td>
+                <td>{session.device_name || session.device_id || "未知设备"}</td>
+                <td>{session.platform || "-"}</td>
+                <td>{session.app_version || "-"}</td>
+                <td>{session.ip_address || "-"}</td>
+                <td><span className={`pill ${session.is_online ? "success" : "muted-pill"}`}>{session.is_online ? "在线" : "离线"}</span></td>
+                <td>{compactDate(session.last_seen_at)}</td>
+                <td>
+                  <button className="button ghost danger-text" onClick={() => void revokeSession(session.id)}>踢下线</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+      <section className="card">
+        <table>
+          <thead><tr><th>账号</th><th>姓名</th><th>角色</th><th>状态</th><th>在线设备</th><th>操作</th></tr></thead>
           <tbody>
             {users.map((user) => (
-              <tr key={user.id}><td>{user.email}</td><td>{user.display_name}</td><td>{user.role}</td><td>{user.is_active ? "启用" : "停用"}</td></tr>
+              <tr key={user.id}>
+                <td>{user.email}</td>
+                <td>{user.display_name}</td>
+                <td>{user.role}</td>
+                <td>{user.is_active ? "启用" : "停用"}</td>
+                <td>{sessionsForUser(user.id).filter((session) => session.is_online).length}</td>
+                <td>
+                  <button className="button ghost danger-text" onClick={() => void revokeUserSessions(user.id)}>踢全部设备</button>
+                </td>
+              </tr>
             ))}
           </tbody>
         </table>
@@ -835,6 +1235,8 @@ function ModelPolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
 function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
   const [policy, setPolicy] = useState<UpdatePolicy | null>(null);
   const [message, setMessage] = useState("");
+  const [uploadingSlot, setUploadingSlot] = useState<string | null>(null);
+  const [assetSignatures, setAssetSignatures] = useState<Record<string, string>>({});
 
   async function loadPolicy() {
     const data = await api<UpdatePolicy>("/api/admin/update-policy");
@@ -856,12 +1258,60 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
     try {
       const saved = await api<UpdatePolicy>("/api/admin/update-policy", {
         method: "PUT",
-        body: JSON.stringify(policy),
+        body: JSON.stringify({
+          enabled: policy.enabled,
+          latest_version: policy.latest_version,
+          min_supported_version: policy.min_supported_version,
+          force_update: policy.force_update,
+          release_notes: policy.release_notes,
+          macos_asset_id: policy.macos_asset_id,
+          windows_asset_id: policy.windows_asset_id,
+          linux_asset_id: policy.linux_asset_id,
+          default_asset_id: policy.default_asset_id,
+          macos_download_url: policy.macos_download_url,
+          windows_download_url: policy.windows_download_url,
+          linux_download_url: policy.linux_download_url,
+          default_download_url: policy.default_download_url,
+        }),
       });
       setPolicy(saved);
       setMessage("已保存，员工客户端启动或下次检查更新时生效");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存失败");
+    }
+  }
+
+  async function uploadAsset(slot: (typeof UPDATE_ASSET_SLOTS)[number], file: File | null) {
+    if (!policy || !file) return;
+    const version = policy.latest_version.trim();
+    if (!version) {
+      setMessage("请先填写最新版号，再上传安装包");
+      return;
+    }
+
+    const form = new FormData();
+    form.set("platform", slot.platform);
+    form.set("version", version);
+    form.set("signature", (assetSignatures[slot.platform] ?? policy[slot.assetKey]?.signature ?? "").trim());
+    form.set("file", file);
+
+    setMessage("");
+    setUploadingSlot(slot.platform);
+    try {
+      const asset = await api<UpdateAsset>("/api/admin/update-assets/upload", {
+        method: "POST",
+        body: form,
+      });
+      setPolicy({
+        ...policy,
+        [slot.assetIdKey]: asset.id,
+        [slot.assetKey]: asset,
+      });
+      setMessage(`${slot.label} 安装包已上传，请保存策略后生效`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "上传失败");
+    } finally {
+      setUploadingSlot(null);
     }
   }
 
@@ -890,7 +1340,7 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
           <button className="button" onClick={() => void savePolicy()}>保存策略</button>
         </div>
         <div className="hint">
-          把安装包放到服务器、对象存储或 CDN 后，将下载地址填到对应平台。最低可用版本以下的客户端会被强制更新；非强制更新时，旧版本仍可继续使用。
+          直接上传各平台安装包，服务器会作为文件存储提供下载。最低可用版本以下的客户端会被强制更新；非强制更新时，旧版本仍可继续使用。
         </div>
         <div className="form-grid update-form">
           <label className="model-field">
@@ -911,42 +1361,59 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
               onChange={(event) => updatePolicy({ min_supported_version: event.target.value })}
             />
           </label>
-          <label className="model-field model-field-wide">
-            <span>macOS 下载地址</span>
-            <input
-              className="input"
-              placeholder="https://example.com/fpi-agent-1.4.0.dmg"
-              value={policy.macos_download_url}
-              onChange={(event) => updatePolicy({ macos_download_url: event.target.value })}
-            />
-          </label>
-          <label className="model-field model-field-wide">
-            <span>Windows 下载地址</span>
-            <input
-              className="input"
-              placeholder="https://example.com/fpi-agent-1.4.0.exe"
-              value={policy.windows_download_url}
-              onChange={(event) => updatePolicy({ windows_download_url: event.target.value })}
-            />
-          </label>
-          <label className="model-field model-field-wide">
-            <span>Linux 下载地址</span>
-            <input
-              className="input"
-              placeholder="https://example.com/fpi-agent-1.4.0.deb"
-              value={policy.linux_download_url}
-              onChange={(event) => updatePolicy({ linux_download_url: event.target.value })}
-            />
-          </label>
-          <label className="model-field model-field-wide">
-            <span>默认下载地址</span>
-            <input
-              className="input"
-              placeholder="https://example.com/fpi-agent-1.4.0.zip"
-              value={policy.default_download_url}
-              onChange={(event) => updatePolicy({ default_download_url: event.target.value })}
-            />
-          </label>
+          <div className="model-field model-field-wide">
+            <span>安装包文件</span>
+            <div className="update-asset-grid">
+              {UPDATE_ASSET_SLOTS.map((slot) => {
+                const asset = policy[slot.assetKey];
+                const isUploading = uploadingSlot === slot.platform;
+                return (
+                  <div className="update-asset-panel" key={slot.platform}>
+                    <div className="update-asset-head">
+                      <strong>{slot.label}</strong>
+                      <span>{asset ? `v${asset.version}` : "未上传"}</span>
+                    </div>
+                    {asset ? (
+                      <div className="update-asset-meta">
+                        <b>{asset.original_filename}</b>
+                        <span>{asset.mime_type || "文件"} · {formatNumber(asset.size_bytes)} bytes</span>
+                        <span>上传人：{asset.uploaded_by_display_name || asset.uploaded_by_email || "-"}</span>
+                        <span>上传时间：{compactDate(asset.time_created)}</span>
+                        <span>下载次数：{formatNumber(asset.download_count)}</span>
+                        <span>SHA-256：{asset.sha256.slice(0, 16)}...</span>
+                        <span>应用内更新签名：{asset.signature ? `${asset.signature.slice(0, 18)}...` : "未配置"}</span>
+                      </div>
+                    ) : (
+                      <p className="muted">员工端匹配不到该平台包时会使用默认包。</p>
+                    )}
+                    <textarea
+                      className="input textarea"
+                      placeholder="粘贴 Tauri .sig 文件内容；留空则只能打开安装包兜底"
+                      value={assetSignatures[slot.platform] ?? asset?.signature ?? ""}
+                      onChange={(event) =>
+                        setAssetSignatures({
+                          ...assetSignatures,
+                          [slot.platform]: event.target.value,
+                        })
+                      }
+                    />
+                    <label className={`button outline file-button ${isUploading ? "disabled" : ""}`}>
+                      <input
+                        type="file"
+                        disabled={isUploading}
+                        onChange={(event) => {
+                          const selected = event.currentTarget.files?.[0] ?? null;
+                          event.currentTarget.value = "";
+                          void uploadAsset(slot, selected);
+                        }}
+                      />
+                      {isUploading ? "上传中..." : asset ? "替换文件" : "上传文件"}
+                    </label>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
           <label className="model-field model-field-wide">
             <span>更新说明</span>
             <textarea

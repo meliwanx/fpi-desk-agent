@@ -6,6 +6,7 @@ import hashlib
 import json
 import mimetypes
 import re
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,14 @@ from sqlalchemy.orm.attributes import flag_modified
 from starlette.responses import FileResponse
 
 from app.company_auth.model_policy_sync import sync_company_model_policy
-from app.company_auth.store import CompanyModelPolicy, CompanyUpdatePolicy, CompanyUser
+from app.company_auth.store import (
+    CompanyFeedback,
+    CompanyModelPolicy,
+    CompanySessionRecord,
+    CompanyUpdateAsset,
+    CompanyUpdatePolicy,
+    CompanyUser,
+)
 from app.config import Settings
 from app.dependencies import DbDep, SettingsDep
 from app.models.audit import (
@@ -31,6 +39,7 @@ from app.models.audit import (
     AuditUsage,
 )
 from app.utils.id import generate_ulid
+from app.utils.timezone import as_shanghai, shanghai_now
 
 router = APIRouter()
 
@@ -100,10 +109,31 @@ class AdminUpdatePolicyRequest(BaseModel):
     min_supported_version: str = ""
     force_update: bool = False
     release_notes: str = ""
+    macos_asset_id: str = ""
+    windows_asset_id: str = ""
+    linux_asset_id: str = ""
+    default_asset_id: str = ""
     macos_download_url: str = ""
     windows_download_url: str = ""
     linux_download_url: str = ""
     default_download_url: str = ""
+
+
+class AdminUpdateAssetResponse(BaseModel):
+    id: str
+    platform: str
+    version: str
+    original_filename: str
+    mime_type: str
+    size_bytes: int
+    sha256: str
+    signature: str
+    uploaded_by_user_id: str
+    uploaded_by_email: str
+    uploaded_by_display_name: str
+    download_count: int
+    time_created: datetime
+    time_updated: datetime
 
 
 class AdminUpdatePolicyResponse(BaseModel):
@@ -112,10 +142,97 @@ class AdminUpdatePolicyResponse(BaseModel):
     min_supported_version: str
     force_update: bool
     release_notes: str
+    macos_asset_id: str
+    windows_asset_id: str
+    linux_asset_id: str
+    default_asset_id: str
+    macos_asset: AdminUpdateAssetResponse | None = None
+    windows_asset: AdminUpdateAssetResponse | None = None
+    linux_asset: AdminUpdateAssetResponse | None = None
+    default_asset: AdminUpdateAssetResponse | None = None
     macos_download_url: str
     windows_download_url: str
     linux_download_url: str
     default_download_url: str
+
+
+class AdminFeedbackResponse(BaseModel):
+    id: str
+    user_id: str
+    user_email: str
+    user_display_name: str
+    description: str
+    image_original_filename: str
+    image_mime_type: str
+    image_size_bytes: int
+    image_sha256: str
+    image_download_url: str | None = None
+    time_created: datetime
+    time_updated: datetime
+
+
+class AdminFeedbackListResponse(BaseModel):
+    items: list[AdminFeedbackResponse]
+
+
+class AdminCompanySessionResponse(BaseModel):
+    id: str
+    user_id: str
+    user_email: str
+    user_display_name: str
+    user_role: str
+    user_is_active: bool
+    device_id: str
+    device_name: str
+    platform: str
+    app_version: str
+    ip_address: str
+    user_agent: str
+    is_online: bool
+    expires_at: datetime
+    revoked_at: datetime | None = None
+    time_created: datetime
+    last_seen_at: datetime
+    revoked_by_user_id: str = ""
+    revoked_by_email: str = ""
+    revoked_reason: str = ""
+
+
+class AdminCompanySessionListResponse(BaseModel):
+    total: int
+    items: list[AdminCompanySessionResponse]
+
+
+class AdminRevokeSessionsRequest(BaseModel):
+    session_ids: list[str] = Field(default_factory=list)
+    user_ids: list[str] = Field(default_factory=list)
+    reason: str = ""
+
+
+class AdminRevokeSessionRequest(BaseModel):
+    reason: str = ""
+
+
+class AdminRevokeSessionsResponse(BaseModel):
+    revoked_count: int
+
+
+class AdminActionResponse(BaseModel):
+    id: str
+    actor_user_id: str
+    actor_email: str
+    actor_display_name: str
+    action: str
+    target_type: str
+    target_id: str
+    metadata: dict[str, Any]
+    time_created: datetime
+    time_updated: datetime
+
+
+class AdminActionListResponse(BaseModel):
+    total: int
+    items: list[AdminActionResponse]
 
 
 class AuditIngestSession(BaseModel):
@@ -203,13 +320,54 @@ def _update_policy_value(policy: CompanyUpdatePolicy | dict[str, Any], key: str,
     return getattr(policy, key, default)
 
 
-def _public_update_policy(policy: CompanyUpdatePolicy | dict[str, Any]) -> AdminUpdatePolicyResponse:
+def _public_update_asset(asset: CompanyUpdateAsset) -> AdminUpdateAssetResponse:
+    return AdminUpdateAssetResponse(
+        id=asset.id,
+        platform=asset.platform,
+        version=asset.version,
+        original_filename=asset.original_filename,
+        mime_type=asset.mime_type,
+        size_bytes=asset.size_bytes,
+        sha256=asset.sha256,
+        signature=asset.signature,
+        uploaded_by_user_id=asset.uploaded_by_user_id,
+        uploaded_by_email=asset.uploaded_by_email,
+        uploaded_by_display_name=asset.uploaded_by_display_name,
+        download_count=asset.download_count,
+        time_created=asset.time_created,
+        time_updated=asset.time_updated,
+    )
+
+
+async def _policy_asset(store: Any, asset_id: str) -> AdminUpdateAssetResponse | None:
+    if not asset_id or not hasattr(store, "get_update_asset"):
+        return None
+    asset = await store.get_update_asset(asset_id)
+    return _public_update_asset(asset) if asset is not None else None
+
+
+async def _public_update_policy(
+    policy: CompanyUpdatePolicy | dict[str, Any],
+    store: Any,
+) -> AdminUpdatePolicyResponse:
+    macos_asset_id = str(_update_policy_value(policy, "macos_asset_id", "") or "")
+    windows_asset_id = str(_update_policy_value(policy, "windows_asset_id", "") or "")
+    linux_asset_id = str(_update_policy_value(policy, "linux_asset_id", "") or "")
+    default_asset_id = str(_update_policy_value(policy, "default_asset_id", "") or "")
     return AdminUpdatePolicyResponse(
         enabled=bool(_update_policy_value(policy, "enabled", False)),
         latest_version=str(_update_policy_value(policy, "latest_version", "") or ""),
         min_supported_version=str(_update_policy_value(policy, "min_supported_version", "") or ""),
         force_update=bool(_update_policy_value(policy, "force_update", False)),
         release_notes=str(_update_policy_value(policy, "release_notes", "") or ""),
+        macos_asset_id=macos_asset_id,
+        windows_asset_id=windows_asset_id,
+        linux_asset_id=linux_asset_id,
+        default_asset_id=default_asset_id,
+        macos_asset=await _policy_asset(store, macos_asset_id),
+        windows_asset=await _policy_asset(store, windows_asset_id),
+        linux_asset=await _policy_asset(store, linux_asset_id),
+        default_asset=await _policy_asset(store, default_asset_id),
         macos_download_url=str(_update_policy_value(policy, "macos_download_url", "") or ""),
         windows_download_url=str(_update_policy_value(policy, "windows_download_url", "") or ""),
         linux_download_url=str(_update_policy_value(policy, "linux_download_url", "") or ""),
@@ -231,6 +389,14 @@ def _safe_filename(name: str | None) -> str:
 
 def _audit_storage_dir(settings: Settings) -> Path:
     return Path(settings.audit_file_storage_dir).expanduser()
+
+
+def _update_asset_storage_dir(settings: Settings) -> Path:
+    return Path(settings.update_asset_storage_dir).expanduser()
+
+
+def _feedback_storage_dir(settings: Settings) -> Path:
+    return Path(settings.feedback_storage_dir).expanduser()
 
 
 def _json_text(value: Any) -> str:
@@ -329,6 +495,21 @@ async def _record_admin_action(
     )
 
 
+def _public_admin_action(action: AuditAdminAction) -> AdminActionResponse:
+    return AdminActionResponse(
+        id=action.id,
+        actor_user_id=action.actor_user_id,
+        actor_email=action.actor_email,
+        actor_display_name=action.actor_display_name,
+        action=action.action,
+        target_type=action.target_type,
+        target_id=action.target_id,
+        metadata=action.metadata_json or {},
+        time_created=action.time_created,
+        time_updated=action.time_updated,
+    )
+
+
 @router.get("/admin/users", response_model=list[AdminUserResponse])
 async def list_admin_users(request: Request) -> list[AdminUserResponse]:
     _require_admin(request)
@@ -376,6 +557,125 @@ async def update_admin_user(
     return _public_user(user)
 
 
+@router.get("/admin/sessions", response_model=AdminCompanySessionListResponse)
+async def list_admin_company_sessions(
+    request: Request,
+    user_id: str | None = None,
+    include_revoked: bool = False,
+    online_only: bool = True,
+    limit: int = 100,
+    offset: int = 0,
+) -> AdminCompanySessionListResponse:
+    _require_admin(request)
+    store = _company_store(request)
+    total, sessions = await store.list_sessions(
+        include_revoked=include_revoked,
+        user_id=user_id,
+        limit=limit,
+        offset=offset,
+    )
+    now = shanghai_now()
+    presence = getattr(request.app.state, "company_presence", None)
+    online_session_ids = await presence.online_session_ids() if presence is not None and presence.available else set()
+    items = [
+        _public_company_session(session, now=now, online_session_ids=online_session_ids)
+        for session in sessions
+    ]
+    if online_only:
+        items = [session for session in items if session.is_online]
+        total = len(items)
+    return AdminCompanySessionListResponse(
+        total=total,
+        items=items,
+    )
+
+
+@router.post("/admin/sessions/{session_id}/revoke", response_model=AdminRevokeSessionsResponse)
+async def revoke_admin_company_session(
+    session_id: str,
+    request: Request,
+    db: DbDep,
+    body: AdminRevokeSessionRequest | None = None,
+) -> AdminRevokeSessionsResponse:
+    admin = _require_admin(request)
+    reason = (body.reason if body else "").strip()
+    revoked_count = await _company_store(request).revoke_session_by_id(
+        session_id,
+        revoked_by_user_id=admin.id,
+        revoked_by_email=admin.email,
+        reason=reason,
+    )
+    if revoked_count:
+        await _record_admin_action(
+            db,
+            user=admin,
+            action="revoke_company_session",
+            target_type="company_session",
+            target_id=session_id,
+            metadata={"reason": reason},
+        )
+    return AdminRevokeSessionsResponse(revoked_count=revoked_count)
+
+
+@router.post("/admin/users/{user_id}/revoke-sessions", response_model=AdminRevokeSessionsResponse)
+async def revoke_admin_user_company_sessions(
+    user_id: str,
+    request: Request,
+    db: DbDep,
+    body: AdminRevokeSessionRequest | None = None,
+) -> AdminRevokeSessionsResponse:
+    admin = _require_admin(request)
+    reason = (body.reason if body else "").strip()
+    revoked_count = await _company_store(request).revoke_sessions(
+        user_ids=[user_id],
+        revoked_by_user_id=admin.id,
+        revoked_by_email=admin.email,
+        reason=reason,
+    )
+    if revoked_count:
+        await _record_admin_action(
+            db,
+            user=admin,
+            action="revoke_company_user_sessions",
+            target_type="company_user",
+            target_id=user_id,
+            metadata={"reason": reason, "revoked_count": revoked_count},
+        )
+    return AdminRevokeSessionsResponse(revoked_count=revoked_count)
+
+
+@router.post("/admin/sessions/revoke-bulk", response_model=AdminRevokeSessionsResponse)
+async def revoke_admin_company_sessions_bulk(
+    request: Request,
+    db: DbDep,
+    body: AdminRevokeSessionsRequest,
+) -> AdminRevokeSessionsResponse:
+    admin = _require_admin(request)
+    reason = body.reason.strip()
+    revoked_count = await _company_store(request).revoke_sessions(
+        session_ids=body.session_ids,
+        user_ids=body.user_ids,
+        revoked_by_user_id=admin.id,
+        revoked_by_email=admin.email,
+        reason=reason,
+    )
+    if revoked_count:
+        await _record_admin_action(
+            db,
+            user=admin,
+            action="revoke_company_sessions_bulk",
+            target_type="company_session",
+            target_id="bulk",
+            metadata={
+                "reason": reason,
+                "session_ids": body.session_ids,
+                "user_ids": body.user_ids,
+                "revoked_count": revoked_count,
+            },
+        )
+    return AdminRevokeSessionsResponse(revoked_count=revoked_count)
+
+
 @router.get("/admin/model-policy", response_model=AdminModelPolicyResponse)
 async def get_admin_model_policy(request: Request) -> AdminModelPolicyResponse:
     _require_admin(request)
@@ -406,8 +706,9 @@ async def update_admin_model_policy(
 @router.get("/admin/update-policy", response_model=AdminUpdatePolicyResponse)
 async def get_admin_update_policy(request: Request) -> AdminUpdatePolicyResponse:
     _require_admin(request)
-    policy = await _company_store(request).get_update_policy()
-    return _public_update_policy(policy)
+    store = _company_store(request)
+    policy = await store.get_update_policy()
+    return await _public_update_policy(policy, store)
 
 
 @router.put("/admin/update-policy", response_model=AdminUpdatePolicyResponse)
@@ -416,13 +717,18 @@ async def update_admin_update_policy(
     body: AdminUpdatePolicyRequest,
 ) -> AdminUpdatePolicyResponse:
     _require_admin(request)
+    store = _company_store(request)
     try:
-        policy = await _company_store(request).update_update_policy(
+        policy = await store.update_update_policy(
             enabled=body.enabled,
             latest_version=body.latest_version,
             min_supported_version=body.min_supported_version,
             force_update=body.force_update,
             release_notes=body.release_notes,
+            macos_asset_id=body.macos_asset_id,
+            windows_asset_id=body.windows_asset_id,
+            linux_asset_id=body.linux_asset_id,
+            default_asset_id=body.default_asset_id,
             macos_download_url=body.macos_download_url,
             windows_download_url=body.windows_download_url,
             linux_download_url=body.linux_download_url,
@@ -430,7 +736,169 @@ async def update_admin_update_policy(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _public_update_policy(policy)
+    return await _public_update_policy(policy, store)
+
+
+@router.post("/admin/update-assets/upload", response_model=AdminUpdateAssetResponse)
+async def upload_admin_update_asset(
+    request: Request,
+    settings: SettingsDep,
+    platform: str = Form(...),
+    version: str = Form(...),
+    signature: str = Form(""),
+    file: UploadFile = File(...),
+) -> AdminUpdateAssetResponse:
+    user = _require_admin(request)
+    store = _company_store(request)
+    original_filename = _safe_filename(file.filename)
+    storage_dir = _update_asset_storage_dir(settings)
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    stored_filename = f"{generate_ulid()}-{original_filename}"
+    target = storage_dir / stored_filename
+
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        with target.open("wb") as handle:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                digest.update(chunk)
+                handle.write(chunk)
+    except Exception:
+        if target.exists():
+            target.unlink(missing_ok=True)
+        raise
+
+    if size == 0:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Update asset file cannot be empty")
+
+    mime_type = file.content_type or mimetypes.guess_type(original_filename)[0] or "application/octet-stream"
+    try:
+        asset = await store.create_update_asset(
+            platform=platform,
+            version=version,
+            original_filename=original_filename,
+            stored_filename=stored_filename,
+            mime_type=mime_type,
+            size_bytes=size,
+            sha256=digest.hexdigest(),
+            signature=signature,
+            uploaded_by_user_id=user.id,
+            uploaded_by_email=user.email,
+            uploaded_by_display_name=user.display_name,
+        )
+    except ValueError as exc:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return _public_update_asset(asset)
+
+
+def _public_feedback(request: Request, feedback: CompanyFeedback) -> AdminFeedbackResponse:
+    image_download_url = None
+    if feedback.image_stored_filename:
+        image_download_url = str(request.url_for("download_admin_feedback_image", feedback_id=feedback.id))
+    return AdminFeedbackResponse(
+        id=feedback.id,
+        user_id=feedback.user_id,
+        user_email=feedback.user_email,
+        user_display_name=feedback.user_display_name,
+        description=feedback.description,
+        image_original_filename=feedback.image_original_filename,
+        image_mime_type=feedback.image_mime_type,
+        image_size_bytes=feedback.image_size_bytes,
+        image_sha256=feedback.image_sha256,
+        image_download_url=image_download_url,
+        time_created=feedback.time_created,
+        time_updated=feedback.time_updated,
+    )
+
+
+def _datetime_iso(value: datetime) -> str:
+    return as_shanghai(value).isoformat()
+
+
+def _is_session_online(
+    session: CompanySessionRecord,
+    *,
+    now: datetime | None = None,
+    online_session_ids: set[str] | None = None,
+) -> bool:
+    current = as_shanghai(now) if now is not None else shanghai_now()
+    if session.revoked_at is not None:
+        return False
+    if as_shanghai(session.expires_at) <= current:
+        return False
+    if online_session_ids is not None and session.id in online_session_ids:
+        return True
+    return as_shanghai(session.last_seen_at) >= current - timedelta(seconds=120)
+
+
+def _public_company_session(
+    session: CompanySessionRecord,
+    *,
+    now: datetime | None = None,
+    online_session_ids: set[str] | None = None,
+) -> AdminCompanySessionResponse:
+    return AdminCompanySessionResponse(
+        id=session.id,
+        user_id=session.user_id,
+        user_email=session.user_email,
+        user_display_name=session.user_display_name,
+        user_role=session.user_role,
+        user_is_active=session.user_is_active,
+        device_id=session.device_id,
+        device_name=session.device_name,
+        platform=session.platform,
+        app_version=session.app_version,
+        ip_address=session.ip_address,
+        user_agent=session.user_agent,
+        is_online=_is_session_online(session, now=now, online_session_ids=online_session_ids),
+        expires_at=session.expires_at,
+        revoked_at=session.revoked_at,
+        time_created=session.time_created,
+        last_seen_at=session.last_seen_at,
+        revoked_by_user_id=session.revoked_by_user_id,
+        revoked_by_email=session.revoked_by_email,
+        revoked_reason=session.revoked_reason,
+    )
+
+
+@router.get("/admin/feedback", response_model=AdminFeedbackListResponse)
+async def list_admin_feedback(request: Request) -> AdminFeedbackListResponse:
+    _require_admin(request)
+    store = _company_store(request)
+    if not hasattr(store, "list_feedback"):
+        return AdminFeedbackListResponse(items=[])
+    items = await store.list_feedback()
+    return AdminFeedbackListResponse(items=[_public_feedback(request, item) for item in items])
+
+
+@router.get("/admin/feedback/{feedback_id}/image", name="download_admin_feedback_image")
+async def download_admin_feedback_image(
+    request: Request,
+    settings: SettingsDep,
+    feedback_id: str,
+) -> FileResponse:
+    _require_admin(request)
+    store = _company_store(request)
+    if not hasattr(store, "get_feedback"):
+        raise HTTPException(status_code=404, detail="Feedback not found")
+    feedback = await store.get_feedback(feedback_id)
+    if feedback is None or not feedback.image_stored_filename:
+        raise HTTPException(status_code=404, detail="Feedback image not found")
+    file_path = _feedback_storage_dir(settings) / Path(feedback.image_stored_filename).name
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Feedback image file not found")
+    return FileResponse(
+        file_path,
+        media_type=feedback.image_mime_type or "application/octet-stream",
+        filename=feedback.image_original_filename or file_path.name,
+    )
 
 
 async def _upsert_audit_session(
@@ -750,8 +1218,8 @@ async def list_audit_sessions(
                 "user_display_name": row.user_display_name,
                 "model_id": row.model_id,
                 "provider_id": row.provider_id,
-                "time_created": row.time_created.isoformat(),
-                "time_updated": row.time_updated.isoformat(),
+                "time_created": _datetime_iso(row.time_created),
+                "time_updated": _datetime_iso(row.time_updated),
             }
             for row in rows
         ],
@@ -764,6 +1232,23 @@ async def get_audit_summary(
     db: DbDep,
 ) -> dict[str, Any]:
     _require_admin(request)
+    now = shanghai_now()
+    settings = getattr(request.app.state, "settings", None)
+    activity_days = []
+    online_users: set[str] = set()
+    online_sessions = 0
+    store = getattr(request.app.state, "company_auth_store", None)
+    presence = getattr(request.app.state, "company_presence", None)
+    online_session_ids = await presence.online_session_ids() if presence is not None and presence.available else set()
+    if store is not None and hasattr(store, "activity_days"):
+        activity_days = await store.activity_days(days=30)
+    if store is not None and hasattr(store, "list_sessions"):
+        _, company_sessions = await store.list_sessions(include_revoked=False, limit=10_000)
+        for session in company_sessions:
+            if _is_session_online(session, now=now, online_session_ids=online_session_ids):
+                online_sessions += 1
+                online_users.add(session.user_id)
+
     usage = (
         await db.execute(
             select(
@@ -790,12 +1275,31 @@ async def get_audit_summary(
             select(func.count()).select_from(AuditRiskFinding).where(AuditRiskFinding.status == "open")
         )
     ).scalar_one()
+    today = now.date().isoformat()
+    today_activity = next((item for item in activity_days if item.date == today), None)
     return {
         "sessions": {"total": sessions_total},
         "messages": {"total": messages_total},
         "files": {"total": files_total, "uploaded": files_uploaded},
         "tool_calls": {"total": tool_calls_total},
         "risks": {"total": risks_total, "open": risks_open},
+        "activity": {
+            "daily_active_users": today_activity.active_users if today_activity else 0,
+            "online_users": len(online_users),
+            "online_sessions": online_sessions,
+            "redis": {
+                "enabled": bool(getattr(settings, "redis_enabled", False)),
+                "available": bool(presence is not None and presence.available),
+            },
+            "series": [
+                {
+                    "date": item.date,
+                    "active_users": item.active_users,
+                    "session_count": item.session_count,
+                }
+                for item in activity_days
+            ],
+        },
         "usage": {
             "input_tokens": int(usage["input_tokens"] or 0),
             "output_tokens": int(usage["output_tokens"] or 0),
@@ -806,6 +1310,34 @@ async def get_audit_summary(
             "cost": float(usage["cost"] or 0),
         },
     }
+
+
+@router.get("/admin/audit/admin-actions", response_model=AdminActionListResponse)
+async def list_admin_actions(
+    request: Request,
+    db: DbDep,
+    action: str | None = None,
+    actor_user_id: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> AdminActionListResponse:
+    _require_admin(request)
+    stmt = select(AuditAdminAction)
+    count_stmt = select(func.count()).select_from(AuditAdminAction)
+    filters = []
+    if action:
+        filters.append(AuditAdminAction.action == action.strip())
+    if actor_user_id:
+        filters.append(AuditAdminAction.actor_user_id == actor_user_id.strip())
+    for condition in filters:
+        stmt = stmt.where(condition)
+        count_stmt = count_stmt.where(condition)
+    stmt = stmt.order_by(AuditAdminAction.time_created.desc()).offset(max(0, int(offset or 0))).limit(
+        min(max(int(limit or 100), 1), 500)
+    )
+    total = (await db.execute(count_stmt)).scalar_one()
+    rows = list((await db.execute(stmt)).scalars().all())
+    return AdminActionListResponse(total=int(total or 0), items=[_public_admin_action(row) for row in rows])
 
 
 @router.get("/admin/audit/risks")
@@ -874,8 +1406,8 @@ async def list_audit_risks(
                 ),
                 "workspace": session.workspace if session is not None else "",
                 "session_title": session.title if session is not None else "",
-                "time_created": finding.time_created.isoformat(),
-                "time_updated": finding.time_updated.isoformat(),
+                "time_created": _datetime_iso(finding.time_created),
+                "time_updated": _datetime_iso(finding.time_updated),
             }
             for finding, session in rows
         ],
@@ -948,8 +1480,8 @@ async def list_audit_tool_calls(
                 ),
                 "workspace": session.workspace if session is not None else "",
                 "session_title": session.title if session is not None else "",
-                "time_created": tool_call.time_created.isoformat(),
-                "time_updated": tool_call.time_updated.isoformat(),
+                "time_created": _datetime_iso(tool_call.time_created),
+                "time_updated": _datetime_iso(tool_call.time_updated),
             }
             for tool_call, session in rows
         ],
@@ -1024,7 +1556,7 @@ async def get_audit_session_messages(
                 "id": message.local_message_id,
                 "role": message.role,
                 "data": message.data,
-                "time_created": message.time_created.isoformat(),
+                "time_created": _datetime_iso(message.time_created),
                 "parts": [
                     {
                         "id": part.local_part_id,
@@ -1084,7 +1616,7 @@ async def get_audit_session_messages(
                             if part.local_part_id in files_by_part
                             else None
                         ),
-                        "time_created": part.time_created.isoformat(),
+                        "time_created": _datetime_iso(part.time_created),
                     }
                     for part in parts_by_message.get(message.local_message_id, [])
                 ],

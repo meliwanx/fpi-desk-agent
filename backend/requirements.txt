@@ -1,4 +1,4 @@
-# OpenYak Backend — pinned production dependencies
+# fpi-agent Backend — pinned production dependencies
 # Generated from local environment. Only packages actually used by the app.
 
 # ── Web Framework ────────────────────────────────────────────────────────
@@ -78,3 +78,4 @@ matplotlib==3.10.8
 
 # ── Remote Access ─────────────────────────────────────────────────────────
 qrcode[pil]==8.0
+redis==5.3.1

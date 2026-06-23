@@ -58,7 +58,7 @@ class WebFetchTool(ToolDefinition):
                 timeout=30.0,
             ) as client:
                 resp = await client.get(url, headers={
-                    "User-Agent": "OpenYak/0.1 (tool; web_fetch)",
+                    "User-Agent": "fpi-agent/0.1 (tool; web_fetch)",
                 })
                 resp.raise_for_status()
 

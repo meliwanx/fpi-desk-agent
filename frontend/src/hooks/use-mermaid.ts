@@ -23,7 +23,7 @@ export function useMermaid() {
         mermaidInstance = await initPromise;
       }
 
-      // Theme configuration - map to OpenYak theme colors
+      // Theme configuration - map to fpi-agent theme colors
       const isDark = theme === "dark";
       mermaidInstance.initialize({
         startOnLoad: false,

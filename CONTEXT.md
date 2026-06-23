@@ -1,6 +1,6 @@
-# OpenYak Context
+# fpi-agent Context
 
-OpenYak is a local desktop AI workbench for office workflows: turning files, threads, and messy office context into deliverables. This file is the canonical glossary for the domain — names used across `backend/`, `frontend/`, and `desktop-tauri/`. Use these terms exactly; treat the listed aliases as words to avoid.
+fpi-agent is a local desktop AI workbench for office workflows: turning files, threads, and messy office context into deliverables. This file is the canonical glossary for the domain — names used across `backend/`, `frontend/`, and `desktop-tauri/`. Use these terms exactly; treat the listed aliases as words to avoid.
 
 ## Language
 
@@ -74,7 +74,7 @@ _Avoid_: document, output, deliverable.
 ### Integration
 
 **Channel**:
-A non-OpenYak surface (Slack, Discord, Telegram, Feishu, WeChat, Email, etc.) that injects Messages into a Session and forwards Parts back out; implements `BaseChannel` in `backend/app/channels/base.py`.
+A non-fpi-agent surface (Slack, Discord, Telegram, Feishu, WeChat, Email, etc.) that injects Messages into a Session and forwards Parts back out; implements `BaseChannel` in `backend/app/channels/base.py`.
 _Avoid_: integration, connector, bot.
 
 ## Relationships

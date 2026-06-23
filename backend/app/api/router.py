@@ -17,6 +17,7 @@ from app.api import chat as chat_api
 from app.api import config as config_api
 from app.api import connectors as connectors_api
 from app.api import files as files_api
+from app.api import feedback as feedback_api
 from app.api import google_auth as google_auth_api
 from app.api import mcp as mcp_api
 from app.api import messages as messages_api
@@ -44,6 +45,7 @@ api_router.include_router(skills_api.router, tags=["skills"])
 api_router.include_router(sessions_api.router, tags=["sessions"])
 api_router.include_router(messages_api.router, tags=["messages"])
 api_router.include_router(files_api.router, tags=["files"])
+api_router.include_router(feedback_api.router, tags=["feedback"])
 api_router.include_router(artifacts_api.router, tags=["artifacts"])
 api_router.include_router(usage_api.router, tags=["usage"])
 api_router.include_router(config_api.router, tags=["config"])

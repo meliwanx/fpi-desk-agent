@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +27,7 @@ from app.schemas.session import (
 from app.storage.repository import create, delete_by_id, get_all, get_by_id
 from app.streaming.manager import GenerationJob, StreamManager
 from app.utils.id import generate_ulid
+from app.utils.timezone import shanghai_now
 
 logger = logging.getLogger(__name__)
 
@@ -1010,7 +1010,7 @@ async def compact_session_cascade(
         async with s.begin():
             live = await get_session(s, session_id)
             if live is not None:
-                live.time_compacting = datetime.now(timezone.utc)
+                live.time_compacting = shanghai_now()
 
     try:
         result = await run_compaction(
