@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -22,6 +21,7 @@ from app.schemas.chat import PromptRequest
 from app.session.processor import run_generation
 from app.streaming.manager import GenerationJob
 from app.utils.id import generate_ulid
+from app.utils.timezone import shanghai_now
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +124,7 @@ async def _execute_single(
     """Run a single-shot automation (original behavior)."""
     session_id = generate_ulid()
     run_id = generate_ulid()
-    now = datetime.now(timezone.utc)
+    now = shanghai_now()
 
     # Create TaskRun record
     async with session_factory() as db:
@@ -152,7 +152,7 @@ async def _execute_single(
     )
 
     # Update records
-    finished_at = datetime.now(timezone.utc)
+    finished_at = shanghai_now()
     async with session_factory() as db:
         async with db.begin():
             run_obj = (
@@ -210,7 +210,7 @@ async def _execute_loop(
         iteration_num = i + 1
         session_id = generate_ulid()
         run_id = generate_ulid()
-        now = datetime.now(timezone.utc)
+        now = shanghai_now()
 
         if first_session_id is None:
             first_session_id = session_id
@@ -261,7 +261,7 @@ async def _execute_loop(
         progress_entries.append(summary if summary else f"[{status}]")
 
         # Update TaskRun
-        finished_at = datetime.now(timezone.utc)
+        finished_at = shanghai_now()
         async with session_factory() as db:
             async with db.begin():
                 run_obj = (
@@ -298,7 +298,7 @@ async def _execute_loop(
                 )
             ).scalar_one_or_none()
             if task_obj:
-                task_obj.last_run_at = datetime.now(timezone.utc)
+                task_obj.last_run_at = shanghai_now()
                 task_obj.last_run_status = final_status
                 task_obj.run_count = (task_obj.run_count or 0) + completed_iterations
 

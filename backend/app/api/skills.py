@@ -5,7 +5,7 @@ scraped from https://skillsmp.com (see
 ``scripts/update_skills_catalog.py``). Hitting SkillsMP live every time
 a user opens the browser is a non-starter: their anon quota is 50
 req/day per IP, which burns out under debounced search-as-you-type.
-Instead we ship a JSON catalog and refresh it on each OpenYak release.
+Instead we ship a JSON catalog and refresh it on each fpi-agent release.
 
 Install still uses live GitHub raw content so the actual SKILL.md
 body is always authoritative; only discovery is offline.

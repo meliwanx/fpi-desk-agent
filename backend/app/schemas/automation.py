@@ -5,7 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_serializer, model_validator
+
+from app.utils.timezone import as_shanghai
 
 
 class ScheduleConfig(BaseModel):
@@ -87,6 +89,12 @@ class AutomationResponse(BaseModel):
     time_created: datetime
     time_updated: datetime
 
+    @field_serializer("last_run_at", "next_run_at", "time_created", "time_updated")
+    def _serialize_datetime_shanghai(self, value: datetime | None) -> str | None:
+        if value is None:
+            return None
+        return as_shanghai(value).isoformat()
+
     model_config = {"from_attributes": True}
 
 
@@ -100,6 +108,12 @@ class TaskRunResponse(BaseModel):
     finished_at: datetime | None
     triggered_by: str
     time_created: datetime
+
+    @field_serializer("started_at", "finished_at", "time_created")
+    def _serialize_datetime_shanghai(self, value: datetime | None) -> str | None:
+        if value is None:
+            return None
+        return as_shanghai(value).isoformat()
 
     model_config = {"from_attributes": True}
 

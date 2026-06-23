@@ -19,7 +19,7 @@ import { WindowTopIcons } from "@/components/layout/window-top-icons";
 import { UpdateBanner } from "@/components/desktop/update-banner";
 import { OnboardingScreen } from "@/components/onboarding/onboarding-screen";
 import { Button } from "@/components/ui/button";
-import { OpenYakLogo } from "@/components/ui/openyak-logo";
+import { FpiAgentLogo } from "@/components/ui/openyak-logo";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSidebarStore } from "@/stores/sidebar-store";
 import { useSettingsStore, useSettingsHasHydrated } from "@/stores/settings-store";
@@ -239,7 +239,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                   onClick={toggleSidebar}
                   aria-label={t("openSidebar")}
                 >
-                  <OpenYakLogo size={18} />
+                  <FpiAgentLogo size={18} />
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">{t("openSidebar")}</TooltipContent>

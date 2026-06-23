@@ -1,4 +1,4 @@
-"""Convert parsed Claude plugin data to OpenYak registry objects."""
+"""Convert parsed Claude plugin data to fpi-agent registry objects."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from app.skill.model import SkillInfo
 
 
 def convert_skill(raw: PluginSkillRaw, plugin: PluginMeta) -> SkillInfo:
-    """Convert a raw Claude plugin skill to an OpenYak SkillInfo.
+    """Convert a raw Claude plugin skill to an fpi-agent SkillInfo.
 
     Skills are namespaced as "{plugin}:{skill}" to avoid conflicts.
     """

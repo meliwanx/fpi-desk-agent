@@ -1,6 +1,6 @@
 """OpenAI-compatible API endpoints for external integrations.
 
-Exposes /v1/chat/completions and /v1/models so OpenYak can be used as a
+Exposes /v1/chat/completions and /v1/models so fpi-agent can be used as a
 drop-in OpenAI-compatible backend. Internally delegates to the same
 run_generation() pipeline used by the native chat API.
 """
@@ -347,7 +347,7 @@ async def chat_completions(
 ):
     """OpenAI-compatible chat completions endpoint.
 
-    Delegates to OpenYak's full agent loop (run_generation) and translates
+    Delegates to fpi-agent's full agent loop (run_generation) and translates
     SSE events into the OpenAI streaming format.
     """
     # Extract sender info from OpenClaw's system messages (for session title)
@@ -421,7 +421,7 @@ async def _stream_openai_chunks(
     model: str,
     run_id: str,
 ):
-    """Translate OpenYak SSE events into OpenAI streaming chunks."""
+    """Translate fpi-agent SSE events into OpenAI streaming chunks."""
     queue = job.subscribe()
     created = int(time.time())
 
@@ -462,7 +462,7 @@ async def _stream_openai_chunks(
                 yield "data: [DONE]\n\n"
                 break
 
-            # tool-call, tool-result, permission-request, etc. are silent — internal to OpenYak
+            # tool-call, tool-result, permission-request, etc. are silent — internal to fpi-agent
 
     except asyncio.CancelledError:
         pass

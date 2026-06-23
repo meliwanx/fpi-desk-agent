@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import { createServer, type ServerResponse, type Server } from "node:http";
 import path from "node:path";
 import { promisify } from "node:util";
-import { mockOpenYakApi, seedOpenYakStorage } from "./fixtures/openyak-api";
+import { mockFpiAgentApi, seedFpiAgentStorage } from "./fixtures/openyak-api";
 
 const execFile = promisify(execFileCallback);
 
@@ -68,7 +68,7 @@ const stills = [
   "openyak-long-context.png",
 ] as const;
 
-test.describe("OpenYak README media capture", () => {
+test.describe("fpi-agent README media capture", () => {
   test.describe.configure({ mode: "serial", timeout: 900_000 });
   test.skip(
     process.env.OPENYAK_CAPTURE_README_MEDIA !== "true",
@@ -209,8 +209,8 @@ test.describe("OpenYak README media capture", () => {
   });
 });
 
-async function setupCleanLightApp(page: Page, options?: Parameters<typeof mockOpenYakApi>[1]) {
-  await seedOpenYakStorage(page, { force: true });
+async function setupCleanLightApp(page: Page, options?: Parameters<typeof mockFpiAgentApi>[1]) {
+  await seedFpiAgentStorage(page, { force: true });
   await page.addInitScript(() => {
     window.localStorage.setItem("theme", "light");
     window.localStorage.setItem(
@@ -257,7 +257,7 @@ async function setupCleanLightApp(page: Page, options?: Parameters<typeof mockOp
     if (document.documentElement) inject();
     else document.addEventListener("DOMContentLoaded", inject, { once: true });
   });
-  await mockOpenYakApi(page, options);
+  await mockFpiAgentApi(page, options);
   if (slowStreamPort) {
     await page.route("**/api/chat/stream/**", async (route) => {
       const original = new URL(route.request().url());
@@ -269,7 +269,7 @@ async function setupCleanLightApp(page: Page, options?: Parameters<typeof mockOp
 }
 
 async function expectHome(page: Page) {
-  await expect(page.getByRole("heading", { name: /What should (OpenYak help you do|we do in)/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /What should (fpi-agent help you do|we do in)/i })).toBeVisible();
   await expect(page.locator("html")).not.toHaveClass(/dark/);
   await expect(page.getByText("Runtime", { exact: false })).toHaveCount(0);
   await expect(page.getByText("API 401", { exact: false })).toHaveCount(0);
@@ -500,7 +500,7 @@ function naturalStreamingText(kind: string) {
 }
 
 function autoCompactStreamingText() {
-  return " Auto compacted answer persisted after compression.\n\nContext checkpoint\n\nOpenYak preserved the launch-review thread, compressed older turns, and kept the active decision context available for the next reply.\n\n| Area | Preserved detail | Next action |\n| --- | --- | --- |\n| Owners | Product, CS, Finance, Legal, Security | Confirm one accountable owner per risk |\n| Deadlines | Board packet, renewal window, automation savings date | Keep the critical dates in the active summary |\n| Risks | Budget variance, onboarding readiness, vendor renewal | Use the compressed summary for follow-up planning |";
+  return " Auto compacted answer persisted after compression.\n\nContext checkpoint\n\nfpi-agent preserved the launch-review thread, compressed older turns, and kept the active decision context available for the next reply.\n\n| Area | Preserved detail | Next action |\n| --- | --- | --- |\n| Owners | Product, CS, Finance, Legal, Security | Confirm one accountable owner per risk |\n| Deadlines | Board packet, renewal window, automation savings date | Keep the critical dates in the active summary |\n| Risks | Budget variance, onboarding readiness, vendor renewal | Use the compressed summary for follow-up planning |";
 }
 
 function delayMs(milliseconds: number) {

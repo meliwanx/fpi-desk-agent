@@ -22,7 +22,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { OpenYakLogo } from "@/components/ui/openyak-logo";
+import { FpiAgentLogo } from "@/components/ui/openyak-logo";
 import { IS_DESKTOP, TITLE_BAR_HEIGHT } from "@/lib/constants";
 import { useIsMacOS } from "@/hooks/use-platform";
 import {
@@ -156,7 +156,7 @@ function ThinkingGroup({ texts }: { texts: string[] }) {
     <div className="relative pl-7">
       {/* Timeline dot */}
       <div className="absolute left-0 top-0.5 flex items-center justify-center">
-        <OpenYakLogo size={14} className="text-[var(--text-secondary)]" />
+        <FpiAgentLogo size={14} className="text-[var(--text-secondary)]" />
       </div>
 
       <p className="text-[13px] font-semibold text-[var(--text-primary)]">

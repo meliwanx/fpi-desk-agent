@@ -2,7 +2,7 @@
 
 import { CheckCircle2, ChevronRight, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { OpenYakLogo } from "@/components/ui/openyak-logo";
+import { FpiAgentLogo } from "@/components/ui/openyak-logo";
 import { useActivityStore, type ActivityData } from "@/stores/activity-store";
 
 interface ActivitySummaryProps {
@@ -54,7 +54,7 @@ export function ActivitySummary({ data }: ActivitySummaryProps) {
       {isCompleted ? (
         <CheckCircle2 className="h-3.5 w-3.5 text-[var(--tool-completed)]" />
       ) : hasReasoning ? (
-        <OpenYakLogo size={14} />
+        <FpiAgentLogo size={14} />
       ) : (
         <Wrench className="h-3.5 w-3.5" />
       )}

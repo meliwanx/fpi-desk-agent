@@ -9,7 +9,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal, TypeAlias
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
+
+from app.utils.timezone import as_shanghai
 
 
 # --- Part types (discriminated union via 'type' field) ---
@@ -145,6 +147,10 @@ class PartResponse(BaseModel):
     time_created: datetime
     data: dict[str, Any]
 
+    @field_serializer("time_created")
+    def _serialize_time_created(self, value: datetime) -> str:
+        return as_shanghai(value).isoformat()
+
     model_config = {"from_attributes": True}
 
 
@@ -154,6 +160,10 @@ class MessageResponse(BaseModel):
     time_created: datetime
     data: dict[str, Any]
     parts: list[PartResponse] = []
+
+    @field_serializer("time_created")
+    def _serialize_time_created(self, value: datetime) -> str:
+        return as_shanghai(value).isoformat()
 
     model_config = {"from_attributes": True}
 

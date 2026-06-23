@@ -15,8 +15,8 @@ def _session_response(**overrides) -> SessionResponse:
     return SessionResponse(**data)
 
 
-def test_session_response_serializes_naive_datetimes_as_utc_z() -> None:
+def test_session_response_serializes_datetimes_as_shanghai() -> None:
     dumped = _session_response().model_dump(mode="json")
 
-    assert dumped["time_created"] == "2026-06-19T14:30:00Z"
-    assert dumped["time_updated"] == "2026-06-19T14:31:00Z"
+    assert dumped["time_created"] == "2026-06-19T14:30:00+08:00"
+    assert dumped["time_updated"] == "2026-06-19T22:31:00+08:00"

@@ -118,6 +118,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await conn.run_sync(Base.metadata.create_all)
         # Add any missing columns to existing tables (lightweight auto-migration)
         await conn.run_sync(_add_missing_columns)
+        await conn.run_sync(_migrate_sqlite_timestamps_to_shanghai)
 
     app.state.engine = engine
     app.state.session_factory = session_factory
@@ -393,7 +394,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     connector_registry = ConnectorRegistry(project_dir=settings.project_dir)
 
-    # Plugin loader (Claude knowledge-work-plugins → OpenYak registries)
+    # Plugin loader (Claude knowledge-work-plugins → fpi-agent registries)
     from app.plugin import load_plugins_by_source
     from app.plugin.manager import PluginManager
 
@@ -669,6 +670,75 @@ def _add_missing_columns(connection) -> None:
             connection.execute(text(sql))
 
 
+def _migrate_sqlite_timestamps_to_shanghai(connection) -> None:
+    """One-time SQLite migration from UTC wall-clock timestamps to Shanghai time."""
+    from datetime import datetime, timedelta
+
+    from sqlalchemy import DateTime, inspect as sa_inspect, select, text
+
+    from app.utils.timezone import shanghai_now
+
+    if connection.dialect.name != "sqlite":
+        return
+
+    migration_key = "timezone_migrated_to_shanghai_v1"
+    connection.execute(
+        text(
+            'CREATE TABLE IF NOT EXISTS "_app_migrations" ('
+            '"key" TEXT PRIMARY KEY, '
+            '"applied_at" TEXT NOT NULL'
+            ")"
+        )
+    )
+    existing = connection.execute(
+        text('SELECT "key" FROM "_app_migrations" WHERE "key" = :key'),
+        {"key": migration_key},
+    ).first()
+    if existing is not None:
+        return
+
+    inspector = sa_inspect(connection)
+    for table in Base.metadata.sorted_tables:
+        if not inspector.has_table(table.name):
+            continue
+        primary_key = next(iter(table.primary_key.columns), None)
+        if primary_key is None:
+            continue
+        datetime_columns = [
+            column
+            for column in table.columns
+            if isinstance(column.type, DateTime)
+        ]
+        if not datetime_columns:
+            continue
+
+        rows = connection.execute(select(primary_key, *datetime_columns)).mappings().all()
+        for row in rows:
+            values = {}
+            for column in datetime_columns:
+                value = row[column.name]
+                if value is None:
+                    continue
+                if isinstance(value, str):
+                    try:
+                        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                    except ValueError:
+                        continue
+                values[column.name] = value + timedelta(hours=8)
+            if not values:
+                continue
+            connection.execute(
+                table.update()
+                .where(primary_key == row[primary_key.name])
+                .values(**values)
+            )
+
+    connection.execute(
+        text('INSERT INTO "_app_migrations" ("key", "applied_at") VALUES (:key, :applied_at)'),
+        {"key": migration_key, "applied_at": shanghai_now().isoformat()},
+    )
+
+
 def _find_frontend_dir() -> Path | None:
     """Locate the frontend static build (out/) directory.
 
@@ -703,14 +773,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings = Settings()
 
     app = FastAPI(
-        title="OpenYak",
+        title="fpi-agent",
         version="0.0.1",
         lifespan=lifespan,
     )
     app.state.settings = settings
     set_settings(settings)
 
-    # CORS — restricted to the OpenYak frontend origins. Wildcard would let
+    # CORS — restricted to the fpi-agent frontend origins. Wildcard would let
     # any webpage read responses from this local server cross-origin, which
     # is a PII-leak vector on top of the CSRF risk handled below.
     #   - Tauri desktop shell: tauri://localhost (macOS/Linux) and

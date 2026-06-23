@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from typing import Any
+
+from app.utils.timezone import shanghai_now
 
 
 class CompanyPresenceStore:
@@ -67,7 +68,7 @@ class CompanyPresenceStore:
             **(metadata or {}),
         }
         presence_key = self._presence_key(user_id, session_id)
-        active_key = self._daily_active_key(day or datetime.now(timezone.utc).date().isoformat())
+        active_key = self._daily_active_key(day or shanghai_now().date().isoformat())
         await self.redis.set(
             presence_key,
             json.dumps(payload, ensure_ascii=False, sort_keys=True),

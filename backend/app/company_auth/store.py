@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import (
@@ -36,6 +36,9 @@ from app.company_auth.security import (
 )
 from app.config import internal_default_custom_endpoints_json
 from app.utils.id import generate_ulid
+from app.utils.timezone import as_shanghai, shanghai_now
+
+_SHANGHAI_TIMEZONE_MIGRATION_KEY = "timezone_migrated_to_shanghai_v1"
 
 
 @dataclass(frozen=True)
@@ -161,10 +164,6 @@ class CompanyFeedback:
     image_sha256: str
     time_created: datetime
     time_updated: datetime
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def _normalise_model_protocol(value: str | None) -> str:
@@ -324,6 +323,7 @@ class CompanyAuthStore:
         async with self.engine.begin() as conn:
             await conn.run_sync(self.metadata.create_all)
             await conn.run_sync(self._add_missing_columns)
+            await conn.run_sync(self._migrate_sqlite_timestamps_to_shanghai)
 
     async def dispose(self) -> None:
         await self.engine.dispose()
@@ -348,7 +348,7 @@ class CompanyAuthStore:
                 return False
 
             effective_password = password or generate_temporary_password()
-            now = _utcnow()
+            now = shanghai_now()
             await conn.execute(
                 insert(self.users).values(
                     id=generate_ulid(),
@@ -368,7 +368,7 @@ class CompanyAuthStore:
                 {
                     "email": normalized,
                     "password": effective_password,
-                    "created_at": _utcnow().isoformat(),
+                    "created_at": shanghai_now().isoformat(),
                 },
             )
         return True
@@ -424,7 +424,7 @@ class CompanyAuthStore:
         if not password:
             raise ValueError("Password cannot be empty")
         safe_role = role.strip().lower() if role.strip().lower() in {"admin", "user"} else "user"
-        now = _utcnow()
+        now = shanghai_now()
         user_id = generate_ulid()
         async with self.engine.begin() as conn:
             await conn.execute(
@@ -461,7 +461,7 @@ class CompanyAuthStore:
         role: str | None = None,
         is_active: bool | None = None,
     ) -> CompanyUser | None:
-        values: dict = {"time_updated": _utcnow()}
+        values: dict = {"time_updated": shanghai_now()}
         if display_name is not None:
             values["display_name"] = display_name.strip()
         if password is not None:
@@ -525,6 +525,58 @@ class CompanyAuthStore:
             if name not in update_asset_existing:
                 sync_conn.exec_driver_sql(f"ALTER TABLE {update_asset_table} ADD COLUMN {name} {ddl_type}")
 
+    def _migrate_sqlite_timestamps_to_shanghai(self, sync_conn) -> None:
+        if sync_conn.dialect.name != "sqlite":
+            return
+
+        existing = sync_conn.execute(
+            select(self.settings.c.key)
+            .where(self.settings.c.key == _SHANGHAI_TIMEZONE_MIGRATION_KEY)
+            .limit(1)
+        ).scalar_one_or_none()
+        if existing is not None:
+            return
+
+        timestamp_columns = {
+            self.users: ("time_created", "time_updated"),
+            self.sessions: ("expires_at", "revoked_at", "time_created", "last_seen_at"),
+            self.settings: ("time_updated",),
+            self.update_assets: ("time_created", "time_updated"),
+            self.feedback: ("time_created", "time_updated"),
+        }
+        for table, column_names in timestamp_columns.items():
+            primary_key = next(iter(table.primary_key.columns))
+            columns = [primary_key, *(table.c[name] for name in column_names)]
+            rows = sync_conn.execute(select(*columns)).mappings().all()
+            for row in rows:
+                values = {
+                    name: row[name] + timedelta(hours=8)
+                    for name in column_names
+                    if row[name] is not None
+                }
+                if not values:
+                    continue
+                sync_conn.execute(
+                    update(table)
+                    .where(primary_key == row[primary_key.name])
+                    .values(**values)
+                )
+
+        now = shanghai_now()
+        sync_conn.execute(
+            insert(self.settings).values(
+                key=_SHANGHAI_TIMEZONE_MIGRATION_KEY,
+                value=json.dumps(
+                    {
+                        "timezone": "Asia/Shanghai",
+                        "applied_at": now.isoformat(),
+                    },
+                    ensure_ascii=False,
+                ),
+                time_updated=now,
+            )
+        )
+
     async def create_session(
         self,
         user_id: str,
@@ -537,7 +589,7 @@ class CompanyAuthStore:
         user_agent: str = "",
     ) -> CompanySession:
         token = generate_session_token()
-        now = _utcnow()
+        now = shanghai_now()
         expires_at = now + timedelta(days=self.session_days)
         session_id = generate_ulid()
         async with self.engine.begin() as conn:
@@ -570,7 +622,7 @@ class CompanyAuthStore:
     async def get_session_context(self, token: str) -> CompanySessionContext | None:
         if not token:
             return None
-        now = _utcnow()
+        now = shanghai_now()
         token_digest = hash_token(token)
         async with self.engine.begin() as conn:
             result = await conn.execute(
@@ -626,7 +678,7 @@ class CompanyAuthStore:
                         self.sessions.c.revoked_at.is_(None),
                     )
                 )
-                .values(revoked_at=_utcnow())
+                .values(revoked_at=shanghai_now())
             )
             return (result.rowcount or 0) > 0
 
@@ -640,7 +692,7 @@ class CompanyAuthStore:
     ) -> int:
         if not session_id:
             return 0
-        now = _utcnow()
+        now = shanghai_now()
         async with self.engine.begin() as conn:
             result = await conn.execute(
                 update(self.sessions)
@@ -679,7 +731,7 @@ class CompanyAuthStore:
         if clean_user_ids:
             id_conditions.append(self.sessions.c.user_id.in_(clean_user_ids))
         conditions.append(id_conditions[0] if len(id_conditions) == 1 else id_conditions[0] | id_conditions[1])
-        now = _utcnow()
+        now = shanghai_now()
         async with self.engine.begin() as conn:
             result = await conn.execute(
                 update(self.sessions)
@@ -742,7 +794,7 @@ class CompanyAuthStore:
     async def activity_days(self, *, days: int = 30) -> list[CompanyActivityDay]:
         total, sessions = await self.list_sessions(include_revoked=True, limit=10_000)
         del total
-        today = _utcnow().date()
+        today = shanghai_now().date()
         start = today - timedelta(days=max(1, days) - 1)
         buckets: dict[str, dict[str, set[str] | int]] = {
             (start + timedelta(days=offset)).isoformat(): {"users": set(), "sessions": 0}
@@ -799,7 +851,7 @@ class CompanyAuthStore:
             existing=existing_policy,
         )
         payload = json.dumps(self._policy_to_payload(policy), ensure_ascii=False)
-        now = _utcnow()
+        now = shanghai_now()
         async with self.engine.begin() as conn:
             existing = await conn.execute(
                 select(self.settings.c.key).where(self.settings.c.key == "model_policy").limit(1)
@@ -870,7 +922,7 @@ class CompanyAuthStore:
             strict=True,
         )
         payload = json.dumps(self._update_policy_to_payload(policy), ensure_ascii=False)
-        now = _utcnow()
+        now = shanghai_now()
         async with self.engine.begin() as conn:
             existing = await conn.execute(
                 select(self.settings.c.key).where(self.settings.c.key == "update_policy").limit(1)
@@ -915,7 +967,7 @@ class CompanyAuthStore:
             raise ValueError("Update asset SHA-256 must be 64 hex characters")
 
         asset_id = generate_ulid()
-        now = _utcnow()
+        now = shanghai_now()
         async with self.engine.begin() as conn:
             await conn.execute(
                 insert(self.update_assets).values(
@@ -957,7 +1009,7 @@ class CompanyAuthStore:
         return self._update_asset_from_mapping(row) if row is not None else None
 
     async def increment_update_asset_download_count(self, asset_id: str) -> CompanyUpdateAsset | None:
-        now = _utcnow()
+        now = shanghai_now()
         async with self.engine.begin() as conn:
             existing = await conn.execute(
                 select(self.update_assets.c.download_count)
@@ -995,7 +1047,7 @@ class CompanyAuthStore:
             raise ValueError("Feedback image SHA-256 must be 64 hex characters")
 
         feedback_id = generate_ulid()
-        now = _utcnow()
+        now = shanghai_now()
         async with self.engine.begin() as conn:
             await conn.execute(
                 insert(self.feedback).values(
@@ -1061,10 +1113,10 @@ class CompanyAuthStore:
             user_display_name=row["user_display_name"],
             user_role=row["user_role"],
             user_is_active=bool(row["user_is_active"]),
-            expires_at=row["expires_at"],
-            revoked_at=row["revoked_at"],
-            time_created=row["time_created"],
-            last_seen_at=row["last_seen_at"],
+            expires_at=as_shanghai(row["expires_at"]),
+            revoked_at=as_shanghai(row["revoked_at"]) if row["revoked_at"] is not None else None,
+            time_created=as_shanghai(row["time_created"]),
+            last_seen_at=as_shanghai(row["last_seen_at"]),
             device_id=row["device_id"] or "",
             device_name=row["device_name"] or "",
             platform=row["platform"] or "",
@@ -1092,8 +1144,8 @@ class CompanyAuthStore:
             uploaded_by_email=row["uploaded_by_email"],
             uploaded_by_display_name=row["uploaded_by_display_name"],
             download_count=int(row["download_count"] or 0),
-            time_created=row["time_created"],
-            time_updated=row["time_updated"],
+            time_created=as_shanghai(row["time_created"]),
+            time_updated=as_shanghai(row["time_updated"]),
         )
 
     @staticmethod
@@ -1132,8 +1184,8 @@ class CompanyAuthStore:
             image_mime_type=row["image_mime_type"],
             image_size_bytes=int(row["image_size_bytes"] or 0),
             image_sha256=row["image_sha256"],
-            time_created=row["time_created"],
-            time_updated=row["time_updated"],
+            time_created=as_shanghai(row["time_created"]),
+            time_updated=as_shanghai(row["time_updated"]),
         )
 
     @staticmethod

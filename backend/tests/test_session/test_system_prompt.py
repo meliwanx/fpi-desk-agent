@@ -48,7 +48,7 @@ class TestSystemPrompt:
         assert "software engineering" in prompt.lower() or "tool" in prompt.lower()
         assert "聚光办公助理" in prompt
         assert "Yakyak" not in prompt
-        assert "OpenYak agent assistant" not in prompt
+        assert "fpi-agent agent assistant" not in prompt
 
     def test_includes_environment(self):
         ar = AgentRegistry()

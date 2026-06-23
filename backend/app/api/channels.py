@@ -1,7 +1,7 @@
 """Channels API — manage in-process messaging platform channels.
 
 Replaces the old OpenClaw-based system with nanobot's native channel
-architecture running directly inside OpenYak (no external Node.js process).
+architecture running directly inside fpi-agent (no external Node.js process).
 """
 
 from __future__ import annotations

@@ -7,8 +7,6 @@ import functools
 import logging
 from typing import Any
 
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
@@ -38,6 +36,7 @@ from app.schemas.chat import (
     TaskBatchRequest,
 )
 from app.session.compaction import run_compaction
+from app.utils.timezone import shanghai_now
 from app.session.manager import get_session
 from app.session.manager import delete_messages_after, update_message_file_parts, update_message_text
 from app.session.processor import run_generation
@@ -392,7 +391,7 @@ async def start_compaction(
                 async with db.begin():
                     session = await get_session(db, body.session_id)
                     if session is not None:
-                        session.time_compacting = datetime.now(timezone.utc)
+                        session.time_compacting = shanghai_now()
 
             result = await run_compaction(
                 body.session_id,

@@ -1,6 +1,6 @@
 """OpenAI Subscription provider — uses ChatGPT Plus/Pro/Team subscription via WHAM API.
 
-Translates between OpenAI Chat Completions format (used internally by OpenYak)
+Translates between OpenAI Chat Completions format (used internally by fpi-agent)
 and the WHAM Responses API (https://chatgpt.com/backend-api/codex/responses).
 """
 

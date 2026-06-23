@@ -1,4 +1,4 @@
-"""Plugin system — load Claude knowledge-work-plugins into OpenYak.
+"""Plugin system — load Claude knowledge-work-plugins into fpi-agent.
 
 Bundled plugins ship with the backend in ``app/data/plugins/``.
 Users can add more in ``.openyak/plugins/`` (project-level) or
@@ -19,7 +19,7 @@ _BUNDLED_PLUGINS_DIR = Path(__file__).resolve().parent.parent / "data" / "plugin
 
 
 def load_plugins(project_dir: str | None = None) -> PluginLoadResult:
-    """Scan for Claude-format plugins and convert them to OpenYak objects.
+    """Scan for Claude-format plugins and convert them to fpi-agent objects.
 
     Search order (lowest → highest priority):
       1. Bundled plugins:  app/data/plugins/

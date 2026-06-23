@@ -1,10 +1,10 @@
-# OpenYak Code of Conduct
+# fpi-agent Code of Conduct
 
 ## Our Pledge
 
-OpenYak is an open source project for people who want to build, use, test, and improve local-first AI tooling. We are committed to keeping project spaces constructive, respectful, and useful for contributors and users.
+fpi-agent is an open source project for people who want to build, use, test, and improve local-first AI tooling. We are committed to keeping project spaces constructive, respectful, and useful for contributors and users.
 
-This Code of Conduct applies to all OpenYak project spaces, including GitHub issues, pull requests, discussions, comments, releases, and any other official community channels.
+This Code of Conduct applies to all fpi-agent project spaces, including GitHub issues, pull requests, discussions, comments, releases, and any other official community channels.
 
 ## Expected Behavior
 
@@ -52,4 +52,4 @@ Security vulnerabilities must not be reported in public issues. Please follow th
 
 ## Scope
 
-This Code of Conduct applies within OpenYak project spaces. It may also apply outside project spaces when behavior directly targets OpenYak contributors, maintainers, users, or the health of the project community.
+This Code of Conduct applies within fpi-agent project spaces. It may also apply outside project spaces when behavior directly targets fpi-agent contributors, maintainers, users, or the health of the project community.

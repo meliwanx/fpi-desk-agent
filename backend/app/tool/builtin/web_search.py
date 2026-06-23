@@ -1,4 +1,4 @@
-"""Web search tool — search via OpenYak Proxy (Serper/Google) or DuckDuckGo fallback.
+"""Web search tool — search via fpi-agent Proxy (Serper/Google) or DuckDuckGo fallback.
 
 When proxy mode is active, searches go through the deployed proxy which
 holds the Serper API key and handles hosted-search limits. Without proxy, falls
@@ -170,7 +170,7 @@ class WebSearchTool(ToolDefinition):
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.get(
                     f"https://html.duckduckgo.com/html/?q={quote_plus(query)}",
-                    headers={"User-Agent": "OpenYak/0.1"},
+                    headers={"User-Agent": "fpi-agent/0.1"},
                 )
                 resp.raise_for_status()
 

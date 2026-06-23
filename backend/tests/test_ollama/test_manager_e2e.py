@@ -72,7 +72,7 @@ async def _chat_once(base_url: str, model: str) -> str:
             json={
                 "model": model,
                 "stream": False,
-                "messages": [{"role": "user", "content": "Reply with exactly: OpenYak Ollama OK"}],
+                "messages": [{"role": "user", "content": "Reply with exactly: fpi-agent Ollama OK"}],
                 "options": {"temperature": 0},
             },
         )
@@ -92,7 +92,7 @@ async def test_install_chat_and_uninstall_with_small_qwen_model(tmp_path, monkey
 
         await _pull_model(base_url, _MODEL)
         reply = await _chat_once(base_url, _MODEL)
-        assert "OpenYak" in reply
+        assert "fpi-agent" in reply
         assert "OK" in reply
 
         result = await mgr.uninstall(delete_models=True)

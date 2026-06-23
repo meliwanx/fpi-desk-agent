@@ -70,7 +70,7 @@ async def _run(model: str, calls: int, env_file: str | None) -> list[UsageRow]:
         base_url="https://openrouter.ai/api/v1",
         default_headers={
             "HTTP-Referer": "https://github.com/openyak/desktop",
-            "X-Title": "OpenYak",
+            "X-Title": "fpi-agent",
         },
     )
 

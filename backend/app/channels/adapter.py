@@ -1,7 +1,7 @@
-"""OpenYak agent adapter — bridges the message bus to OpenYak's generation pipeline.
+"""fpi-agent agent adapter — bridges the message bus to fpi-agent's generation pipeline.
 
 Replaces nanobot's AgentLoop: consumes InboundMessage from the bus,
-runs OpenYak's full agent (run_generation), and publishes OutboundMessage.
+runs fpi-agent's full agent (run_generation), and publishes OutboundMessage.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ _MAX_CONCURRENT = 3
 
 
 class AgentAdapter:
-    """Consumes messages from the bus and runs OpenYak's agent pipeline.
+    """Consumes messages from the bus and runs fpi-agent's agent pipeline.
 
     Manages per-session serialization and cross-session concurrency.
     """
@@ -72,7 +72,7 @@ class AgentAdapter:
                 await asyncio.sleep(1)
 
     async def _handle(self, msg: InboundMessage) -> None:
-        """Process a single inbound message through OpenYak's agent."""
+        """Process a single inbound message through fpi-agent's agent."""
         session_key = msg.session_key
 
         # Per-session lock ensures serial processing
@@ -98,7 +98,7 @@ class AgentAdapter:
         ))
 
     async def _call_agent(self, msg: InboundMessage) -> str:
-        """Call OpenYak's run_generation pipeline and collect the response text."""
+        """Call fpi-agent's run_generation pipeline and collect the response text."""
         # Lazy imports to avoid circular dependencies at module level
         from app.dependencies import (
             get_agent_registry,

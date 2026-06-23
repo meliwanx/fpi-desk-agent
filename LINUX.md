@@ -1,10 +1,10 @@
-# Linux Support for OpenYak Desktop
+# Linux Support for fpi-agent Desktop
 
-OpenYak desktop app now includes full Linux support with native packages for major distributions.
+fpi-agent desktop app now includes full Linux support with native packages for major distributions.
 
 ## Supported Distributions
 
-OpenYak has been tested and is officially supported on:
+fpi-agent has been tested and is officially supported on:
 
 - **Ubuntu** 22.04 LTS and later
 - **Fedora** 38 and later
@@ -18,10 +18,10 @@ Other distributions may work but are not officially tested.
 
 ### Debian/Ubuntu-based distributions (.deb)
 
-Download the `.deb` package from the [releases page](https://github.com/openyak/openyak/releases) and install:
+Download the `.deb` package from the [releases page](https://github.com/meliwanx/fpi-desk-agent/releases) and install:
 
 ```bash
-sudo dpkg -i openyak_*.deb
+sudo dpkg -i fpi-agent_*.deb
 sudo apt-get install -f  # Install dependencies if needed
 ```
 
@@ -29,16 +29,16 @@ Or double-click the `.deb` file in your file manager to install via the Software
 
 ### Fedora/RHEL-based distributions (.rpm)
 
-Download the `.rpm` package from the [releases page](https://github.com/openyak/openyak/releases) and install:
+Download the `.rpm` package from the [releases page](https://github.com/meliwanx/fpi-desk-agent/releases) and install:
 
 ```bash
-sudo dnf install openyak-*.rpm
+sudo dnf install fpi-agent-*.rpm
 ```
 
 Or:
 
 ```bash
-sudo rpm -i openyak-*.rpm
+sudo rpm -i fpi-agent-*.rpm
 ```
 
 ## System Requirements
@@ -62,7 +62,7 @@ sudo dnf install webkit2gtk4.1 libayatana-appindicator-gtk3 zenity
 
 ## Running from Source
 
-To build and run OpenYak from source on Linux:
+To build and run fpi-agent from source on Linux:
 
 ### 1. Install Build Dependencies
 
@@ -131,8 +131,8 @@ source $HOME/.cargo/env
 
 ```bash
 # Clone the repository
-git clone https://github.com/openyak/openyak.git
-cd openyak
+git clone https://github.com/meliwanx/fpi-desk-agent.git
+cd fpi-desk-agent
 
 # Install frontend dependencies
 cd frontend
@@ -169,7 +169,7 @@ All features available on Windows and macOS are supported on Linux:
 - ✅ System tray integration (using Ayatana indicators)
 - ✅ Native file dialogs (via zenity)
 - ✅ Auto-updates
-- ✅ Deep linking (openyak:// protocol)
+- ✅ Deep linking (fpi-agent:// protocol)
 - ✅ Window state persistence
 - ✅ Keyboard shortcuts
 - ✅ Python backend with embedded Node.js runtime
@@ -186,7 +186,7 @@ All features available on Windows and macOS are supported on Linux:
 - If zenity is not available, file operations may not work correctly
 
 ### Wayland vs X11
-- OpenYak supports both Wayland and X11
+- fpi-agent supports both Wayland and X11
 - Some features (like window positioning) may behave differently under Wayland due to compositor restrictions
 - If you experience stability issues on Wayland, you can force X11 mode (see "Environment Overrides" below)
 
@@ -207,7 +207,7 @@ The app sets several environment variables by default to improve compatibility. 
 1. Check system dependencies are installed (see "Required System Packages" above)
 2. Run from terminal to see error messages:
    ```bash
-   openyak  # If installed via .deb/.rpm
+   fpi-agent  # If installed via .deb/.rpm
    ```
 
 ### System tray icon not showing
@@ -235,12 +235,12 @@ The app sets several environment variables by default to improve compatibility. 
 
 **Debian/Ubuntu:**
 ```bash
-sudo apt-get remove openyak
+sudo apt-get remove fpi-agent
 ```
 
 **Fedora:**
 ```bash
-sudo dnf remove openyak
+sudo dnf remove fpi-agent
 ```
 
 
@@ -248,12 +248,12 @@ sudo dnf remove openyak
 
 User data is stored in:
 ```
-~/.local/share/openyak-desktop/
+~/.local/share/fpi-agent-desktop/
 ```
 
 Configuration files:
 ```
-~/.config/openyak-desktop/
+~/.config/fpi-agent-desktop/
 ```
 
 ## Support
@@ -261,7 +261,7 @@ Configuration files:
 If you encounter issues on Linux:
 
 1. Check this document for known issues and solutions
-2. Search existing [GitHub Issues](https://github.com/openyak/openyak/issues)
+2. Search existing [GitHub Issues](https://github.com/meliwanx/fpi-desk-agent/issues)
 3. Create a new issue with:
    - Your Linux distribution and version
    - Desktop environment (GNOME, KDE, etc.)

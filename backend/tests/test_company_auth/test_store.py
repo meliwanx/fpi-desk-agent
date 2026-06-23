@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
+from sqlalchemy import select
 
 from app.company_auth.store import CompanyAuthStore
+
+
+SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 @pytest.mark.asyncio
@@ -31,6 +37,121 @@ async def test_bootstrap_creates_admin_and_allows_login(tmp_path):
         current = await store.get_session_user(session.token)
         assert current is not None
         assert current.email == "admin@example.com"
+    finally:
+        await store.dispose()
+
+
+@pytest.mark.asyncio
+async def test_company_store_writes_database_timestamps_in_shanghai_time(tmp_path):
+    store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
+    await store.startup()
+    try:
+        user = await store.create_user(
+            email="employee@example.com",
+            display_name="Employee One",
+            password="EmployeePassword123!",
+            role="user",
+        )
+        session = await store.create_session(user.id)
+
+        async with store.engine.connect() as conn:
+            row = (
+                await conn.execute(
+                    select(
+                        store.sessions.c.time_created,
+                        store.sessions.c.last_seen_at,
+                        store.sessions.c.expires_at,
+                    ).where(store.sessions.c.id == session.id)
+                )
+            ).mappings().one()
+
+        now = datetime.now(SHANGHAI)
+        for field_name in ("time_created", "last_seen_at"):
+            value = row[field_name]
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=SHANGHAI)
+            else:
+                value = value.astimezone(SHANGHAI)
+            assert abs(value - now) < timedelta(minutes=2)
+
+        expires_at = row["expires_at"]
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=SHANGHAI)
+        else:
+            expires_at = expires_at.astimezone(SHANGHAI)
+        assert (
+            timedelta(days=29, hours=23, minutes=58)
+            < expires_at - now
+            < timedelta(days=30, minutes=2)
+        )
+
+        _, records = await store.list_sessions(user_id=user.id)
+        assert len(records) == 1
+        assert records[0].time_created.tzinfo == SHANGHAI
+        assert records[0].last_seen_at.tzinfo == SHANGHAI
+    finally:
+        await store.dispose()
+
+
+@pytest.mark.asyncio
+async def test_company_store_migrates_existing_sqlite_timestamps_once(tmp_path):
+    store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
+    old_utc_wall_time = datetime(2026, 1, 2, 3, 4, 5)
+    async with store.engine.begin() as conn:
+        await conn.run_sync(store.metadata.create_all)
+        await conn.execute(
+            store.users.insert().values(
+                id="user_1",
+                email="employee@example.com",
+                display_name="Employee One",
+                password_hash="hash",
+                role="user",
+                is_active=True,
+                time_created=old_utc_wall_time,
+                time_updated=old_utc_wall_time,
+            )
+        )
+        await conn.execute(
+            store.sessions.insert().values(
+                id="session_1",
+                user_id="user_1",
+                token_hash="token_hash",
+                expires_at=old_utc_wall_time,
+                revoked_at=None,
+                time_created=old_utc_wall_time,
+                last_seen_at=old_utc_wall_time,
+                device_id="device_1",
+                device_name="Office PC",
+                platform="windows",
+                app_version="1.0.0",
+                ip_address="127.0.0.1",
+                user_agent="pytest",
+                revoked_by_user_id="",
+                revoked_by_email="",
+                revoked_reason="",
+            )
+        )
+
+    try:
+        await store.startup()
+        async with store.engine.connect() as conn:
+            migrated = (
+                await conn.execute(
+                    select(store.sessions.c.last_seen_at).where(store.sessions.c.id == "session_1")
+                )
+            ).scalar_one()
+
+        assert migrated == old_utc_wall_time + timedelta(hours=8)
+
+        await store.startup()
+        async with store.engine.connect() as conn:
+            migrated_again = (
+                await conn.execute(
+                    select(store.sessions.c.last_seen_at).where(store.sessions.c.id == "session_1")
+                )
+            ).scalar_one()
+
+        assert migrated_again == migrated
     finally:
         await store.dispose()
 

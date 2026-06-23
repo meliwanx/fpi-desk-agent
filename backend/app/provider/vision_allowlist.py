@@ -43,7 +43,7 @@ text-only (``ministral-3`` sees), ``nova-micro`` is text-only.
 
 Maintaining it
 --------------
-To teach OpenYak about a new vision model, add a pattern to ``_ALLOW`` (grouped
+To teach fpi-agent about a new vision model, add a pattern to ``_ALLOW`` (grouped
 by vendor). Patterns are ``re.search``-ed against a lowercased ``"id\\nname"``
 haystack, so they match whether or not the id carries a ``vendor/`` prefix
 (``gpt-4o`` and OpenRouter's ``openai/gpt-4o`` both hit). Add a pattern to

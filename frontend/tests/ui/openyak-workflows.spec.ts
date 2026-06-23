@@ -1,13 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
-  mockOpenYakApi,
-  seedOpenYakStorage,
-  type OpenYakMockState,
+  mockFpiAgentApi,
+  seedFpiAgentStorage,
+  type FpiAgentMockState,
 } from "./fixtures/openyak-api";
 
-async function setupMockedApp(page: Page): Promise<OpenYakMockState> {
-  await seedOpenYakStorage(page);
-  return mockOpenYakApi(page);
+async function setupMockedApp(page: Page): Promise<FpiAgentMockState> {
+  await seedFpiAgentStorage(page);
+  return mockFpiAgentApi(page);
 }
 
 async function expectNoAppCrash(page: Page) {
@@ -24,7 +24,7 @@ async function sendPrompt(page: Page, text: string) {
   await promptResponse;
 }
 
-test.describe("OpenYak complete GUI workflows", () => {
+test.describe("fpi-agent complete GUI workflows", () => {
   test.describe.configure({ timeout: 60_000 });
 
   test("chat task journey: workspace, attachment, mention, send, persist, search, reopen", async ({
@@ -37,7 +37,7 @@ test.describe("OpenYak complete GUI workflows", () => {
     );
     await expect(
       page.getByRole("heading", {
-        name: /What should (OpenYak help you do|we do in)/i,
+        name: /What should (fpi-agent help you do|we do in)/i,
       }),
     ).toBeVisible();
     await expect(
@@ -244,13 +244,13 @@ test.describe("OpenYak complete GUI workflows", () => {
     await expect(page.getByRole("heading", { name: "New Task" })).toBeVisible();
     await expect(page.locator("select")).toContainText("GPT-5.5");
     await page
-      .getByPlaceholder("What should OpenYak do?")
+      .getByPlaceholder("What should fpi-agent do?")
       .fill("Check the release notes from my phone");
 
     const promptResponse = page.waitForResponse(
       (res) => res.url().includes("/api/chat/prompt") && res.status() === 200,
     );
-    await page.getByPlaceholder("What should OpenYak do?").press("Enter");
+    await page.getByPlaceholder("What should fpi-agent do?").press("Enter");
     await promptResponse;
 
     await expect(page).toHaveURL(

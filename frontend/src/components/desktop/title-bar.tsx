@@ -8,7 +8,7 @@ import { IS_DESKTOP, TITLE_BAR_HEIGHT } from "@/lib/constants";
 import { desktopAPI } from "@/lib/tauri-api";
 import { useIsMacOS } from "@/hooks/use-platform";
 
-function OpenYakLogo() {
+function FpiAgentLogo() {
   return (
     <Image
       src="/favicon.svg"
@@ -70,7 +70,7 @@ export function TitleBar() {
       }}
     >
       <div className="flex items-center gap-2 pl-3 h-full shrink-0">
-        <OpenYakLogo />
+        <FpiAgentLogo />
         <span className="text-xs font-medium text-[var(--text-secondary)] tracking-wide">
           fpi-agent
         </span>

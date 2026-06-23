@@ -1,7 +1,7 @@
 """Base channel interface for chat platforms.
 
 Ported from nanobot.channels.base (MIT license).
-Adapted for OpenYak: removed loguru dependency, uses stdlib logging.
+Adapted for fpi-agent: removed loguru dependency, uses stdlib logging.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ class BaseChannel(ABC):
     Abstract base class for chat channel implementations.
 
     Each channel (Telegram, Discord, etc.) should implement this interface
-    to integrate with the OpenYak message bus.
+    to integrate with the fpi-agent message bus.
     """
 
     name: str = "base"

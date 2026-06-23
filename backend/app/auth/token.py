@@ -1,4 +1,4 @@
-"""Token generation, storage, and validation for OpenYak's local API.
+"""Token generation, storage, and validation for fpi-agent's local API.
 
 Two tokens live here:
 
@@ -6,7 +6,7 @@ Two tokens live here:
   ``<data_dir>/session_token.json`` with mode 0600, handed to the desktop
   shell via the Tauri IPC bridge. Its purpose is to make the local HTTP
   API unreachable from processes that do not share the filesystem
-  identity of the user who launched OpenYak. On a multi-user host, user
+  identity of the user who launched fpi-agent. On a multi-user host, user
   Ana cannot read user Pepe's session token and therefore cannot call
   Pepe's backend even though both are on the same loopback interface.
 

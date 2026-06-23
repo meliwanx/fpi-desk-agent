@@ -6,7 +6,7 @@ import hashlib
 import json
 import mimetypes
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +39,7 @@ from app.models.audit import (
     AuditUsage,
 )
 from app.utils.id import generate_ulid
+from app.utils.timezone import as_shanghai, shanghai_now
 
 router = APIRouter()
 
@@ -573,7 +574,7 @@ async def list_admin_company_sessions(
         limit=limit,
         offset=offset,
     )
-    now = datetime.now(timezone.utc)
+    now = shanghai_now()
     presence = getattr(request.app.state, "company_presence", None)
     online_session_ids = await presence.online_session_ids() if presence is not None and presence.available else set()
     items = [
@@ -817,10 +818,8 @@ def _public_feedback(request: Request, feedback: CompanyFeedback) -> AdminFeedba
     )
 
 
-def _as_aware_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+def _datetime_iso(value: datetime) -> str:
+    return as_shanghai(value).isoformat()
 
 
 def _is_session_online(
@@ -829,14 +828,14 @@ def _is_session_online(
     now: datetime | None = None,
     online_session_ids: set[str] | None = None,
 ) -> bool:
-    current = now or datetime.now(timezone.utc)
+    current = as_shanghai(now) if now is not None else shanghai_now()
     if session.revoked_at is not None:
         return False
-    if _as_aware_utc(session.expires_at) <= current:
+    if as_shanghai(session.expires_at) <= current:
         return False
     if online_session_ids is not None and session.id in online_session_ids:
         return True
-    return _as_aware_utc(session.last_seen_at) >= current - timedelta(seconds=120)
+    return as_shanghai(session.last_seen_at) >= current - timedelta(seconds=120)
 
 
 def _public_company_session(
@@ -1219,8 +1218,8 @@ async def list_audit_sessions(
                 "user_display_name": row.user_display_name,
                 "model_id": row.model_id,
                 "provider_id": row.provider_id,
-                "time_created": row.time_created.isoformat(),
-                "time_updated": row.time_updated.isoformat(),
+                "time_created": _datetime_iso(row.time_created),
+                "time_updated": _datetime_iso(row.time_updated),
             }
             for row in rows
         ],
@@ -1233,7 +1232,7 @@ async def get_audit_summary(
     db: DbDep,
 ) -> dict[str, Any]:
     _require_admin(request)
-    now = datetime.now(timezone.utc)
+    now = shanghai_now()
     settings = getattr(request.app.state, "settings", None)
     activity_days = []
     online_users: set[str] = set()
@@ -1407,8 +1406,8 @@ async def list_audit_risks(
                 ),
                 "workspace": session.workspace if session is not None else "",
                 "session_title": session.title if session is not None else "",
-                "time_created": finding.time_created.isoformat(),
-                "time_updated": finding.time_updated.isoformat(),
+                "time_created": _datetime_iso(finding.time_created),
+                "time_updated": _datetime_iso(finding.time_updated),
             }
             for finding, session in rows
         ],
@@ -1481,8 +1480,8 @@ async def list_audit_tool_calls(
                 ),
                 "workspace": session.workspace if session is not None else "",
                 "session_title": session.title if session is not None else "",
-                "time_created": tool_call.time_created.isoformat(),
-                "time_updated": tool_call.time_updated.isoformat(),
+                "time_created": _datetime_iso(tool_call.time_created),
+                "time_updated": _datetime_iso(tool_call.time_updated),
             }
             for tool_call, session in rows
         ],
@@ -1557,7 +1556,7 @@ async def get_audit_session_messages(
                 "id": message.local_message_id,
                 "role": message.role,
                 "data": message.data,
-                "time_created": message.time_created.isoformat(),
+                "time_created": _datetime_iso(message.time_created),
                 "parts": [
                     {
                         "id": part.local_part_id,
@@ -1617,7 +1616,7 @@ async def get_audit_session_messages(
                             if part.local_part_id in files_by_part
                             else None
                         ),
-                        "time_created": part.time_created.isoformat(),
+                        "time_created": _datetime_iso(part.time_created),
                     }
                     for part in parts_by_message.get(message.local_message_id, [])
                 ],

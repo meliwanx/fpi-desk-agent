@@ -57,8 +57,8 @@ def test_markdown_code_block_preserved_in_pre_code():
 
 
 def test_markdown_link_to_anchor():
-    out = markdown_to_telegram_html("[OpenYak](https://example.com)")
-    assert '<a href="https://example.com">OpenYak</a>' in out
+    out = markdown_to_telegram_html("[fpi-agent](https://example.com)")
+    assert '<a href="https://example.com">fpi-agent</a>' in out
 
 
 def test_markdown_headers_stripped_to_text():

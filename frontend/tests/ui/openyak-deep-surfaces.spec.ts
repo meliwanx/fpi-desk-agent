@@ -1,18 +1,18 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
-  mockOpenYakApi,
-  seedOpenYakStorage,
-  type OpenYakMockOptions,
-  type OpenYakMockState,
+  mockFpiAgentApi,
+  seedFpiAgentStorage,
+  type FpiAgentMockOptions,
+  type FpiAgentMockState,
 } from "./fixtures/openyak-api";
 
 async function setupMockedApp(
   page: Page,
-  options?: OpenYakMockOptions,
-  seedOptions?: Parameters<typeof seedOpenYakStorage>[1],
-): Promise<OpenYakMockState> {
-  await seedOpenYakStorage(page, seedOptions);
-  return mockOpenYakApi(page, options);
+  options?: FpiAgentMockOptions,
+  seedOptions?: Parameters<typeof seedFpiAgentStorage>[1],
+): Promise<FpiAgentMockState> {
+  await seedFpiAgentStorage(page, seedOptions);
+  return mockFpiAgentApi(page, options);
 }
 
 async function expectNoAppCrash(page: Page) {
@@ -44,7 +44,7 @@ async function seedManagedProvider(page: Page) {
   });
 }
 
-test.describe("OpenYak deep claimed-feature GUI surfaces", () => {
+test.describe("fpi-agent deep claimed-feature GUI surfaces", () => {
   test.describe.configure({ timeout: 90_000 });
   test.skip(({ isMobile }) => isMobile, "Desktop-only surfaces are covered alongside separate mobile GUI workflows.");
 
@@ -257,7 +257,7 @@ test.describe("OpenYak deep claimed-feature GUI surfaces", () => {
       hasCompletedOnboarding: false,
     });
     await onboarding.goto("/c/new");
-    await expect(onboarding.getByRole("heading", { name: "Welcome to OpenYak" })).toBeVisible();
+    await expect(onboarding.getByRole("heading", { name: "Welcome to fpi-agent" })).toBeVisible();
 
     await onboarding.getByRole("button", { name: "Set Up Provider" }).click();
     await expect(onboarding).toHaveURL(/\/settings\?tab=providers$/);

@@ -1,4 +1,4 @@
-/** Lightweight fetch wrapper for the OpenYak backend API. */
+/** Lightweight fetch wrapper for the fpi-agent backend API. */
 
 import {
   getBackendToken,

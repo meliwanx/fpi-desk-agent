@@ -1,6 +1,6 @@
 """CSRF protection via Origin/Referer validation.
 
-OpenYak's HTTP server binds to 127.0.0.1, so it is reachable from any webpage
+fpi-agent's HTTP server binds to 127.0.0.1, so it is reachable from any webpage
 the user visits — the browser acts as a proxy into loopback. Without server-side
 origin validation, a malicious page can issue cross-site POSTs to privileged
 endpoints (shutdown, chat-prompt-with-bash, config reads, etc.). Neither
@@ -112,7 +112,7 @@ def _origin_allowed(
     extra: Iterable[str],
     runtime: Iterable[str] = (),
 ) -> bool:
-    """Return True if ``origin`` is an OpenYak-controlled frontend origin.
+    """Return True if ``origin`` is an fpi-agent-controlled frontend origin.
 
     Per RFC 6454, origin scheme and host compare case-insensitively — browsers
     normalize before sending, but we defensively normalize on our side too.
@@ -208,7 +208,7 @@ class CsrfProtectionMiddleware:
 
     Pass-through for safe methods (GET/HEAD/OPTIONS) and for requests without
     any browser-attached Origin/Referer (native clients). Rejects mutating
-    requests whose Origin/Referer does not match the OpenYak frontend
+    requests whose Origin/Referer does not match the fpi-agent frontend
     allowlist, and rejects state-changing requests carrying a body with an
     unexpected Content-Type.
 
@@ -250,7 +250,7 @@ class CsrfProtectionMiddleware:
         source = _source_origin(headers)
         if source is not None:
             # Reject the literal "null" origin (sandboxed iframes, data: URLs,
-            # certain redirects — never a legitimate OpenYak frontend).
+            # certain redirects — never a legitimate fpi-agent frontend).
             if source == "null":
                 await _reject(send, scope, "null origin is not allowed", source=source)
                 return

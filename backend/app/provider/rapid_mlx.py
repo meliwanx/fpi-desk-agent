@@ -25,7 +25,7 @@ LEGACY_DEFAULT_MODEL = "default"
 
 
 def normalize_rapid_mlx_model(name: str | None) -> str:
-    """Map old OpenYak defaults to a real rapid-mlx alias."""
+    """Map old fpi-agent defaults to a real rapid-mlx alias."""
     value = (name or "").strip().removeprefix(f"{PROVIDER_ID}/").strip()
     if not value or value == LEGACY_DEFAULT_MODEL:
         return DEFAULT_MODEL
