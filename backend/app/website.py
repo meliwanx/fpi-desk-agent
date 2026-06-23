@@ -261,28 +261,6 @@ def _website_html() -> str:
       font-size: 13px;
       font-weight: 700;
     }
-    .support-strip {
-      margin-top: 18px;
-      display: grid;
-      grid-template-columns: auto minmax(0, 1fr);
-      gap: 12px;
-      align-items: start;
-      max-width: 640px;
-      padding: 14px 16px;
-      border: 1px solid #cfe0ff;
-      border-radius: 8px;
-      background: #f5f9ff;
-    }
-    .support-strip strong {
-      color: var(--blue-dark);
-      font-size: 14px;
-      white-space: nowrap;
-    }
-    .support-strip span {
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.7;
-    }
     .download-panel {
       margin-top: 32px;
       padding: 18px;
@@ -531,7 +509,7 @@ def _website_html() -> str:
     }
     .feature-grid {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 16px;
     }
     .section-kicker {
@@ -568,6 +546,158 @@ def _website_html() -> str:
       line-height: 1.7;
       font-size: 14px;
     }
+    .analysis-band {
+      border-top: 1px solid rgba(21, 32, 51, 0.08);
+      background: #f7fafc;
+    }
+    .analysis-layout {
+      display: grid;
+      grid-template-columns: 0.92fr 1.08fr;
+      gap: 28px;
+      align-items: stretch;
+    }
+    .analysis-list {
+      display: grid;
+      gap: 12px;
+      margin-top: 24px;
+    }
+    .analysis-item {
+      display: grid;
+      grid-template-columns: 38px minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .analysis-item b {
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      border-radius: 8px;
+      background: #edf7f8;
+      color: var(--teal);
+      font-size: 15px;
+    }
+    .analysis-item h3 {
+      margin: 0 0 6px;
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+    .analysis-item p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+    .analysis-preview {
+      border: 1px solid #cdd7e6;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 22px 58px rgba(34, 47, 72, 0.12);
+      overflow: hidden;
+    }
+    .analysis-toolbar {
+      min-height: 48px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 0 16px;
+      background: #f5f7fb;
+      color: #3f4d64;
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .analysis-body {
+      padding: 18px;
+      display: grid;
+      gap: 16px;
+    }
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .kpi {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfcfe;
+    }
+    .kpi strong {
+      display: block;
+      color: var(--ink);
+      font-size: 20px;
+      margin-bottom: 4px;
+    }
+    .kpi span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .sheet {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .sheet-row {
+      display: grid;
+      grid-template-columns: 1.1fr 0.8fr 1fr 0.9fr;
+      min-height: 34px;
+      border-bottom: 1px solid #e7edf5;
+      background: #fff;
+    }
+    .sheet-row:last-child { border-bottom: 0; }
+    .sheet-row.header {
+      min-height: 36px;
+      background: #eef4fb;
+      color: #40506a;
+      font-weight: 800;
+    }
+    .sheet-row span {
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+      border-right: 1px solid #e7edf5;
+      color: #4a5870;
+      font-size: 13px;
+    }
+    .sheet-row span:last-child { border-right: 0; }
+    .cell-bar {
+      width: 100%;
+      height: 8px;
+      border-radius: 999px;
+      background: #dfe7f2;
+      overflow: hidden;
+    }
+    .cell-bar i {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--blue);
+    }
+    .chart-strip {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 8px;
+      align-items: end;
+      min-height: 118px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+    .chart-strip i {
+      display: block;
+      border-radius: 6px 6px 0 0;
+      background: #1768e8;
+      min-height: 24px;
+    }
+    .chart-strip i:nth-child(2n) { background: var(--teal); }
+    .chart-strip i:nth-child(3n) { background: var(--violet); }
     .workflow-band {
       border-top: 1px solid rgba(21, 32, 51, 0.08);
       background: #fbfcfe;
@@ -638,24 +768,6 @@ def _website_html() -> str:
       color: var(--muted);
       font-size: 13px;
     }
-    .support-panel {
-      margin-top: 18px;
-      padding: 18px;
-      border: 1px solid #d7e1ef;
-      border-radius: 8px;
-      background: #fff;
-    }
-    .support-panel strong {
-      display: block;
-      color: var(--blue-dark);
-      margin-bottom: 8px;
-    }
-    .support-panel p {
-      margin: 0;
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.7;
-    }
     footer {
       max-width: 1160px;
       margin: 0 auto;
@@ -676,7 +788,7 @@ def _website_html() -> str:
       h1 { font-size: 42px; }
       .visual-body { grid-template-columns: 1fr; min-height: auto; }
       .mock-sidebar { display: none; }
-      .feature-grid, .security-layout, .workflow-grid { grid-template-columns: 1fr; }
+      .feature-grid, .security-layout, .workflow-grid, .analysis-layout { grid-template-columns: 1fr; }
       .ops-row { grid-template-columns: 1fr; }
     }
     @media (max-width: 560px) {
@@ -686,9 +798,15 @@ def _website_html() -> str:
       .hero-copy { font-size: 16px; }
       .download-button { width: 100%; }
       .segmented { width: 100%; }
-      .task-grid, .metrics { grid-template-columns: 1fr; }
+      .task-grid, .metrics, .kpi-row { grid-template-columns: 1fr; }
       .section-inner { padding: 42px 18px; }
-      .support-strip { grid-template-columns: 1fr; }
+      .sheet-row { grid-template-columns: 1fr; }
+      .sheet-row span {
+        min-height: 32px;
+        border-right: 0;
+        border-bottom: 1px solid #e7edf5;
+      }
+      .sheet-row span:last-child { border-bottom: 0; }
     }
   </style>
 </head>
@@ -702,6 +820,7 @@ def _website_html() -> str:
         </a>
         <div class="nav-links">
           <a href="#features">能力</a>
+          <a href="#analysis">数据分析</a>
           <a href="#workflow">使用方式</a>
           <a href="#security">部署</a>
           <span class="support-link">可视化发展部提供技术支持</span>
@@ -720,10 +839,7 @@ def _website_html() -> str:
             <span class="meta-pill">公司账号登录</span>
             <span class="meta-pill">安装包服务器托管</span>
             <span class="meta-pill">问题反馈闭环</span>
-          </div>
-          <div class="support-strip">
-            <strong>技术支持</strong>
-            <span>可视化发展部提供技术支持，负责官网、客户端版本分发、反馈入口和后台运维能力的持续建设。</span>
+            <span class="meta-pill">Excel 数据分析</span>
           </div>
 
           <div id="download" class="download-panel">
@@ -759,8 +875,8 @@ def _website_html() -> str:
             <div class="mock-main">
               <div class="assistant-card">
                 <h2>今天的办公线索已经归拢</h2>
-                <p>自动整理会议纪要、客户资料和待办事项，同事可以继续追问、生成文档、提交反馈或跟进版本更新。</p>
-                <div class="chips"><span>资料问答</span><span>报告生成</span><span>问题反馈</span><span>版本更新</span></div>
+                <p>自动整理会议纪要、客户资料、Excel 表格和待办事项，同事可以继续追问、生成文档、提交反馈或跟进版本更新。</p>
+                <div class="chips"><span>资料问答</span><span>Excel 分析</span><span>报告生成</span><span>问题反馈</span><span>版本更新</span></div>
               </div>
               <div class="ops-row">
                 <div class="ops-card"><b>使用状态</b><span>管理员可查看日活、在线设备与版本覆盖情况。</span></div>
@@ -770,7 +886,7 @@ def _website_html() -> str:
               <div class="task-grid">
                 <div class="task"><strong>合同要点提取</strong><span class="bar long"></span><span class="bar mid"></span><span class="bar short"></span></div>
                 <div class="task"><strong>会议纪要生成</strong><span class="bar mid"></span><span class="bar long"></span><span class="bar short"></span></div>
-                <div class="task"><strong>内部知识检索</strong><span class="bar long"></span><span class="bar mid"></span><span class="bar mid"></span></div>
+                <div class="task"><strong>Excel 趋势分析</strong><span class="bar long"></span><span class="bar mid"></span><span class="bar mid"></span></div>
                 <div class="task"><strong>问题反馈追踪</strong><span class="bar mid"></span><span class="bar short"></span><span class="bar long"></span></div>
               </div>
             </div>
@@ -785,7 +901,43 @@ def _website_html() -> str:
           <div class="feature-grid">
             <article class="feature"><div class="icon">问</div><h3>资料理解与问答</h3><p>把日常文档、会议记录、客户资料集中处理，快速得到摘要、结论和下一步动作。</p></article>
             <article class="feature"><div class="icon">写</div><h3>报告和纪要生成</h3><p>围绕已有上下文生成可继续编辑的文档内容，让同事把时间放在判断和复核上。</p></article>
+            <article class="feature"><div class="icon">数</div><h3>Excel 数据分析</h3><p>对表格做清洗、汇总、趋势解释和异常定位，帮助同事更快看懂业务数据。</p></article>
             <article class="feature"><div class="icon">管</div><h3>版本和反馈管控</h3><p>管理员统一上传安装包、设置版本号、查看反馈附图和下载次数，客户端保持一致版本节奏。</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section id="analysis" class="analysis-band">
+        <div class="section-inner analysis-layout">
+          <div>
+            <p class="section-kicker">Excel、CSV 和经营明细先交给助手整理</p>
+            <h2 class="section-heading">数据分析更像一个可复用的办公流程</h2>
+            <p class="hero-copy">同事把表格文件放进工作台后，可以让助手先做字段理解、数据清洗、指标汇总和趋势解释，再把结果整理成报告、图表或下一步排查清单。</p>
+            <div class="analysis-list">
+              <article class="analysis-item"><b>清</b><div><h3>表格清洗与合并</h3><p>识别空值、重复项、异常格式和多表字段差异，减少手工整理时间。</p></div></article>
+              <article class="analysis-item"><b>算</b><div><h3>指标汇总与口径说明</h3><p>围绕部门关注的销量、成本、交付、回款等指标生成清晰口径和汇总结果。</p></div></article>
+              <article class="analysis-item"><b>看</b><div><h3>趋势解读与异常定位</h3><p>把 Excel 中难以直接看出的波动、环比变化和异常点转成可讨论的结论。</p></div></article>
+            </div>
+          </div>
+          <div class="analysis-preview" aria-label="数据分析预览">
+            <div class="analysis-toolbar"><span>Excel 数据分析</span><span>自动汇总 · 趋势解释</span></div>
+            <div class="analysis-body">
+              <div class="kpi-row">
+                <div class="kpi"><strong>12.8%</strong><span>本月效率提升</span></div>
+                <div class="kpi"><strong>3 项</strong><span>异常指标待复核</span></div>
+                <div class="kpi"><strong>8 张</strong><span>表格已归并</span></div>
+              </div>
+              <div class="sheet">
+                <div class="sheet-row header"><span>部门</span><span>指标</span><span>进度</span><span>建议</span></div>
+                <div class="sheet-row"><span>生产</span><span>交付达成</span><span><span class="cell-bar"><i style="width: 82%"></i></span></span><span>关注延迟批次</span></div>
+                <div class="sheet-row"><span>销售</span><span>回款跟进</span><span><span class="cell-bar"><i style="width: 64%"></i></span></span><span>补充客户分层</span></div>
+                <div class="sheet-row"><span>运营</span><span>成本波动</span><span><span class="cell-bar"><i style="width: 73%"></i></span></span><span>复核异常项</span></div>
+              </div>
+              <div class="chart-strip" aria-hidden="true">
+                <i style="height: 36px"></i><i style="height: 58px"></i><i style="height: 44px"></i><i style="height: 76px"></i>
+                <i style="height: 62px"></i><i style="height: 88px"></i><i style="height: 70px"></i><i style="height: 98px"></i>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -806,13 +958,9 @@ def _website_html() -> str:
       <section id="security" class="security-band">
         <div class="section-inner security-layout">
           <div>
-            <p class="section-kicker">可视化发展部提供技术支持</p>
+            <p class="section-kicker">内部部署与后台运维</p>
             <h2 class="section-heading">服务器自托管，后台只走管理入口</h2>
             <p class="hero-copy">官网、反馈图片和安装包都由当前应用服务器托管。用户默认访问域名进入官网；管理员手动访问 /admin 才进入后台管理。</p>
-            <div class="support-panel">
-              <strong>面向内部持续运营</strong>
-              <p>可视化发展部会持续维护下载页、问题反馈、版本发布和后台观测能力，帮助各部门稳定使用聚光智能办公助手。</p>
-            </div>
           </div>
           <div class="metrics">
             <div class="metric"><strong>本地文件</strong><span>安装包上传到应用服务器存储</span></div>
