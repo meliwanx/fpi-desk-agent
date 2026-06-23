@@ -120,11 +120,6 @@ jobs:
     env:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
     strategy:
       fail-fast: false
@@ -180,6 +175,12 @@ jobs:
         run: node scripts/sync-desktop-meta.mjs
 
       - name: Validate Apple signing secrets
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           missing=()
@@ -194,6 +195,9 @@ jobs:
           fi
 
       - name: Install Apple certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
           set -euo pipefail
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
@@ -235,7 +239,7 @@ jobs:
           cd desktop-tauri
           npx @tauri-apps/cli build \
             --target ${{ matrix.target }} \
-            --config '{"build":{"beforeBuildCommand":""},"bundle":{"targets":["dmg","app"],"createUpdaterArtifacts":true}}'
+            --config '{"build":{"beforeBuildCommand":""},"bundle":{"targets":["dmg","app"],"createUpdaterArtifacts":true,"macOS":{"signingIdentity":null}}}'
 
       - name: Sign and verify app bundle
         run: |
@@ -246,6 +250,10 @@ jobs:
           scripts/sign-macos-app.sh "$APP_PATH" "$SIGNING_IDENTITY"
 
       - name: Notarize and staple app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           APP_NAME=$(node -e "const fs=require('node:fs'); const c=JSON.parse(fs.readFileSync('desktop-tauri/src-tauri/tauri.conf.json','utf8')); console.log(c.productName)")
@@ -270,6 +278,10 @@ jobs:
           node scripts/verify-bundle.mjs "$APP_BACKEND"
 
       - name: Regenerate notarized DMG and updater archive
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           APP_NAME=$(node -e "const fs=require('node:fs'); const c=JSON.parse(fs.readFileSync('desktop-tauri/src-tauri/tauri.conf.json','utf8')); console.log(c.productName)")
