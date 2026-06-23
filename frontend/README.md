@@ -1,8 +1,8 @@
 [中文](README.zh-CN.md)
 
-# OpenYak Frontend
+# fpi-agent Frontend
 
-Next.js 15 frontend providing a professional-grade Chat UI for the OpenYak backend, inspired by LibreChat's UX architecture.
+Next.js 15 frontend providing a professional-grade Chat UI for the fpi-agent backend, inspired by LibreChat's UX architecture.
 
 ## Quick Start
 

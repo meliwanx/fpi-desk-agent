@@ -1,6 +1,6 @@
 [中文](README.zh-CN.md)
 
-# OpenYak Backend
+# fpi-agent Backend
 
 Python FastAPI backend that replicates OpenCode's complete agent architecture, bringing Claude Code-level agentic capabilities to open-source models via OpenRouter.
 
@@ -12,7 +12,7 @@ pip install -e ".[dev]"
 
 # 2. Configure environment
 cp .env.example .env
-# Edit .env — set OPENYAK_OPENROUTER_API_KEY
+# Edit .env — set FPI_AGENT_OPENROUTER_API_KEY
 
 # 3. Start the server
 uvicorn app.main:app --reload
@@ -285,7 +285,7 @@ Each tool can be set to `allow`, `deny`, or `ask` (prompts user in UI).
 | SiliconFlow (硅基流动) | BYOK | |
 | Xiaomi MiMo | BYOK | |
 
-All BYOK provider keys follow the pattern `OPENYAK_{PROVIDER}_API_KEY`.
+All BYOK provider keys follow the pattern `FPI_AGENT_{PROVIDER}_API_KEY`.
 
 ## Usage Examples
 
@@ -328,26 +328,26 @@ curl http://localhost:8000/api/agents
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `OPENYAK_OPENROUTER_API_KEY` | OpenRouter API key | (optional) |
-| `OPENYAK_DATABASE_URL` | Database connection string | `sqlite+aiosqlite:///./data/openyak.db` |
-| `OPENYAK_HOST` | Listen address | `0.0.0.0` |
-| `OPENYAK_PORT` | Listen port | `8000` |
-| `OPENYAK_DEBUG` | Debug mode | `false` |
-| `OPENYAK_PROJECT_DIR` | Workspace root (for file operations) | `.` |
-| `OPENYAK_COMPACTION_AUTO` | Auto context compression | `true` |
-| `OPENYAK_DAILY_SEARCH_LIMIT` | Daily web search quota | `20` |
-| `OPENYAK_FTS_ENABLED` | Full-text search indexing | `true` |
-| `OPENYAK_OLLAMA_BASE_URL` | Ollama server URL (auto-set by setup) | `` |
-| `OPENYAK_OLLAMA_AUTO_START` | Auto-start managed Ollama on launch | `true` |
-| `OPENYAK_OLLAMA_LAST_MODEL` | Last-used model for startup pre-warming | `` |
-| `OPENYAK_RAPID_MLX_BASE_URL` | Rapid-MLX OpenAI-compatible endpoint | `` |
-| `OPENYAK_RAPID_MLX_MODEL` | Last selected Rapid-MLX model alias | `` |
-| `OPENYAK_OPENCLAW_ENABLED` | Enable OpenClaw IM bridge | `false` |
-| `OPENYAK_OPENCLAW_URL` | OpenClaw WebSocket URL | `ws://127.0.0.1:18789` |
-| `OPENYAK_PROXY_URL` | Optional hosted proxy URL for managed tools | `` |
-| `OPENYAK_PROXY_TOKEN` | JWT for proxy authentication | `` |
-| `OPENYAK_BRAVE_SEARCH_API_KEY` | Brave Search API key (enhanced web search) | `` |
-| `OPENYAK_REMOTE_ACCESS_ENABLED` | Enable remote tunnel access | `false` |
+| `FPI_AGENT_OPENROUTER_API_KEY` | OpenRouter API key | (optional) |
+| `FPI_AGENT_DATABASE_URL` | Database connection string | `sqlite+aiosqlite:///./data/fpi-agent.db` |
+| `FPI_AGENT_HOST` | Listen address | `0.0.0.0` |
+| `FPI_AGENT_PORT` | Listen port | `8000` |
+| `FPI_AGENT_DEBUG` | Debug mode | `false` |
+| `FPI_AGENT_PROJECT_DIR` | Workspace root (for file operations) | `.` |
+| `FPI_AGENT_COMPACTION_AUTO` | Auto context compression | `true` |
+| `FPI_AGENT_DAILY_SEARCH_LIMIT` | Daily web search quota | `20` |
+| `FPI_AGENT_FTS_ENABLED` | Full-text search indexing | `true` |
+| `FPI_AGENT_OLLAMA_BASE_URL` | Ollama server URL (auto-set by setup) | `` |
+| `FPI_AGENT_OLLAMA_AUTO_START` | Auto-start managed Ollama on launch | `true` |
+| `FPI_AGENT_OLLAMA_LAST_MODEL` | Last-used model for startup pre-warming | `` |
+| `FPI_AGENT_RAPID_MLX_BASE_URL` | Rapid-MLX OpenAI-compatible endpoint | `` |
+| `FPI_AGENT_RAPID_MLX_MODEL` | Last selected Rapid-MLX model alias | `` |
+| `FPI_AGENT_OPENCLAW_ENABLED` | Enable OpenClaw IM bridge | `false` |
+| `FPI_AGENT_OPENCLAW_URL` | OpenClaw WebSocket URL | `ws://127.0.0.1:18789` |
+| `FPI_AGENT_PROXY_URL` | Optional hosted proxy URL for managed tools | `` |
+| `FPI_AGENT_PROXY_TOKEN` | JWT for proxy authentication | `` |
+| `FPI_AGENT_BRAVE_SEARCH_API_KEY` | Brave Search API key (enhanced web search) | `` |
+| `FPI_AGENT_REMOTE_ACCESS_ENABLED` | Enable remote tunnel access | `false` |
 
 ## Build & Deploy
 
@@ -359,6 +359,6 @@ uvicorn app.main:app --reload
 python run.py --port 8100 --data-dir /path/to/app/data
 
 # Production (PyInstaller bundle)
-pyinstaller openyak.spec
-./dist/openyak
+pyinstaller fpi-agent.spec
+./dist/fpi-agent
 ```
