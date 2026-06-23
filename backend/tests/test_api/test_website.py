@@ -23,9 +23,10 @@ async def test_website_landing_page_is_public_and_admin_stays_on_admin_route(app
         assert "可视化发展部提供技术支持" in landing.text
         assert "Excel 数据分析" in landing.text
         assert "数据分析更像一个可复用的办公流程" in landing.text
-        assert "从安装到反馈，流程尽量短" in landing.text
         assert "/download-options" in landing.text
         assert "负责官网、客户端版本分发、反馈入口和后台运维能力的持续建设" not in landing.text
+        assert "从安装到反馈，流程尽量短" not in landing.text
+        assert "服务器自托管，后台只走管理入口" not in landing.text
 
         admin = await public_client.get("/admin")
         assert admin.status_code == 200

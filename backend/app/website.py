@@ -698,76 +698,6 @@ def _website_html() -> str:
     }
     .chart-strip i:nth-child(2n) { background: var(--teal); }
     .chart-strip i:nth-child(3n) { background: var(--violet); }
-    .workflow-band {
-      border-top: 1px solid rgba(21, 32, 51, 0.08);
-      background: #fbfcfe;
-    }
-    .workflow-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 14px;
-    }
-    .workflow-step {
-      min-height: 174px;
-      padding: 18px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fff;
-    }
-    .workflow-step .num {
-      display: inline-grid;
-      place-items: center;
-      width: 30px;
-      height: 30px;
-      border-radius: 8px;
-      margin-bottom: 18px;
-      background: #eef6f2;
-      color: var(--green);
-      font-size: 13px;
-      font-weight: 900;
-    }
-    .workflow-step h3 {
-      margin: 0 0 10px;
-      font-size: 17px;
-      letter-spacing: 0;
-    }
-    .workflow-step p {
-      margin: 0;
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.7;
-    }
-    .security-band {
-      background: var(--soft);
-      border-top: 1px solid rgba(21, 32, 51, 0.08);
-    }
-    .security-layout {
-      display: grid;
-      grid-template-columns: 0.9fr 1.1fr;
-      gap: 28px;
-      align-items: start;
-    }
-    .metrics {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 14px;
-    }
-    .metric {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fff;
-      padding: 18px;
-    }
-    .metric strong {
-      display: block;
-      color: var(--blue-dark);
-      font-size: 24px;
-      margin-bottom: 6px;
-    }
-    .metric span {
-      color: var(--muted);
-      font-size: 13px;
-    }
     footer {
       max-width: 1160px;
       margin: 0 auto;
@@ -788,7 +718,7 @@ def _website_html() -> str:
       h1 { font-size: 42px; }
       .visual-body { grid-template-columns: 1fr; min-height: auto; }
       .mock-sidebar { display: none; }
-      .feature-grid, .security-layout, .workflow-grid, .analysis-layout { grid-template-columns: 1fr; }
+      .feature-grid, .analysis-layout { grid-template-columns: 1fr; }
       .ops-row { grid-template-columns: 1fr; }
     }
     @media (max-width: 560px) {
@@ -798,7 +728,7 @@ def _website_html() -> str:
       .hero-copy { font-size: 16px; }
       .download-button { width: 100%; }
       .segmented { width: 100%; }
-      .task-grid, .metrics, .kpi-row { grid-template-columns: 1fr; }
+      .task-grid, .kpi-row { grid-template-columns: 1fr; }
       .section-inner { padding: 42px 18px; }
       .sheet-row { grid-template-columns: 1fr; }
       .sheet-row span {
@@ -821,8 +751,6 @@ def _website_html() -> str:
         <div class="nav-links">
           <a href="#features">能力</a>
           <a href="#analysis">数据分析</a>
-          <a href="#workflow">使用方式</a>
-          <a href="#security">部署</a>
           <span class="support-link">可视化发展部提供技术支持</span>
           <a class="nav-cta" href="#download">立即下载</a>
         </div>
@@ -942,34 +870,6 @@ def _website_html() -> str:
         </div>
       </section>
 
-      <section id="workflow" class="workflow-band">
-        <div class="section-inner">
-          <p class="section-kicker">同事打开就能理解怎么用</p>
-          <h2 class="section-heading">从安装到反馈，流程尽量短</h2>
-          <div class="workflow-grid">
-            <article class="workflow-step"><span class="num">01</span><h3>按系统下载</h3><p>官网自动识别 Mac、Windows 或 Linux，也可以手动切换安装包。</p></article>
-            <article class="workflow-step"><span class="num">02</span><h3>公司账号登录</h3><p>员工使用公司账号进入客户端，管理员后台不影响员工端登录体验。</p></article>
-            <article class="workflow-step"><span class="num">03</span><h3>处理办公任务</h3><p>围绕资料问答、内容整理、会议纪要和待办推进形成稳定工作流。</p></article>
-            <article class="workflow-step"><span class="num">04</span><h3>反馈到后台</h3><p>问题描述和附图上传到应用服务器，后台可以直接预览并跟进。</p></article>
-          </div>
-        </div>
-      </section>
-
-      <section id="security" class="security-band">
-        <div class="section-inner security-layout">
-          <div>
-            <p class="section-kicker">内部部署与后台运维</p>
-            <h2 class="section-heading">服务器自托管，后台只走管理入口</h2>
-            <p class="hero-copy">官网、反馈图片和安装包都由当前应用服务器托管。用户默认访问域名进入官网；管理员手动访问 /admin 才进入后台管理。</p>
-          </div>
-          <div class="metrics">
-            <div class="metric"><strong>本地文件</strong><span>安装包上传到应用服务器存储</span></div>
-            <div class="metric"><strong>公开下载</strong><span>官网无需登录即可获取客户端</span></div>
-            <div class="metric"><strong>后台管理</strong><span>版本、强更、反馈内容集中维护</span></div>
-            <div class="metric"><strong>统计追踪</strong><span>下载次数与上传人持续记录</span></div>
-          </div>
-        </div>
-      </section>
     </main>
     <footer><span>© 聚光智能办公助手</span><span>可视化发展部提供技术支持</span></footer>
   </div>
