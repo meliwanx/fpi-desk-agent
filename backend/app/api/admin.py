@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
 import mimetypes
 import re
@@ -11,7 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
-from pydantic import BaseModel, Field
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field, field_serializer
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -135,6 +138,10 @@ class AdminUpdateAssetResponse(BaseModel):
     time_created: datetime
     time_updated: datetime
 
+    @field_serializer("time_created", "time_updated")
+    def _serialize_datetime_shanghai(self, value: datetime) -> str:
+        return as_shanghai(value).isoformat()
+
 
 class AdminUpdatePolicyResponse(BaseModel):
     enabled: bool
@@ -170,6 +177,10 @@ class AdminFeedbackResponse(BaseModel):
     time_created: datetime
     time_updated: datetime
 
+    @field_serializer("time_created", "time_updated")
+    def _serialize_datetime_shanghai(self, value: datetime) -> str:
+        return as_shanghai(value).isoformat()
+
 
 class AdminFeedbackListResponse(BaseModel):
     items: list[AdminFeedbackResponse]
@@ -196,6 +207,12 @@ class AdminCompanySessionResponse(BaseModel):
     revoked_by_user_id: str = ""
     revoked_by_email: str = ""
     revoked_reason: str = ""
+
+    @field_serializer("expires_at", "revoked_at", "time_created", "last_seen_at")
+    def _serialize_datetime_shanghai(self, value: datetime | None) -> str | None:
+        if value is None:
+            return None
+        return as_shanghai(value).isoformat()
 
 
 class AdminCompanySessionListResponse(BaseModel):
@@ -228,6 +245,10 @@ class AdminActionResponse(BaseModel):
     metadata: dict[str, Any]
     time_created: datetime
     time_updated: datetime
+
+    @field_serializer("time_created", "time_updated")
+    def _serialize_datetime_shanghai(self, value: datetime) -> str:
+        return as_shanghai(value).isoformat()
 
 
 class AdminActionListResponse(BaseModel):
@@ -577,9 +598,14 @@ async def list_admin_company_sessions(
     now = shanghai_now()
     presence = getattr(request.app.state, "company_presence", None)
     online_session_ids = await presence.online_session_ids() if presence is not None and presence.available else set()
+
+    # Exclude the viewing admin's own session from online counts to prevent self-pollution
+    viewing_session_id = request.scope.get("state", {}).get("company_session_id", "")
+
     items = [
         _public_company_session(session, now=now, online_session_ids=online_session_ids)
         for session in sessions
+        if session.id != viewing_session_id  # Filter out viewer's own session
     ]
     if online_only:
         items = [session for session in items if session.is_online]
@@ -1240,11 +1266,17 @@ async def get_audit_summary(
     store = getattr(request.app.state, "company_auth_store", None)
     presence = getattr(request.app.state, "company_presence", None)
     online_session_ids = await presence.online_session_ids() if presence is not None and presence.available else set()
+
+    # Exclude the viewing admin's own session from activity counts
+    viewing_session_id = request.scope.get("state", {}).get("company_session_id", "")
+
     if store is not None and hasattr(store, "activity_days"):
         activity_days = await store.activity_days(days=30)
     if store is not None and hasattr(store, "list_sessions"):
         _, company_sessions = await store.list_sessions(include_revoked=False, limit=10_000)
         for session in company_sessions:
+            if session.id == viewing_session_id:
+                continue  # Skip viewer's own session
             if _is_session_online(session, now=now, online_session_ids=online_session_ids):
                 online_sessions += 1
                 online_users.add(session.user_id)
@@ -1626,6 +1658,318 @@ async def get_audit_session_messages(
     }
 
 
+@router.get("/admin/audit/analytics/users")
+async def get_user_analytics(
+    request: Request,
+    db: DbDep,
+    days: int = 30,
+) -> dict[str, Any]:
+    """获取用户行为分析数据：活跃度分布、使用频率、Token 消耗等"""
+    _require_admin(request)
+    days = min(max(days, 1), 90)
+    cutoff = shanghai_now() - timedelta(days=days)
+
+    # 按用户统计会话数、消息数、Token 消耗
+    user_stats = (
+        await db.execute(
+            select(
+                AuditSession.user_id,
+                AuditSession.user_email,
+                AuditSession.user_display_name,
+                func.count(func.distinct(AuditSession.local_session_id)).label("session_count"),
+                func.count(func.distinct(AuditMessage.local_message_id)).label("message_count"),
+                func.coalesce(func.sum(AuditUsage.total_tokens), 0).label("total_tokens"),
+                func.coalesce(func.sum(AuditUsage.cost), 0).label("total_cost"),
+            )
+            .select_from(AuditSession)
+            .outerjoin(AuditMessage, AuditMessage.local_session_id == AuditSession.local_session_id)
+            .outerjoin(AuditUsage, AuditUsage.local_session_id == AuditSession.local_session_id)
+            .where(AuditSession.time_created >= cutoff)
+            .group_by(AuditSession.user_id, AuditSession.user_email, AuditSession.user_display_name)
+            .order_by(func.count(func.distinct(AuditSession.local_session_id)).desc())
+        )
+    ).mappings().all()
+
+    # 活跃度分布（按会话数分组）
+    session_distribution = {}
+    for row in user_stats:
+        count = int(row["session_count"])
+        if count == 0:
+            bucket = "0"
+        elif count <= 5:
+            bucket = "1-5"
+        elif count <= 20:
+            bucket = "6-20"
+        elif count <= 50:
+            bucket = "21-50"
+        else:
+            bucket = "50+"
+        session_distribution[bucket] = session_distribution.get(bucket, 0) + 1
+
+    return {
+        "period_days": days,
+        "total_users": len(user_stats),
+        "user_list": [
+            {
+                "user_id": row["user_id"],
+                "user_email": row["user_email"],
+                "user_display_name": row["user_display_name"],
+                "session_count": int(row["session_count"]),
+                "message_count": int(row["message_count"]),
+                "total_tokens": int(row["total_tokens"]),
+                "total_cost": float(row["total_cost"]),
+                "avg_tokens_per_session": (
+                    int(row["total_tokens"]) // int(row["session_count"])
+                    if int(row["session_count"]) > 0
+                    else 0
+                ),
+            }
+            for row in user_stats
+        ],
+        "session_distribution": session_distribution,
+    }
+
+
+@router.get("/admin/audit/analytics/models")
+async def get_model_analytics(
+    request: Request,
+    db: DbDep,
+    days: int = 30,
+) -> dict[str, Any]:
+    """获取模型使用分析：使用频率、Token 消耗、成本分布"""
+    _require_admin(request)
+    days = min(max(days, 1), 90)
+    cutoff = shanghai_now() - timedelta(days=days)
+
+    # 按模型统计
+    model_stats = (
+        await db.execute(
+            select(
+                AuditSession.model_id,
+                AuditSession.provider_id,
+                func.count(func.distinct(AuditSession.local_session_id)).label("session_count"),
+                func.count(func.distinct(AuditMessage.local_message_id)).label("message_count"),
+                func.coalesce(func.sum(AuditUsage.total_tokens), 0).label("total_tokens"),
+                func.coalesce(func.sum(AuditUsage.input_tokens), 0).label("input_tokens"),
+                func.coalesce(func.sum(AuditUsage.output_tokens), 0).label("output_tokens"),
+                func.coalesce(func.sum(AuditUsage.cost), 0).label("total_cost"),
+            )
+            .select_from(AuditSession)
+            .outerjoin(AuditMessage, AuditMessage.local_session_id == AuditSession.local_session_id)
+            .outerjoin(AuditUsage, AuditUsage.local_session_id == AuditSession.local_session_id)
+            .where(AuditSession.time_created >= cutoff)
+            .group_by(AuditSession.model_id, AuditSession.provider_id)
+            .order_by(func.count(func.distinct(AuditSession.local_session_id)).desc())
+        )
+    ).mappings().all()
+
+    return {
+        "period_days": days,
+        "model_list": [
+            {
+                "model_id": row["model_id"],
+                "provider_id": row["provider_id"],
+                "session_count": int(row["session_count"]),
+                "message_count": int(row["message_count"]),
+                "total_tokens": int(row["total_tokens"]),
+                "input_tokens": int(row["input_tokens"]),
+                "output_tokens": int(row["output_tokens"]),
+                "total_cost": float(row["total_cost"]),
+                "avg_cost_per_session": (
+                    float(row["total_cost"]) / int(row["session_count"])
+                    if int(row["session_count"]) > 0
+                    else 0.0
+                ),
+            }
+            for row in model_stats
+        ],
+    }
+
+
+@router.get("/admin/audit/analytics/tools")
+async def get_tool_analytics(
+    request: Request,
+    db: DbDep,
+    days: int = 30,
+) -> dict[str, Any]:
+    """获取工具调用分析：使用频率、成功率、执行时长"""
+    _require_admin(request)
+    days = min(max(days, 1), 90)
+    cutoff = shanghai_now() - timedelta(days=days)
+
+    # 按工具统计
+    tool_stats = (
+        await db.execute(
+            select(
+                AuditToolCall.tool_name,
+                func.count(AuditToolCall.id).label("call_count"),
+                func.sum(func.case((AuditToolCall.status == "completed", 1), else_=0)).label("success_count"),
+                func.sum(func.case((AuditToolCall.status == "error", 1), else_=0)).label("error_count"),
+            )
+            .where(AuditToolCall.time_created >= cutoff)
+            .group_by(AuditToolCall.tool_name)
+            .order_by(func.count(AuditToolCall.id).desc())
+        )
+    ).mappings().all()
+
+    return {
+        "period_days": days,
+        "total_calls": sum(int(row["call_count"]) for row in tool_stats),
+        "tool_list": [
+            {
+                "tool_name": row["tool_name"],
+                "call_count": int(row["call_count"]),
+                "success_count": int(row["success_count"]),
+                "error_count": int(row["error_count"]),
+                "success_rate": (
+                    float(row["success_count"]) / int(row["call_count"]) * 100
+                    if int(row["call_count"]) > 0
+                    else 0.0
+                ),
+            }
+            for row in tool_stats
+        ],
+    }
+
+
+@router.get("/admin/audit/analytics/content")
+async def get_content_analytics(
+    request: Request,
+    db: DbDep,
+    days: int = 30,
+) -> dict[str, Any]:
+    """获取内容分析：消息分布、文件类型、对话长度统计"""
+    _require_admin(request)
+    days = min(max(days, 1), 90)
+    cutoff = shanghai_now() - timedelta(days=days)
+
+    # 按角色统计消息数
+    message_by_role = (
+        await db.execute(
+            select(
+                AuditMessage.role,
+                func.count(AuditMessage.id).label("count"),
+            )
+            .where(AuditMessage.time_created >= cutoff)
+            .group_by(AuditMessage.role)
+        )
+    ).mappings().all()
+
+    # 文件类型统计
+    file_by_type = (
+        await db.execute(
+            select(
+                AuditFile.mime_type,
+                func.count(AuditFile.id).label("count"),
+                func.coalesce(func.sum(AuditFile.size), 0).label("total_size"),
+            )
+            .where(AuditFile.time_created >= cutoff)
+            .group_by(AuditFile.mime_type)
+            .order_by(func.count(AuditFile.id).desc())
+        )
+    ).mappings().all()
+
+    # 会话消息数分布
+    session_message_counts = (
+        await db.execute(
+            select(
+                func.count(AuditMessage.local_message_id).label("message_count"),
+            )
+            .where(AuditMessage.time_created >= cutoff)
+            .group_by(AuditMessage.local_session_id)
+        )
+    ).scalars().all()
+
+    # 分组统计
+    message_distribution = {}
+    for count in session_message_counts:
+        if count == 0:
+            bucket = "0"
+        elif count <= 10:
+            bucket = "1-10"
+        elif count <= 50:
+            bucket = "11-50"
+        elif count <= 100:
+            bucket = "51-100"
+        else:
+            bucket = "100+"
+        message_distribution[bucket] = message_distribution.get(bucket, 0) + 1
+
+    return {
+        "period_days": days,
+        "messages_by_role": {row["role"]: int(row["count"]) for row in message_by_role},
+        "files_by_type": [
+            {
+                "mime_type": row["mime_type"] or "unknown",
+                "count": int(row["count"]),
+                "total_size_mb": float(row["total_size"]) / (1024 * 1024),
+            }
+            for row in file_by_type
+        ],
+        "session_message_distribution": message_distribution,
+    }
+
+
+@router.get("/admin/audit/analytics/timeline")
+async def get_timeline_analytics(
+    request: Request,
+    db: DbDep,
+    days: int = 30,
+) -> dict[str, Any]:
+    """获取时间序列分析：每日会话数、消息数、Token 消耗趋势"""
+    _require_admin(request)
+    days = min(max(days, 1), 90)
+    now = shanghai_now()
+    cutoff = now - timedelta(days=days)
+
+    # 按日统计
+    daily_stats = (
+        await db.execute(
+            select(
+                func.date(AuditSession.time_created).label("date"),
+                func.count(func.distinct(AuditSession.local_session_id)).label("session_count"),
+                func.count(func.distinct(AuditSession.user_id)).label("active_users"),
+            )
+            .where(AuditSession.time_created >= cutoff)
+            .group_by(func.date(AuditSession.time_created))
+            .order_by(func.date(AuditSession.time_created))
+        )
+    ).mappings().all()
+
+    # 按日统计 Token 消耗
+    daily_tokens = (
+        await db.execute(
+            select(
+                func.date(AuditUsage.time_created).label("date"),
+                func.coalesce(func.sum(AuditUsage.total_tokens), 0).label("total_tokens"),
+                func.coalesce(func.sum(AuditUsage.cost), 0).label("total_cost"),
+            )
+            .where(AuditUsage.time_created >= cutoff)
+            .group_by(func.date(AuditUsage.time_created))
+            .order_by(func.date(AuditUsage.time_created))
+        )
+    ).mappings().all()
+
+    # 合并数据
+    token_dict = {str(row["date"]): row for row in daily_tokens}
+    timeline = []
+    for row in daily_stats:
+        date_str = str(row["date"])
+        token_row = token_dict.get(date_str, {"total_tokens": 0, "total_cost": 0})
+        timeline.append({
+            "date": date_str,
+            "session_count": int(row["session_count"]),
+            "active_users": int(row["active_users"]),
+            "total_tokens": int(token_row["total_tokens"]),
+            "total_cost": float(token_row["total_cost"]),
+        })
+
+    return {
+        "period_days": days,
+        "timeline": timeline,
+    }
+
+
 @router.get("/admin/audit/files/{part_id}/download")
 async def download_audit_file(
     part_id: str,
@@ -1641,6 +1985,16 @@ async def download_audit_file(
     path = Path(record.stored_path)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Audit file content missing from storage")
+
+    # Verify file integrity: compute hash and compare to recorded hash
+    if record.content_hash:
+        actual_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+        if actual_hash != record.content_hash:
+            raise HTTPException(
+                status_code=500,
+                detail="File integrity check failed: stored content does not match recorded hash"
+            )
+
     media_type = record.mime_type or mimetypes.guess_type(record.name)[0] or "application/octet-stream"
     await _record_admin_action(
         db,
@@ -1658,3 +2012,200 @@ async def download_audit_file(
     )
     await db.flush()
     return FileResponse(path, media_type=media_type, filename=record.name or path.name)
+
+
+@router.get("/admin/audit/export/sessions")
+async def export_sessions_csv(
+    request: Request,
+    db: DbDep,
+    days: int = 30,
+) -> StreamingResponse:
+    """导出会话数据为 CSV 格式"""
+    _require_admin(request)
+    days = min(max(days, 1), 90)
+    cutoff = shanghai_now() - timedelta(days=days)
+
+    sessions = list(
+        (
+            await db.execute(
+                select(AuditSession)
+                .where(AuditSession.time_created >= cutoff)
+                .order_by(AuditSession.time_created.desc())
+            )
+        ).scalars().all()
+    )
+
+    # 创建 CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "会话ID", "用户邮箱", "用户名", "标题", "工作区", 
+        "模型ID", "供应商", "创建时间", "更新时间"
+    ])
+    
+    for session in sessions:
+        writer.writerow([
+            session.local_session_id,
+            session.user_email,
+            session.user_display_name,
+            session.title,
+            session.workspace,
+            session.model_id,
+            session.provider_id,
+            _datetime_iso(session.time_created),
+            _datetime_iso(session.time_updated),
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename=sessions_{shanghai_now().strftime('%Y%m%d_%H%M%S')}.csv"
+        },
+    )
+
+
+@router.get("/admin/audit/export/users")
+async def export_user_analytics_csv(
+    request: Request,
+    db: DbDep,
+    days: int = 30,
+) -> StreamingResponse:
+    """导出用户分析数据为 CSV 格式"""
+    _require_admin(request)
+    days = min(max(days, 1), 90)
+    cutoff = shanghai_now() - timedelta(days=days)
+
+    user_stats = (
+        await db.execute(
+            select(
+                AuditSession.user_id,
+                AuditSession.user_email,
+                AuditSession.user_display_name,
+                func.count(func.distinct(AuditSession.local_session_id)).label("session_count"),
+                func.count(func.distinct(AuditMessage.local_message_id)).label("message_count"),
+                func.coalesce(func.sum(AuditUsage.total_tokens), 0).label("total_tokens"),
+                func.coalesce(func.sum(AuditUsage.input_tokens), 0).label("input_tokens"),
+                func.coalesce(func.sum(AuditUsage.output_tokens), 0).label("output_tokens"),
+                func.coalesce(func.sum(AuditUsage.cost), 0).label("total_cost"),
+            )
+            .select_from(AuditSession)
+            .outerjoin(AuditMessage, AuditMessage.local_session_id == AuditSession.local_session_id)
+            .outerjoin(AuditUsage, AuditUsage.local_session_id == AuditSession.local_session_id)
+            .where(AuditSession.time_created >= cutoff)
+            .group_by(AuditSession.user_id, AuditSession.user_email, AuditSession.user_display_name)
+            .order_by(func.count(func.distinct(AuditSession.local_session_id)).desc())
+        )
+    ).mappings().all()
+
+    # 创建 CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "用户ID", "用户邮箱", "用户名", "会话数", "消息数", 
+        "总Token", "输入Token", "输出Token", "总成本", "平均每会话Token"
+    ])
+    
+    for row in user_stats:
+        session_count = int(row["session_count"])
+        total_tokens = int(row["total_tokens"])
+        writer.writerow([
+            row["user_id"],
+            row["user_email"],
+            row["user_display_name"],
+            session_count,
+            int(row["message_count"]),
+            total_tokens,
+            int(row["input_tokens"]),
+            int(row["output_tokens"]),
+            f"{float(row['total_cost']):.4f}",
+            total_tokens // session_count if session_count > 0 else 0,
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename=user_analytics_{shanghai_now().strftime('%Y%m%d_%H%M%S')}.csv"
+        },
+    )
+
+
+@router.get("/admin/audit/export/conversations")
+async def export_conversations_csv(
+    request: Request,
+    db: DbDep,
+    days: int = 7,
+    user_id: str | None = None,
+) -> StreamingResponse:
+    """导出对话内容为 CSV 格式（用于内容分析和数字资产管理）"""
+    _require_admin(request)
+    days = min(max(days, 1), 30)  # 最多导出30天
+    cutoff = shanghai_now() - timedelta(days=days)
+
+    # 构建查询
+    stmt = (
+        select(
+            AuditSession.local_session_id,
+            AuditSession.user_email,
+            AuditSession.user_display_name,
+            AuditSession.title,
+            AuditSession.workspace,
+            AuditMessage.role,
+            AuditMessage.data,
+            AuditMessage.time_created,
+        )
+        .select_from(AuditSession)
+        .join(AuditMessage, AuditMessage.local_session_id == AuditSession.local_session_id)
+        .where(AuditSession.time_created >= cutoff)
+        .order_by(AuditSession.time_created.desc(), AuditMessage.time_created.asc())
+    )
+    
+    if user_id:
+        stmt = stmt.where(AuditSession.user_id == user_id)
+
+    messages = list((await db.execute(stmt)).mappings().all())
+
+    # 创建 CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "会话ID", "用户邮箱", "用户名", "会话标题", "工作区", 
+        "角色", "消息内容", "时间"
+    ])
+    
+    for msg in messages:
+        # 提取文本内容
+        data = msg["data"] or {}
+        content = ""
+        if isinstance(data.get("content"), str):
+            content = data["content"]
+        elif isinstance(data.get("content"), list):
+            # 处理多部分内容
+            parts = []
+            for part in data["content"]:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    parts.append(part.get("text", ""))
+            content = "\n".join(parts)
+        
+        writer.writerow([
+            msg["local_session_id"],
+            msg["user_email"],
+            msg["user_display_name"],
+            msg["title"],
+            msg["workspace"],
+            msg["role"],
+            content[:5000],  # 限制长度避免 CSV 过大
+            _datetime_iso(msg["time_created"]),
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f"attachment; filename=conversations_{shanghai_now().strftime('%Y%m%d_%H%M%S')}.csv"
+        },
+    )

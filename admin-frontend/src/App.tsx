@@ -11,7 +11,7 @@ import {
   type ModelPolicy,
 } from "./modelPolicy";
 
-type Tab = "overview" | "sessions" | "risks" | "tools" | "feedback" | "users" | "actions" | "models" | "updates";
+type Tab = "overview" | "sessions" | "analytics" | "risks" | "tools" | "feedback" | "users" | "actions" | "models" | "updates";
 
 interface UserInfo {
   id: string;
@@ -489,6 +489,7 @@ export function App() {
 
         {tab === "overview" && <Overview api={api} />}
         {tab === "sessions" && <Sessions api={api} token={token} />}
+        {tab === "analytics" && <Analytics api={api} token={token} />}
         {tab === "risks" && <Risks api={api} />}
         {tab === "tools" && <ToolCalls api={api} />}
         {tab === "feedback" && <FeedbackPanel api={api} token={token} />}
@@ -505,6 +506,7 @@ function tabTitle(tab: Tab): string {
   return {
     overview: "企业审计总览",
     sessions: "会话审计",
+    analytics: "数据分析",
     risks: "风险发现",
     tools: "工具调用",
     feedback: "问题反馈",
@@ -519,6 +521,7 @@ function tabSubtitle(tab: Tab): string {
   return {
     overview: "查看员工使用规模、token 消耗、风险和文件同步情况。",
     sessions: "按员工、工作区查看每一条对话记录和上传文件。",
+    analytics: "深度分析用户行为、模型使用、成本趋势，导出数字资产数据。",
     risks: "集中处理敏感内容、密钥、订阅链接等风险线索。",
     tools: "审计模型调用的本地工具、输入、输出和状态。",
     feedback: "查看员工提交的问题描述和截图。",
@@ -1426,6 +1429,388 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
         </div>
         {message && <p className={message.startsWith("已保存") ? "success" : "error"}>{message}</p>}
       </section>
+    </div>
+  );
+}
+
+// ============================================================================
+// Analytics Tab - 数据分析
+// ============================================================================
+
+interface UserAnalytics {
+  period_days: number;
+  total_users: number;
+  user_list: Array<{
+    user_id: string;
+    user_email: string;
+    user_display_name: string;
+    session_count: number;
+    message_count: number;
+    total_tokens: number;
+    total_cost: number;
+    avg_tokens_per_session: number;
+  }>;
+  session_distribution: Record<string, number>;
+}
+
+interface ModelAnalytics {
+  period_days: number;
+  model_list: Array<{
+    model_id: string;
+    provider_id: string;
+    session_count: number;
+    message_count: number;
+    total_tokens: number;
+    input_tokens: number;
+    output_tokens: number;
+    total_cost: number;
+    avg_cost_per_session: number;
+  }>;
+}
+
+interface ToolAnalytics {
+  period_days: number;
+  total_calls: number;
+  tool_list: Array<{
+    tool_name: string;
+    call_count: number;
+    success_count: number;
+    error_count: number;
+    success_rate: number;
+  }>;
+}
+
+interface ContentAnalytics {
+  period_days: number;
+  messages_by_role: Record<string, number>;
+  files_by_type: Array<{
+    mime_type: string;
+    count: number;
+    total_size_mb: number;
+  }>;
+  session_message_distribution: Record<string, number>;
+}
+
+interface TimelineAnalytics {
+  period_days: number;
+  timeline: Array<{
+    date: string;
+    session_count: number;
+    active_users: number;
+    total_tokens: number;
+    total_cost: number;
+  }>;
+}
+
+function Analytics({ api, token }: { api: ReturnType<typeof useApi>; token: string }) {
+  const [days, setDays] = useState(30);
+  const [loading, setLoading] = useState(true);
+  const [userStats, setUserStats] = useState<UserAnalytics | null>(null);
+  const [modelStats, setModelStats] = useState<ModelAnalytics | null>(null);
+  const [toolStats, setToolStats] = useState<ToolAnalytics | null>(null);
+  const [contentStats, setContentStats] = useState<ContentAnalytics | null>(null);
+  const [timeline, setTimeline] = useState<TimelineAnalytics | null>(null);
+
+  useEffect(() => {
+    void loadAnalytics();
+  }, [days]);
+
+  async function loadAnalytics() {
+    setLoading(true);
+    try {
+      const [users, models, tools, content, time] = await Promise.all([
+        api<UserAnalytics>(`/api/admin/audit/analytics/users?days=${days}`),
+        api<ModelAnalytics>(`/api/admin/audit/analytics/models?days=${days}`),
+        api<ToolAnalytics>(`/api/admin/audit/analytics/tools?days=${days}`),
+        api<ContentAnalytics>(`/api/admin/audit/analytics/content?days=${days}`),
+        api<TimelineAnalytics>(`/api/admin/audit/analytics/timeline?days=${days}`),
+      ]);
+      setUserStats(users);
+      setModelStats(models);
+      setToolStats(tools);
+      setContentStats(content);
+      setTimeline(time);
+    } catch (error) {
+      console.error("加载分析数据失败:", error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function exportData(endpoint: string, filename: string) {
+    try {
+      const response = await fetch(endpoint, {
+        headers: { "X-FPI-Session": token },
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      alert("导出失败: " + error);
+    }
+  }
+
+  if (loading) {
+    return <div className="card"><p className="muted">加载中...</p></div>;
+  }
+
+  const totalCost = userStats?.user_list.reduce((sum, u) => sum + u.total_cost, 0) || 0;
+  const totalTokens = userStats?.user_list.reduce((sum, u) => sum + u.total_tokens, 0) || 0;
+
+  return (
+    <div className="analytics-container">
+      {/* 时间范围选择 */}
+      <div className="card">
+        <div className="toolbar">
+          <label>
+            统计周期：
+            <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="input">
+              <option value={7}>最近 7 天</option>
+              <option value={30}>最近 30 天</option>
+              <option value={60}>最近 60 天</option>
+              <option value={90}>最近 90 天</option>
+            </select>
+          </label>
+          <div style={{ marginLeft: "auto", display: "flex", gap: "8px" }}>
+            <button
+              className="button outline"
+              onClick={() => exportData(`/api/admin/audit/export/users?days=${days}`, `用户统计_${days}天.csv`)}
+            >
+              导出用户统计
+            </button>
+            <button
+              className="button outline"
+              onClick={() => exportData(`/api/admin/audit/export/sessions?days=${days}`, `会话列表_${days}天.csv`)}
+            >
+              导出会话列表
+            </button>
+            <button
+              className="button"
+              onClick={() => exportData(`/api/admin/audit/export/conversations?days=${days}`, `对话内容_${days}天.csv`)}
+            >
+              导出对话内容
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 总览卡片 */}
+      <div className="stats-grid">
+        <div className="stat-card">
+          <h3>总用户数</h3>
+          <div className="stat-value">{userStats?.total_users || 0}</div>
+          <div className="stat-label">活跃用户</div>
+        </div>
+        <div className="stat-card">
+          <h3>总 Token 消耗</h3>
+          <div className="stat-value">{formatNumber(totalTokens)}</div>
+          <div className="stat-label">{days} 天累计</div>
+        </div>
+        <div className="stat-card">
+          <h3>总成本</h3>
+          <div className="stat-value">${totalCost.toFixed(2)}</div>
+          <div className="stat-label">{days} 天累计</div>
+        </div>
+        <div className="stat-card">
+          <h3>工具调用</h3>
+          <div className="stat-value">{formatNumber(toolStats?.total_calls || 0)}</div>
+          <div className="stat-label">总调用次数</div>
+        </div>
+      </div>
+
+      {/* 时间趋势图 */}
+      <div className="card">
+        <h2>趋势分析</h2>
+        {timeline && timeline.timeline.length > 0 && (
+          <div className="timeline-chart">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>日期</th>
+                  <th>会话数</th>
+                  <th>活跃用户</th>
+                  <th>Token 消耗</th>
+                  <th>成本</th>
+                </tr>
+              </thead>
+              <tbody>
+                {timeline.timeline.slice(-14).map((item) => (
+                  <tr key={item.date}>
+                    <td>{item.date}</td>
+                    <td>{item.session_count}</td>
+                    <td>{item.active_users}</td>
+                    <td>{formatNumber(item.total_tokens)}</td>
+                    <td>${item.total_cost.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* 用户分析 */}
+      <div className="card">
+        <h2>用户分析 - TOP 20</h2>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>排名</th>
+              <th>用户</th>
+              <th>会话数</th>
+              <th>消息数</th>
+              <th>Token 消耗</th>
+              <th>成本</th>
+              <th>平均每会话</th>
+            </tr>
+          </thead>
+          <tbody>
+            {userStats?.user_list.slice(0, 20).map((user, index) => (
+              <tr key={user.user_id}>
+                <td>{index + 1}</td>
+                <td>
+                  <strong>{user.user_display_name}</strong>
+                  <div className="muted">{user.user_email}</div>
+                </td>
+                <td>{user.session_count}</td>
+                <td>{user.message_count}</td>
+                <td>{formatNumber(user.total_tokens)}</td>
+                <td>${user.total_cost.toFixed(2)}</td>
+                <td>{formatNumber(user.avg_tokens_per_session)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* 模型分析 */}
+      <div className="card">
+        <h2>模型使用分析</h2>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>模型</th>
+              <th>供应商</th>
+              <th>会话数</th>
+              <th>消息数</th>
+              <th>总 Token</th>
+              <th>输入 Token</th>
+              <th>输出 Token</th>
+              <th>总成本</th>
+              <th>平均成本</th>
+            </tr>
+          </thead>
+          <tbody>
+            {modelStats?.model_list.map((model) => (
+              <tr key={`${model.provider_id}-${model.model_id}`}>
+                <td><strong>{model.model_id}</strong></td>
+                <td>{model.provider_id}</td>
+                <td>{model.session_count}</td>
+                <td>{model.message_count}</td>
+                <td>{formatNumber(model.total_tokens)}</td>
+                <td>{formatNumber(model.input_tokens)}</td>
+                <td>{formatNumber(model.output_tokens)}</td>
+                <td>${model.total_cost.toFixed(2)}</td>
+                <td>${model.avg_cost_per_session.toFixed(3)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* 工具调用分析 */}
+      <div className="card">
+        <h2>工具调用分析</h2>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>工具名称</th>
+              <th>调用次数</th>
+              <th>成功次数</th>
+              <th>失败次数</th>
+              <th>成功率</th>
+            </tr>
+          </thead>
+          <tbody>
+            {toolStats?.tool_list.map((tool) => (
+              <tr key={tool.tool_name}>
+                <td><strong>{tool.tool_name}</strong></td>
+                <td>{formatNumber(tool.call_count)}</td>
+                <td>{formatNumber(tool.success_count)}</td>
+                <td>{formatNumber(tool.error_count)}</td>
+                <td>
+                  <span className={tool.success_rate >= 95 ? "pill success" : tool.success_rate >= 80 ? "pill warning" : "pill error"}>
+                    {tool.success_rate.toFixed(1)}%
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* 内容分析 */}
+      <div className="card">
+        <h2>内容统计</h2>
+        <div className="content-stats">
+          <div>
+            <h3>消息角色分布</h3>
+            <table className="table">
+              <tbody>
+                {contentStats && Object.entries(contentStats.messages_by_role).map(([role, count]) => (
+                  <tr key={role}>
+                    <td><strong>{role}</strong></td>
+                    <td>{formatNumber(count)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <h3>会话消息数分布</h3>
+            <table className="table">
+              <tbody>
+                {contentStats && Object.entries(contentStats.session_message_distribution).map(([bucket, count]) => (
+                  <tr key={bucket}>
+                    <td><strong>{bucket} 条消息</strong></td>
+                    <td>{count} 个会话</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* 文件类型分析 */}
+      <div className="card">
+        <h2>文件类型分析</h2>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>文件类型</th>
+              <th>数量</th>
+              <th>总大小</th>
+            </tr>
+          </thead>
+          <tbody>
+            {contentStats?.files_by_type.map((file) => (
+              <tr key={file.mime_type}>
+                <td><strong>{file.mime_type}</strong></td>
+                <td>{formatNumber(file.count)}</td>
+                <td>{file.total_size_mb.toFixed(2)} MB</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
