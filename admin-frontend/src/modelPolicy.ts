@@ -4,6 +4,7 @@ export interface ModelEntry {
   name: string;
   protocol: string;
   base_url: string;
+  enabled?: boolean;
   api_key?: string;
   masked_key?: string;
 }
@@ -20,12 +21,16 @@ function modelMatchesDefault(model: ModelEntry, policy: ModelPolicy): boolean {
   return model.provider_id === policy.default_provider_id && model.id === policy.default_model_id;
 }
 
+function modelEnabled(model: ModelEntry): boolean {
+  return model.enabled !== false;
+}
+
 function firstCompleteModel(models: ModelEntry[]): ModelEntry | null {
-  return models.find((model) => model.provider_id.trim() && model.id.trim()) || null;
+  return models.find((model) => modelEnabled(model) && model.provider_id.trim() && model.id.trim()) || null;
 }
 
 export function ensureModelPolicyDefault(policy: ModelPolicy): ModelPolicy {
-  const currentDefaultExists = policy.models.some((model) => modelMatchesDefault(model, policy));
+  const currentDefaultExists = policy.models.some((model) => modelEnabled(model) && modelMatchesDefault(model, policy));
   if (currentDefaultExists) return policy;
 
   const nextDefault = firstCompleteModel(policy.models) || policy.models[0];
@@ -43,6 +48,7 @@ export function normaliseModelPolicy(policy: ModelPolicy): ModelPolicy {
       ...model,
       protocol: model.protocol || DEFAULT_MODEL_PROTOCOL,
       base_url: model.base_url || "",
+      enabled: model.enabled !== false,
       api_key: "",
     })),
   });
@@ -66,20 +72,15 @@ export function updateModelInPolicy(policy: ModelPolicy, index: number, patch: P
 export function addModelToPolicy(policy: ModelPolicy, model: ModelEntry): ModelPolicy {
   return ensureModelPolicyDefault({
     ...policy,
-    models: [...policy.models, model],
-  });
-}
-
-export function removeModelFromPolicy(policy: ModelPolicy, index: number): ModelPolicy {
-  return ensureModelPolicyDefault({
-    ...policy,
-    models: policy.models.filter((_, i) => i !== index),
+    models: [...policy.models, { ...model, enabled: model.enabled !== false }],
   });
 }
 
 export function setDefaultModelInPolicy(policy: ModelPolicy, index: number): ModelPolicy {
   const model = policy.models[index];
-  if (!model || !model.provider_id.trim() || !model.id.trim()) return ensureModelPolicyDefault(policy);
+  if (!model || model.enabled === false || !model.provider_id.trim() || !model.id.trim()) {
+    return ensureModelPolicyDefault(policy);
+  }
   return {
     ...policy,
     default_provider_id: model.provider_id,

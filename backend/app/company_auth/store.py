@@ -19,6 +19,7 @@ from sqlalchemy import (
     Table,
     Text,
     and_,
+    delete,
     func,
     insert,
     select,
@@ -105,6 +106,7 @@ class CompanyModelEntry:
     protocol: str = "openai_compatible"
     base_url: str = ""
     api_key: str = ""
+    enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -1085,6 +1087,14 @@ class CompanyAuthStore:
             row = result.mappings().first()
         return self._feedback_from_mapping(row) if row is not None else None
 
+    async def delete_feedback(self, feedback_id: str) -> CompanyFeedback | None:
+        feedback = await self.get_feedback(feedback_id)
+        if feedback is None:
+            return None
+        async with self.engine.begin() as conn:
+            await conn.execute(delete(self.feedback).where(self.feedback.c.id == feedback_id))
+        return feedback
+
     @staticmethod
     def _write_bootstrap_file(path: Path, payload: dict[str, str]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1232,7 +1242,12 @@ class CompanyAuthStore:
                 api_key = str(raw.get("api_key") or "").strip()
                 if not api_key and fallback is not None:
                     api_key = fallback.api_key
-                if strict:
+                raw_enabled = raw.get("enabled", fallback.enabled if fallback is not None else True)
+                if isinstance(raw_enabled, str):
+                    enabled = raw_enabled.strip().lower() not in {"0", "false", "no", "off"}
+                else:
+                    enabled = bool(raw_enabled)
+                if strict and enabled:
                     if protocol == "openai_compatible" and not base_url:
                         raise ValueError("Base URL is required for OpenAI-compatible models")
                     if not api_key:
@@ -1247,16 +1262,20 @@ class CompanyAuthStore:
                         protocol=protocol,
                         base_url=base_url,
                         api_key=api_key,
+                        enabled=enabled,
                     )
                 )
         if not entries:
             if strict:
                 raise ValueError("At least one model must be allowed")
             entries = list(default.models)
+        enabled_entries = [entry for entry in entries if entry.enabled]
+        if strict and not enabled_entries:
+            raise ValueError("At least one model must be enabled")
 
         if strict:
             provider_configs: dict[str, tuple[str, str, str]] = {}
-            for entry in entries:
+            for entry in enabled_entries:
                 config = (entry.protocol, entry.base_url, entry.api_key)
                 existing_config = provider_configs.get(entry.provider_id)
                 if existing_config is not None and existing_config != config:
@@ -1265,11 +1284,13 @@ class CompanyAuthStore:
 
         default_provider_id = str(payload.get("default_provider_id") or default.default_provider_id).strip()
         default_model_id = str(payload.get("default_model_id") or default.default_model_id).strip()
-        if (default_provider_id, default_model_id) not in {(entry.provider_id, entry.id) for entry in entries}:
+        enabled_model_keys = {(entry.provider_id, entry.id) for entry in enabled_entries}
+        if (default_provider_id, default_model_id) not in enabled_model_keys:
             if strict:
-                raise ValueError("Default model must be present in the allowed model list")
-            default_provider_id = entries[0].provider_id
-            default_model_id = entries[0].id
+                raise ValueError("Default model must be enabled and present in the allowed model list")
+            fallback_entries = enabled_entries or entries
+            default_provider_id = fallback_entries[0].provider_id
+            default_model_id = fallback_entries[0].id
 
         return CompanyModelPolicy(
             default_provider_id=default_provider_id,
@@ -1290,6 +1311,7 @@ class CompanyAuthStore:
                     "protocol": model.protocol,
                     "base_url": model.base_url,
                     "api_key": model.api_key,
+                    "enabled": model.enabled,
                 }
                 for model in policy.models
             ],

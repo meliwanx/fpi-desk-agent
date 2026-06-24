@@ -15,6 +15,8 @@ _MANAGED_PROVIDER_IDS_ATTR = "_company_policy_provider_ids"
 def _group_policy_models(policy: CompanyModelPolicy) -> dict[str, list[CompanyModelEntry]]:
     grouped: dict[str, list[CompanyModelEntry]] = {}
     for model in policy.models:
+        if not model.enabled:
+            continue
         if model.protocol not in {"openai_compatible", "anthropic"}:
             logger.warning("Skipping unsupported company model protocol %s for %s", model.protocol, model.id)
             continue

@@ -321,6 +321,74 @@ async def test_model_policy_preserves_api_key_when_admin_leaves_key_blank(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_model_policy_can_persist_disabled_models_without_runtime_config(tmp_path):
+    store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
+    await store.startup()
+    try:
+        updated = await store.update_model_policy(
+            default_provider_id="custom_backup",
+            default_model_id="gpt-5.4",
+            models=[
+                {
+                    "provider_id": "custom_backup",
+                    "id": "gpt-5.4",
+                    "name": "GPT-5.4",
+                    "protocol": "openai_compatible",
+                    "base_url": "https://backup.example.com/v1",
+                    "api_key": "sk-backup",
+                    "enabled": True,
+                },
+                {
+                    "provider_id": "custom_backup",
+                    "id": "gpt-disabled",
+                    "name": "GPT Disabled",
+                    "protocol": "openai_compatible",
+                    "base_url": "",
+                    "api_key": "",
+                    "enabled": False,
+                },
+            ],
+        )
+
+        assert [(m.id, m.enabled, m.base_url, m.api_key) for m in updated.models] == [
+            ("gpt-5.4", True, "https://backup.example.com/v1", "sk-backup"),
+            ("gpt-disabled", False, "", ""),
+        ]
+
+        reloaded = await store.get_model_policy()
+        assert [(m.id, m.enabled) for m in reloaded.models] == [
+            ("gpt-5.4", True),
+            ("gpt-disabled", False),
+        ]
+
+        with pytest.raises(ValueError, match="Default model must be enabled"):
+            await store.update_model_policy(
+                default_provider_id="custom_backup",
+                default_model_id="gpt-disabled",
+                models=[
+                    {
+                        "provider_id": "custom_backup",
+                        "id": "gpt-5.4",
+                        "name": "GPT-5.4",
+                        "protocol": "openai_compatible",
+                        "base_url": "https://backup.example.com/v1",
+                        "api_key": "sk-backup",
+                        "enabled": True,
+                    },
+                    {
+                        "provider_id": "custom_backup",
+                        "id": "gpt-disabled",
+                        "name": "GPT Disabled",
+                        "protocol": "openai_compatible",
+                        "enabled": False,
+                    },
+                ],
+            )
+    finally:
+        await store.dispose()
+
+
+@pytest.mark.asyncio
 async def test_model_policy_accepts_anthropic_protocol_without_base_url(tmp_path):
     store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
     await store.startup()
@@ -487,5 +555,10 @@ async def test_feedback_persists_user_content_and_optional_image_metadata(tmp_pa
 
         loaded = await store.get_feedback(feedback.id)
         assert loaded == feedback
+
+        deleted = await store.delete_feedback(feedback.id)
+        assert deleted == feedback
+        assert await store.get_feedback(feedback.id) is None
+        assert await store.list_feedback() == []
     finally:
         await store.dispose()

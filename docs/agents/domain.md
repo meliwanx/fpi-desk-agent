@@ -6,6 +6,7 @@ Before architecture, diagnosis, TDD, or issue-writing work, read:
 
 - `CONTEXT.md` at the repo root for project vocabulary
 - Relevant ADRs under `docs/adr/`
+- `docs/agents/deployment.md` before deployment or server access work
 - `.dev/ARCHITECTURE.md` when module dependency rules matter
 - `.dev/CONVENTIONS.md` when coding or testing conventions matter
 

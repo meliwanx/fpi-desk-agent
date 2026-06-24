@@ -12,10 +12,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_serializer
-from sqlalchemy import func, or_, select
+from sqlalchemy import String, case, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 from starlette.responses import FileResponse
@@ -83,6 +83,7 @@ class AdminModelPolicyEntryRequest(BaseModel):
     protocol: str = "openai_compatible"
     base_url: str = ""
     api_key: str | None = None
+    enabled: bool = True
 
 
 class AdminModelPolicyEntryResponse(BaseModel):
@@ -92,6 +93,7 @@ class AdminModelPolicyEntryResponse(BaseModel):
     protocol: str
     base_url: str
     masked_key: str
+    enabled: bool
 
 
 class AdminModelPolicyRequest(BaseModel):
@@ -329,6 +331,7 @@ def _public_model_policy(policy: CompanyModelPolicy) -> AdminModelPolicyResponse
                 protocol=model.protocol,
                 base_url=model.base_url,
                 masked_key=_masked_api_key(model.api_key),
+                enabled=model.enabled,
             )
             for model in policy.models
         ],
@@ -902,6 +905,28 @@ async def list_admin_feedback(request: Request) -> AdminFeedbackListResponse:
         return AdminFeedbackListResponse(items=[])
     items = await store.list_feedback()
     return AdminFeedbackListResponse(items=[_public_feedback(request, item) for item in items])
+
+
+@router.delete("/admin/feedback/{feedback_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_admin_feedback(
+    request: Request,
+    settings: SettingsDep,
+    feedback_id: str,
+) -> Response:
+    _require_admin(request)
+    store = _company_store(request)
+    if not hasattr(store, "delete_feedback"):
+        raise HTTPException(status_code=404, detail="Feedback not found")
+    feedback = await store.delete_feedback(feedback_id)
+    if feedback is None:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+    if feedback.image_stored_filename:
+        file_path = _feedback_storage_dir(settings) / Path(feedback.image_stored_filename).name
+        try:
+            file_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/admin/feedback/{feedback_id}/image", name="download_admin_feedback_image")
@@ -1658,6 +1683,166 @@ async def get_audit_session_messages(
     }
 
 
+@router.get("/admin/audit/entries")
+async def list_audit_entries(
+    request: Request,
+    db: DbDep,
+    q: str = "",
+    role: str | None = None,
+    part_type: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Return flattened audited message parts across all sessions."""
+    _require_admin(request)
+    stmt = (
+        select(AuditPart, AuditMessage, AuditSession)
+        .join(AuditMessage, AuditMessage.local_message_id == AuditPart.local_message_id)
+        .outerjoin(AuditSession, AuditSession.local_session_id == AuditPart.local_session_id)
+    )
+    count_stmt = (
+        select(func.count())
+        .select_from(AuditPart)
+        .join(AuditMessage, AuditMessage.local_message_id == AuditPart.local_message_id)
+        .outerjoin(AuditSession, AuditSession.local_session_id == AuditPart.local_session_id)
+    )
+    filters = []
+    if role:
+        filters.append(AuditMessage.role == role.strip())
+    if part_type:
+        filters.append(AuditPart.part_type == part_type.strip())
+    if q.strip():
+        pattern = f"%{q.strip()}%"
+        filters.append(
+            or_(
+                AuditSession.title.like(pattern),
+                AuditSession.workspace.like(pattern),
+                AuditSession.user_email.like(pattern),
+                AuditSession.user_display_name.like(pattern),
+                AuditMessage.role.like(pattern),
+                AuditPart.part_type.like(pattern),
+                cast(AuditPart.data, String).like(pattern),
+            )
+        )
+    for condition in filters:
+        stmt = stmt.where(condition)
+        count_stmt = count_stmt.where(condition)
+
+    limit = min(max(int(limit or 100), 1), 500)
+    offset = max(int(offset or 0), 0)
+    stmt = stmt.order_by(AuditPart.time_created.desc()).offset(offset).limit(limit)
+    total = int((await db.execute(count_stmt)).scalar_one() or 0)
+    rows = list((await db.execute(stmt)).all())
+    part_ids = [part.local_part_id for part, _message, _session in rows]
+    files_by_part: dict[str, AuditFile] = {}
+    tools_by_part: dict[str, AuditToolCall] = {}
+    usage_by_part: dict[str, AuditUsage] = {}
+    risks_by_part: dict[str, list[AuditRiskFinding]] = {}
+    if part_ids:
+        files = list((await db.execute(select(AuditFile).where(AuditFile.local_part_id.in_(part_ids)))).scalars().all())
+        files_by_part = {file.local_part_id: file for file in files}
+        tools = list((await db.execute(select(AuditToolCall).where(AuditToolCall.local_part_id.in_(part_ids)))).scalars().all())
+        tools_by_part = {tool.local_part_id: tool for tool in tools}
+        usage_rows = list((await db.execute(select(AuditUsage).where(AuditUsage.local_part_id.in_(part_ids)))).scalars().all())
+        usage_by_part = {usage.local_part_id: usage for usage in usage_rows}
+        risk_rows = list(
+            (
+                await db.execute(select(AuditRiskFinding).where(AuditRiskFinding.local_part_id.in_(part_ids)))
+            ).scalars().all()
+        )
+        for risk in risk_rows:
+            risks_by_part.setdefault(risk.local_part_id, []).append(risk)
+
+    return {
+        "total": total,
+        "items": [
+            {
+                "id": part.local_part_id,
+                "type": part.part_type,
+                "data": part.data,
+                "time_created": _datetime_iso(part.time_created),
+                "message": {
+                    "id": message.local_message_id,
+                    "role": message.role,
+                    "data": message.data,
+                    "time_created": _datetime_iso(message.time_created),
+                },
+                "session": (
+                    {
+                        "id": session.local_session_id,
+                        "title": session.title,
+                        "workspace": session.workspace,
+                        "user_id": session.user_id,
+                        "user_email": session.user_email,
+                        "user_display_name": session.user_display_name,
+                        "model_id": session.model_id,
+                        "provider_id": session.provider_id,
+                        "time_created": _datetime_iso(session.time_created),
+                        "time_updated": _datetime_iso(session.time_updated),
+                    }
+                    if session is not None
+                    else None
+                ),
+                "tool_call": (
+                    {
+                        "tool": tools_by_part[part.local_part_id].tool_name,
+                        "call_id": tools_by_part[part.local_part_id].call_id,
+                        "status": tools_by_part[part.local_part_id].status,
+                        "title": tools_by_part[part.local_part_id].title,
+                        "input": tools_by_part[part.local_part_id].input_json,
+                        "output_preview": tools_by_part[part.local_part_id].output_preview,
+                        "metadata": tools_by_part[part.local_part_id].metadata_json,
+                    }
+                    if part.local_part_id in tools_by_part
+                    else None
+                ),
+                "usage": (
+                    {
+                        "finish_reason": usage_by_part[part.local_part_id].finish_reason,
+                        "input_tokens": usage_by_part[part.local_part_id].input_tokens,
+                        "output_tokens": usage_by_part[part.local_part_id].output_tokens,
+                        "reasoning_tokens": usage_by_part[part.local_part_id].reasoning_tokens,
+                        "cache_read_tokens": usage_by_part[part.local_part_id].cache_read_tokens,
+                        "cache_write_tokens": usage_by_part[part.local_part_id].cache_write_tokens,
+                        "total_tokens": usage_by_part[part.local_part_id].total_tokens,
+                        "cost": usage_by_part[part.local_part_id].cost,
+                    }
+                    if part.local_part_id in usage_by_part
+                    else None
+                ),
+                "risks": [
+                    {
+                        "id": risk.id,
+                        "kind": risk.kind,
+                        "severity": risk.severity,
+                        "status": risk.status,
+                        "summary": risk.summary,
+                        "evidence_preview": risk.evidence_preview,
+                    }
+                    for risk in risks_by_part.get(part.local_part_id, [])
+                ],
+                "file": (
+                    {
+                        "name": files_by_part[part.local_part_id].name,
+                        "size": files_by_part[part.local_part_id].size,
+                        "mime_type": files_by_part[part.local_part_id].mime_type,
+                        "content_hash": files_by_part[part.local_part_id].content_hash,
+                        "content_uploaded": files_by_part[part.local_part_id].content_uploaded,
+                        "download_url": (
+                            f"/api/admin/audit/files/{part.local_part_id}/download"
+                            if files_by_part[part.local_part_id].content_uploaded
+                            else None
+                        ),
+                    }
+                    if part.local_part_id in files_by_part
+                    else None
+                ),
+            }
+            for part, message, session in rows
+        ],
+    }
+
+
 @router.get("/admin/audit/analytics/users")
 async def get_user_analytics(
     request: Request,
@@ -1670,6 +1855,23 @@ async def get_user_analytics(
     cutoff = shanghai_now() - timedelta(days=days)
 
     # 按用户统计会话数、消息数、Token 消耗
+    message_counts = (
+        select(
+            AuditMessage.local_session_id.label("local_session_id"),
+            func.count(AuditMessage.local_message_id).label("message_count"),
+        )
+        .group_by(AuditMessage.local_session_id)
+        .subquery()
+    )
+    usage_totals = (
+        select(
+            AuditUsage.local_session_id.label("local_session_id"),
+            func.coalesce(func.sum(AuditUsage.total_tokens), 0).label("total_tokens"),
+            func.coalesce(func.sum(AuditUsage.cost), 0).label("total_cost"),
+        )
+        .group_by(AuditUsage.local_session_id)
+        .subquery()
+    )
     user_stats = (
         await db.execute(
             select(
@@ -1677,13 +1879,13 @@ async def get_user_analytics(
                 AuditSession.user_email,
                 AuditSession.user_display_name,
                 func.count(func.distinct(AuditSession.local_session_id)).label("session_count"),
-                func.count(func.distinct(AuditMessage.local_message_id)).label("message_count"),
-                func.coalesce(func.sum(AuditUsage.total_tokens), 0).label("total_tokens"),
-                func.coalesce(func.sum(AuditUsage.cost), 0).label("total_cost"),
+                func.coalesce(func.sum(message_counts.c.message_count), 0).label("message_count"),
+                func.coalesce(func.sum(usage_totals.c.total_tokens), 0).label("total_tokens"),
+                func.coalesce(func.sum(usage_totals.c.total_cost), 0).label("total_cost"),
             )
             .select_from(AuditSession)
-            .outerjoin(AuditMessage, AuditMessage.local_session_id == AuditSession.local_session_id)
-            .outerjoin(AuditUsage, AuditUsage.local_session_id == AuditSession.local_session_id)
+            .outerjoin(message_counts, message_counts.c.local_session_id == AuditSession.local_session_id)
+            .outerjoin(usage_totals, usage_totals.c.local_session_id == AuditSession.local_session_id)
             .where(AuditSession.time_created >= cutoff)
             .group_by(AuditSession.user_id, AuditSession.user_email, AuditSession.user_display_name)
             .order_by(func.count(func.distinct(AuditSession.local_session_id)).desc())
@@ -1742,21 +1944,40 @@ async def get_model_analytics(
     cutoff = shanghai_now() - timedelta(days=days)
 
     # 按模型统计
+    message_counts = (
+        select(
+            AuditMessage.local_session_id.label("local_session_id"),
+            func.count(AuditMessage.local_message_id).label("message_count"),
+        )
+        .group_by(AuditMessage.local_session_id)
+        .subquery()
+    )
+    usage_totals = (
+        select(
+            AuditUsage.local_session_id.label("local_session_id"),
+            func.coalesce(func.sum(AuditUsage.total_tokens), 0).label("total_tokens"),
+            func.coalesce(func.sum(AuditUsage.input_tokens), 0).label("input_tokens"),
+            func.coalesce(func.sum(AuditUsage.output_tokens), 0).label("output_tokens"),
+            func.coalesce(func.sum(AuditUsage.cost), 0).label("total_cost"),
+        )
+        .group_by(AuditUsage.local_session_id)
+        .subquery()
+    )
     model_stats = (
         await db.execute(
             select(
                 AuditSession.model_id,
                 AuditSession.provider_id,
                 func.count(func.distinct(AuditSession.local_session_id)).label("session_count"),
-                func.count(func.distinct(AuditMessage.local_message_id)).label("message_count"),
-                func.coalesce(func.sum(AuditUsage.total_tokens), 0).label("total_tokens"),
-                func.coalesce(func.sum(AuditUsage.input_tokens), 0).label("input_tokens"),
-                func.coalesce(func.sum(AuditUsage.output_tokens), 0).label("output_tokens"),
-                func.coalesce(func.sum(AuditUsage.cost), 0).label("total_cost"),
+                func.coalesce(func.sum(message_counts.c.message_count), 0).label("message_count"),
+                func.coalesce(func.sum(usage_totals.c.total_tokens), 0).label("total_tokens"),
+                func.coalesce(func.sum(usage_totals.c.input_tokens), 0).label("input_tokens"),
+                func.coalesce(func.sum(usage_totals.c.output_tokens), 0).label("output_tokens"),
+                func.coalesce(func.sum(usage_totals.c.total_cost), 0).label("total_cost"),
             )
             .select_from(AuditSession)
-            .outerjoin(AuditMessage, AuditMessage.local_session_id == AuditSession.local_session_id)
-            .outerjoin(AuditUsage, AuditUsage.local_session_id == AuditSession.local_session_id)
+            .outerjoin(message_counts, message_counts.c.local_session_id == AuditSession.local_session_id)
+            .outerjoin(usage_totals, usage_totals.c.local_session_id == AuditSession.local_session_id)
             .where(AuditSession.time_created >= cutoff)
             .group_by(AuditSession.model_id, AuditSession.provider_id)
             .order_by(func.count(func.distinct(AuditSession.local_session_id)).desc())
@@ -1803,8 +2024,8 @@ async def get_tool_analytics(
             select(
                 AuditToolCall.tool_name,
                 func.count(AuditToolCall.id).label("call_count"),
-                func.sum(func.case((AuditToolCall.status == "completed", 1), else_=0)).label("success_count"),
-                func.sum(func.case((AuditToolCall.status == "error", 1), else_=0)).label("error_count"),
+                func.coalesce(func.sum(case((AuditToolCall.status == "completed", 1), else_=0)), 0).label("success_count"),
+                func.coalesce(func.sum(case((AuditToolCall.status == "error", 1), else_=0)), 0).label("error_count"),
             )
             .where(AuditToolCall.time_created >= cutoff)
             .group_by(AuditToolCall.tool_name)

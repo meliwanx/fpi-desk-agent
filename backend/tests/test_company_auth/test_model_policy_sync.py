@@ -36,6 +36,40 @@ async def test_sync_company_model_policy_registers_openai_compatible_provider():
     ]
 
 
+async def test_sync_company_model_policy_skips_disabled_models():
+    registry = ProviderRegistry()
+    policy = CompanyModelPolicy(
+        default_provider_id="custom_backup",
+        default_model_id="gpt-5.4",
+        models=[
+            CompanyModelEntry(
+                provider_id="custom_backup",
+                id="gpt-5.4",
+                name="GPT-5.4",
+                protocol="openai_compatible",
+                base_url="https://backup.example.com/v1",
+                api_key="sk-backup",
+                enabled=True,
+            ),
+            CompanyModelEntry(
+                provider_id="custom_backup",
+                id="gpt-disabled",
+                name="GPT Disabled",
+                protocol="openai_compatible",
+                base_url="https://backup.example.com/v1",
+                api_key="sk-backup",
+                enabled=False,
+            ),
+        ],
+    )
+
+    await sync_company_model_policy(registry, policy)
+
+    assert [(model.provider_id, model.id, model.name) for model in registry.all_models()] == [
+        ("custom_backup", "gpt-5.4", "GPT-5.4")
+    ]
+
+
 async def test_sync_company_model_policy_registers_anthropic_provider_with_allowed_models():
     registry = ProviderRegistry()
     policy = CompanyModelPolicy(

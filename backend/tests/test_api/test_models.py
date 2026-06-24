@@ -70,6 +70,62 @@ class TestListModels:
             ("custom_onlyme", "gpt-5.5")
         ]
 
+    async def test_company_model_policy_hides_disabled_models(self, app_client):
+        class FakeCompanyStore:
+            async def get_session_user(self, token: str):
+                return CompanyUser(
+                    id="employee-1",
+                    email="employee@example.com",
+                    display_name="Employee One",
+                    role="user",
+                    is_active=True,
+                )
+
+            async def get_model_policy(self):
+                return CompanyModelPolicy(
+                    default_provider_id="custom_onlyme",
+                    default_model_id="gpt-5.5",
+                    models=[
+                        CompanyModelEntry(
+                            provider_id="custom_onlyme",
+                            id="gpt-5.5",
+                            name="GPT-5.5",
+                            protocol="openai_compatible",
+                            base_url="https://sub2api.onlymeok.com/v1",
+                            api_key="sk-secret",
+                            enabled=True,
+                        ),
+                        CompanyModelEntry(
+                            provider_id="custom_onlyme",
+                            id="gpt-5-disabled",
+                            name="GPT Disabled",
+                            protocol="openai_compatible",
+                            base_url="https://sub2api.onlymeok.com/v1",
+                            api_key="sk-secret",
+                            enabled=False,
+                        ),
+                    ],
+                )
+
+        app_client.app.state.settings.company_auth_enabled = True
+        app_client.app.state.company_auth_store = FakeCompanyStore()
+        app_client.app.state.provider_registry.all_models.return_value = [
+            ModelInfo(id="gpt-5.5", name="GPT-5.5", provider_id="custom_onlyme", capabilities=ModelCapabilities()),
+            ModelInfo(id="gpt-5-disabled", name="GPT Disabled", provider_id="custom_onlyme", capabilities=ModelCapabilities()),
+        ]
+
+        listed = await app_client.get("/api/models", headers={"X-FPI-Session": "token"})
+        runtime = await app_client.get("/api/models/policy/runtime", headers={"X-FPI-Session": "token"})
+
+        assert listed.status_code == 200
+        assert [(m["provider_id"], m["id"]) for m in listed.json()] == [
+            ("custom_onlyme", "gpt-5.5")
+        ]
+        assert runtime.status_code == 200
+        assert [(m["provider_id"], m["id"]) for m in runtime.json()["models"]] == [
+            ("custom_onlyme", "gpt-5.5")
+        ]
+
     async def test_company_model_policy_endpoint_returns_default(self, app_client):
         class FakeCompanyStore:
             async def get_session_user(self, token: str):

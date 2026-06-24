@@ -4,14 +4,24 @@ import {
   addModelToPolicy,
   ensureModelPolicyDefault,
   normaliseModelPolicy,
-  removeModelFromPolicy,
   setDefaultModelInPolicy,
   updateModelInPolicy,
   type ModelEntry,
   type ModelPolicy,
 } from "./modelPolicy";
 
-type Tab = "overview" | "sessions" | "analytics" | "risks" | "tools" | "feedback" | "users" | "actions" | "models" | "updates";
+type Tab =
+  | "overview"
+  | "sessions"
+  | "allInfo"
+  | "analytics"
+  | "risks"
+  | "tools"
+  | "feedback"
+  | "users"
+  | "actions"
+  | "models"
+  | "updates";
 
 interface UserInfo {
   id: string;
@@ -83,10 +93,12 @@ interface AuditSession {
   id: string;
   title: string;
   workspace: string;
+  user_id?: string;
   user_email: string;
   user_display_name: string;
   model_id: string | null;
   provider_id: string | null;
+  time_created: string;
   time_updated: string;
 }
 
@@ -200,6 +212,17 @@ interface TranscriptRisk {
   evidence_preview: string;
 }
 
+interface AuditEntry extends TranscriptPart {
+  time_created: string;
+  message: {
+    id: string;
+    role: string;
+    data: Record<string, unknown>;
+    time_created: string;
+  };
+  session: AuditSession | null;
+}
+
 interface UpdatePolicy {
   enabled: boolean;
   latest_version: string;
@@ -287,6 +310,7 @@ function partTypeLabel(type: string): string {
     reasoning: "思考",
     tool: "工具",
     tool_call: "工具",
+    "step-finish": "用量",
     step_finish: "用量",
     file: "文件",
   }[type] || type || "内容";
@@ -314,6 +338,15 @@ function textFromPart(part: TranscriptPart): string {
     return JSON.stringify(part.data, null, 2);
   }
   return "";
+}
+
+function previewFromPart(part: TranscriptPart): string {
+  const text = textFromPart(part);
+  if (text) return compactAuditValue(text, 120);
+  if (part.tool_call) return compactAuditValue(part.tool_call.title || part.tool_call.tool, 120);
+  if (part.file) return compactAuditValue(part.file.name, 120);
+  if (part.usage) return `Token ${formatNumber(part.usage.total_tokens)} · $${Number(part.usage.cost || 0).toFixed(4)}`;
+  return compactAuditValue(part.data, 120);
 }
 
 function KeyValueGrid({ value }: { value: Record<string, unknown> }) {
@@ -455,6 +488,8 @@ export function App() {
           {[
             ["overview", "总览"],
             ["sessions", "会话审计"],
+            ["allInfo", "全部信息"],
+            ["analytics", "数据分析"],
             ["risks", "风险发现"],
             ["tools", "工具调用"],
             ["feedback", "问题反馈"],
@@ -489,6 +524,7 @@ export function App() {
 
         {tab === "overview" && <Overview api={api} />}
         {tab === "sessions" && <Sessions api={api} token={token} />}
+        {tab === "allInfo" && <AllAuditInfo api={api} token={token} />}
         {tab === "analytics" && <Analytics api={api} token={token} />}
         {tab === "risks" && <Risks api={api} />}
         {tab === "tools" && <ToolCalls api={api} />}
@@ -506,6 +542,7 @@ function tabTitle(tab: Tab): string {
   return {
     overview: "企业审计总览",
     sessions: "会话审计",
+    allInfo: "全部信息",
     analytics: "数据分析",
     risks: "风险发现",
     tools: "工具调用",
@@ -520,7 +557,8 @@ function tabTitle(tab: Tab): string {
 function tabSubtitle(tab: Tab): string {
   return {
     overview: "查看员工使用规模、token 消耗、风险和文件同步情况。",
-    sessions: "按员工、工作区查看每一条对话记录和上传文件。",
+    sessions: "以会话为单位查看记录，点击表格行后查看完整详情。",
+    allInfo: "跨会话查看所有消息片段、工具调用、文件和用量记录。",
     analytics: "深度分析用户行为、模型使用、成本趋势，导出数字资产数据。",
     risks: "集中处理敏感内容、密钥、订阅链接等风险线索。",
     tools: "审计模型调用的本地工具、输入、输出和状态。",
@@ -673,30 +711,68 @@ function Sessions({ api, token }: { api: ReturnType<typeof useApi>; token: strin
   const files = messages.flatMap((message) =>
     message.parts.filter((part) => part.file).map((part) => ({ partId: part.id, ...part.file! })),
   );
+  const selectedSession = sessions.find((session) => session.id === selected) || null;
 
   return (
-    <div className="split">
-      <section className="card">
+    <div className="audit-workspace session-audit-workspace">
+      <section className="card audit-table-card">
         <div className="toolbar">
           <input className="input" placeholder="搜索员工、标题、工作区" value={query} onChange={(e) => setQuery(e.target.value)} />
           <button className="button" onClick={() => void loadSessions()}>搜索</button>
         </div>
-        <div className="list">
-          {sessions.map((session) => (
-            <button
-              key={session.id}
-              className={`list-item ${selected === session.id ? "active" : ""}`}
-              onClick={() => void loadTranscript(session.id)}
-            >
-              <strong>{session.title || "未命名会话"}</strong>
-              <span>{session.user_display_name || session.user_email}</span>
-              <small>{session.workspace || "无工作区"} · {compactDate(session.time_updated)}</small>
-            </button>
-          ))}
+        <div className="table-scroll">
+          <table className="session-table table">
+            <thead>
+              <tr>
+                <th>会话</th>
+                <th>员工</th>
+                <th>工作区</th>
+                <th>模型</th>
+                <th>更新时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sessions.map((session) => (
+                <tr
+                  key={session.id}
+                  className={selected === session.id ? "is-selected" : ""}
+                  onClick={() => void loadTranscript(session.id)}
+                >
+                  <td>
+                    <strong>{session.title || "未命名会话"}</strong>
+                    <div className="muted mono">{session.id}</div>
+                  </td>
+                  <td>
+                    <strong>{session.user_display_name || session.user_email}</strong>
+                    <div className="muted">{session.user_email}</div>
+                  </td>
+                  <td className="mono">{session.workspace || "无工作区"}</td>
+                  <td>{session.model_id || "-"}<div className="muted">{session.provider_id || ""}</div></td>
+                  <td>{compactDate(session.time_updated)}</td>
+                </tr>
+              ))}
+              {sessions.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="muted">暂无会话</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </section>
-      <section className="card transcript">
-        <h2>对话详情</h2>
+      <section className="card transcript audit-detail">
+        <div className="detail-header">
+          <div>
+            <h2>对话详情</h2>
+            {selectedSession && (
+              <div className="detail-meta">
+                <span>{selectedSession.user_display_name || selectedSession.user_email}</span>
+                <span>{selectedSession.workspace || "无工作区"}</span>
+                <span>{compactDate(selectedSession.time_updated)}</span>
+              </div>
+            )}
+          </div>
+        </div>
         {files.length > 0 && (
           <div className="file-list">
             {files.map((file) => (
@@ -712,7 +788,7 @@ function Sessions({ api, token }: { api: ReturnType<typeof useApi>; token: strin
           </div>
         )}
         {messages.length === 0 ? (
-          <p className="muted">选择左侧会话查看详情</p>
+          <p className="muted">选择上方会话查看详情</p>
         ) : (
           messages.map((message) => (
             <article className="message" key={message.id}>
@@ -725,6 +801,115 @@ function Sessions({ api, token }: { api: ReturnType<typeof useApi>; token: strin
               ))}
             </article>
           ))
+        )}
+      </section>
+    </div>
+  );
+}
+
+function AllAuditInfo({ api, token }: { api: ReturnType<typeof useApi>; token: string }) {
+  const [query, setQuery] = useState("");
+  const [type, setType] = useState("");
+  const [entries, setEntries] = useState<AuditEntry[]>([]);
+  const [total, setTotal] = useState(0);
+  const [selected, setSelected] = useState<string | null>(null);
+
+  async function loadEntries() {
+    const params = new URLSearchParams({ limit: "200" });
+    if (query.trim()) params.set("q", query.trim());
+    if (type) params.set("part_type", type);
+    const data = await api<{ total: number; items: AuditEntry[] }>(`/api/admin/audit/entries?${params.toString()}`);
+    setEntries(data.items);
+    setTotal(data.total);
+    if (selected && !data.items.some((entry) => entry.id === selected)) {
+      setSelected(null);
+    }
+  }
+
+  useEffect(() => {
+    void loadEntries();
+  }, []);
+
+  const selectedEntry = entries.find((entry) => entry.id === selected) || null;
+
+  return (
+    <div className="audit-workspace all-info-workspace">
+      <section className="card audit-table-card">
+        <div className="toolbar">
+          <input className="input" placeholder="搜索员工、会话、工作区、内容" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <select className="input audit-filter-select" value={type} onChange={(event) => setType(event.target.value)}>
+            <option value="">全部类型</option>
+            <option value="text">文本</option>
+            <option value="tool">工具</option>
+            <option value="step-finish">用量</option>
+            <option value="file">文件</option>
+            <option value="reasoning">思考</option>
+          </select>
+          <button className="button" onClick={() => void loadEntries()}>搜索</button>
+          <span className="muted">共 {formatNumber(total)} 条</span>
+        </div>
+        <div className="table-scroll">
+          <table className="entries-table table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>员工</th>
+                <th>会话</th>
+                <th>角色</th>
+                <th>类型</th>
+                <th>内容摘要</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((entry) => (
+                <tr
+                  key={entry.id}
+                  className={selected === entry.id ? "is-selected" : ""}
+                  onClick={() => setSelected(entry.id)}
+                >
+                  <td>{compactDate(entry.time_created)}</td>
+                  <td>
+                    <strong>{entry.session?.user_display_name || entry.session?.user_email || "-"}</strong>
+                    <div className="muted">{entry.session?.user_email || ""}</div>
+                  </td>
+                  <td>
+                    <strong>{entry.session?.title || "未命名会话"}</strong>
+                    <div className="muted mono">{entry.session?.workspace || "无工作区"}</div>
+                  </td>
+                  <td><span className={`role-badge ${entry.message.role}`}>{roleLabel(entry.message.role)}</span></td>
+                  <td><span className="badge">{partTypeLabel(entry.type)}</span></td>
+                  <td>{previewFromPart(entry)}</td>
+                </tr>
+              ))}
+              {entries.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="muted">暂无内容</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section className="card audit-detail">
+        <div className="detail-header">
+          <div>
+            <h2>信息详情</h2>
+            {selectedEntry && (
+              <div className="detail-meta">
+                <span>{selectedEntry.session?.title || selectedEntry.session?.id || "-"}</span>
+                <span>{roleLabel(selectedEntry.message.role)}</span>
+                <span>{compactDate(selectedEntry.time_created)}</span>
+              </div>
+            )}
+          </div>
+        </div>
+        {selectedEntry ? (
+          <>
+            <AuditPartView part={selectedEntry} token={token} />
+            <RawDataDetails data={selectedEntry} />
+          </>
+        ) : (
+          <p className="muted">选择上方信息查看详情</p>
         )}
       </section>
     </div>
@@ -854,6 +1039,7 @@ function AdminActions({ api }: { api: ReturnType<typeof useApi> }) {
 function FeedbackPanel({ api, token }: { api: ReturnType<typeof useApi>; token: string }) {
   const [items, setItems] = useState<FeedbackItem[]>([]);
   const [error, setError] = useState("");
+  const [deletingId, setDeletingId] = useState("");
 
   async function loadFeedback() {
     setError("");
@@ -868,6 +1054,21 @@ function FeedbackPanel({ api, token }: { api: ReturnType<typeof useApi>; token: 
   useEffect(() => {
     void loadFeedback();
   }, []);
+
+  async function deleteFeedback(feedbackId: string) {
+    const confirmed = window.confirm("确定删除这条反馈吗？删除后图片附件也会一起清理。");
+    if (!confirmed) return;
+    setError("");
+    setDeletingId(feedbackId);
+    try {
+      await api(`/api/admin/feedback/${encodeURIComponent(feedbackId)}`, { method: "DELETE" });
+      setItems((current) => current.filter((item) => item.id !== feedbackId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "反馈删除失败");
+    } finally {
+      setDeletingId("");
+    }
+  }
 
   if (error) return <section className="card error">{error}</section>;
 
@@ -884,6 +1085,13 @@ function FeedbackPanel({ api, token }: { api: ReturnType<typeof useApi>; token: 
                   <strong>{item.user_display_name || item.user_email || "未知员工"}</strong>
                   <div className="muted">{item.user_email || "-"} · {compactDate(item.time_created)}</div>
                 </div>
+                <button
+                  className="button ghost danger-text"
+                  disabled={deletingId === item.id}
+                  onClick={() => void deleteFeedback(item.id)}
+                >
+                  {deletingId === item.id ? "删除中" : "删除"}
+                </button>
               </div>
               <p className="feedback-description">{item.description}</p>
               {item.image_download_url && (
@@ -1168,6 +1376,7 @@ function ModelPolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
             name: "",
             protocol: DEFAULT_MODEL_PROTOCOL,
             base_url: "https://",
+            enabled: true,
             api_key: "",
           }))}
         >
@@ -1176,18 +1385,26 @@ function ModelPolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
         <button className="button" onClick={() => void savePolicy()}>保存策略</button>
       </div>
       <div className="model-list">
-        {policy.models.map((model, index) => (
-          <div className="model-row" key={`${index}-${model.provider_id}-${model.id}`}>
+        {policy.models.map((model, index) => {
+          const enabled = model.enabled !== false;
+          return (
+          <div className={`model-row ${enabled ? "" : "is-disabled"}`} key={`${index}-${model.provider_id}-${model.id}`}>
             <label className="default-model-choice">
               <input
                 type="radio"
                 name="default-model"
                 checked={model.provider_id === policy.default_provider_id && model.id === policy.default_model_id}
-                disabled={!model.provider_id.trim() || !model.id.trim()}
+                disabled={!enabled || !model.provider_id.trim() || !model.id.trim()}
                 onChange={() => setPolicy(setDefaultModelInPolicy(policy, index))}
               />
               <span>默认</span>
             </label>
+            <button
+              className={`button ghost ${enabled ? "" : "button-state-muted"}`}
+              onClick={() => updateModel(index, { enabled: !enabled })}
+            >
+              {enabled ? "禁用" : "启用"}
+            </button>
             <label className="model-field">
               <span>协议</span>
               <select className="input" value={model.protocol || DEFAULT_MODEL_PROTOCOL} onChange={(e) => updateModel(index, { protocol: e.target.value })}>
@@ -1221,14 +1438,9 @@ function ModelPolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
                 onChange={(e) => updateModel(index, { api_key: e.target.value })}
               />
             </label>
-            <button
-              className="button ghost"
-              onClick={() => setPolicy(removeModelFromPolicy(policy, index))}
-            >
-              移除
-            </button>
           </div>
-        ))}
+          );
+        })}
       </div>
       {message && <p className={message.startsWith("已保存") ? "success" : "error"}>{message}</p>}
     </section>
@@ -1505,6 +1717,7 @@ interface TimelineAnalytics {
 function Analytics({ api, token }: { api: ReturnType<typeof useApi>; token: string }) {
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [userStats, setUserStats] = useState<UserAnalytics | null>(null);
   const [modelStats, setModelStats] = useState<ModelAnalytics | null>(null);
   const [toolStats, setToolStats] = useState<ToolAnalytics | null>(null);
@@ -1517,21 +1730,35 @@ function Analytics({ api, token }: { api: ReturnType<typeof useApi>; token: stri
 
   async function loadAnalytics() {
     setLoading(true);
+    setError("");
     try {
+      async function loadOne<T>(path: string): Promise<T | null> {
+        try {
+          return await api<T>(path);
+        } catch (error) {
+          console.error("加载分析接口失败:", path, error);
+          return null;
+        }
+      }
+
       const [users, models, tools, content, time] = await Promise.all([
-        api<UserAnalytics>(`/api/admin/audit/analytics/users?days=${days}`),
-        api<ModelAnalytics>(`/api/admin/audit/analytics/models?days=${days}`),
-        api<ToolAnalytics>(`/api/admin/audit/analytics/tools?days=${days}`),
-        api<ContentAnalytics>(`/api/admin/audit/analytics/content?days=${days}`),
-        api<TimelineAnalytics>(`/api/admin/audit/analytics/timeline?days=${days}`),
+        loadOne<UserAnalytics>(`/api/admin/audit/analytics/users?days=${days}`),
+        loadOne<ModelAnalytics>(`/api/admin/audit/analytics/models?days=${days}`),
+        loadOne<ToolAnalytics>(`/api/admin/audit/analytics/tools?days=${days}`),
+        loadOne<ContentAnalytics>(`/api/admin/audit/analytics/content?days=${days}`),
+        loadOne<TimelineAnalytics>(`/api/admin/audit/analytics/timeline?days=${days}`),
       ]);
       setUserStats(users);
       setModelStats(models);
       setToolStats(tools);
       setContentStats(content);
       setTimeline(time);
+      if ([users, models, tools, content, time].some((item) => item === null)) {
+        setError("部分分析数据加载失败，已展示可用数据。");
+      }
     } catch (error) {
       console.error("加载分析数据失败:", error);
+      setError("分析数据加载失败。");
     } finally {
       setLoading(false);
     }
@@ -1599,6 +1826,7 @@ function Analytics({ api, token }: { api: ReturnType<typeof useApi>; token: stri
             </button>
           </div>
         </div>
+        {error && <p className="error">{error}</p>}
       </div>
 
       {/* 总览卡片 */}

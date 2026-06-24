@@ -59,6 +59,18 @@ def _model_from_policy_entry(entry: CompanyModelEntry, indexed: dict[tuple[str, 
     return model
 
 
+def _enabled_policy_entries(policy: CompanyModelPolicy) -> list[CompanyModelEntry]:
+    return [entry for entry in policy.models if entry.enabled]
+
+
+def _effective_policy_default(policy: CompanyModelPolicy, entries: list[CompanyModelEntry]) -> tuple[str, str]:
+    default_key = (policy.default_provider_id, policy.default_model_id)
+    if any((entry.provider_id, entry.id) == default_key for entry in entries):
+        return policy.default_provider_id, policy.default_model_id
+    first = entries[0] if entries else None
+    return (first.provider_id, first.id) if first is not None else ("", "")
+
+
 async def _company_model_policy(request: Request) -> CompanyModelPolicy | None:
     return await _company_model_policy_for_registry(request, None)
 
@@ -118,7 +130,7 @@ async def _policy_models(
         return None, models
 
     indexed = {(model.provider_id, model.id): model for model in models}
-    allowed = [_model_from_policy_entry(entry, indexed) for entry in policy.models]
+    allowed = [_model_from_policy_entry(entry, indexed) for entry in _enabled_policy_entries(policy)]
     return policy, allowed
 
 
@@ -149,9 +161,10 @@ async def get_model_policy(
             default_model_id=first.id if first else "",
             models=models,
         )
+    default_provider_id, default_model_id = _effective_policy_default(policy, _enabled_policy_entries(policy))
     return ModelPolicyResponse(
-        default_provider_id=policy.default_provider_id,
-        default_model_id=policy.default_model_id,
+        default_provider_id=default_provider_id,
+        default_model_id=default_model_id,
         models=models,
     )
 
@@ -174,9 +187,11 @@ async def get_runtime_model_policy(
             default_model_id="",
             models=[],
         )
+    entries = _enabled_policy_entries(policy)
+    default_provider_id, default_model_id = _effective_policy_default(policy, entries)
     return RuntimeModelPolicyResponse(
-        default_provider_id=policy.default_provider_id,
-        default_model_id=policy.default_model_id,
+        default_provider_id=default_provider_id,
+        default_model_id=default_model_id,
         models=[
             RuntimeModelPolicyEntry(
                 provider_id=model.provider_id,
@@ -186,7 +201,7 @@ async def get_runtime_model_policy(
                 base_url=model.base_url,
                 api_key=model.api_key,
             )
-            for model in policy.models
+            for model in entries
         ],
     )
 

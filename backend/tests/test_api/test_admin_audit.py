@@ -891,6 +891,26 @@ async def test_employee_can_submit_feedback_and_admin_can_review_image(app_clien
         )
         assert image.status_code == 200
         assert image.content == image_bytes
+
+        deleted = await app_client.delete(
+            f"/api/admin/feedback/{payload['id']}",
+            headers={"x-test-company-role": "admin"},
+        )
+        assert deleted.status_code == 204
+
+        listed_after_delete = await app_client.get(
+            "/api/admin/feedback",
+            headers={"x-test-company-role": "admin"},
+        )
+        assert listed_after_delete.status_code == 200
+        assert listed_after_delete.json()["items"] == []
+
+        image_after_delete = await app_client.get(
+            items[0]["image_download_url"],
+            headers={"x-test-company-role": "admin"},
+        )
+        assert image_after_delete.status_code == 404
+        assert list((tmp_path / "feedback_uploads").glob("*")) == []
     finally:
         await store.dispose()
 
@@ -1198,6 +1218,42 @@ async def test_enterprise_audit_tracks_usage_tools_risks_and_admin_actions(
     )
     assert tool_calls.status_code == 200
     assert tool_calls.json()["items"][0]["call_id"] == "call-read-1"
+
+    tool_analytics = await app_client.get(
+        "/api/admin/audit/analytics/tools",
+        headers={"X-Test-Company-Role": "admin"},
+    )
+    assert tool_analytics.status_code == 200
+    assert tool_analytics.json()["total_calls"] == 1
+    assert tool_analytics.json()["tool_list"][0]["tool_name"] == "read"
+    assert tool_analytics.json()["tool_list"][0]["success_count"] == 1
+
+    user_analytics = await app_client.get(
+        "/api/admin/audit/analytics/users",
+        headers={"X-Test-Company-Role": "admin"},
+    )
+    assert user_analytics.status_code == 200
+    assert user_analytics.json()["total_users"] == 1
+    assert user_analytics.json()["user_list"][0]["message_count"] == 2
+    assert user_analytics.json()["user_list"][0]["total_tokens"] == 1275
+
+    model_analytics = await app_client.get(
+        "/api/admin/audit/analytics/models",
+        headers={"X-Test-Company-Role": "admin"},
+    )
+    assert model_analytics.status_code == 200
+    assert model_analytics.json()["model_list"][0]["message_count"] == 2
+    assert model_analytics.json()["model_list"][0]["total_tokens"] == 1275
+
+    entries = await app_client.get(
+        "/api/admin/audit/entries?limit=20",
+        headers={"X-Test-Company-Role": "admin"},
+    )
+    assert entries.status_code == 200
+    entry_payload = entries.json()
+    assert entry_payload["total"] == 4
+    assert {item["type"] for item in entry_payload["items"]} == {"text", "tool", "step-finish", "file"}
+    assert entry_payload["items"][0]["session"]["title"] == "查 VPN 配置"
 
     (tmp_path / "vpn.txt").write_text("vpn evidence", encoding="utf-8")
     upload = await app_client.post(
