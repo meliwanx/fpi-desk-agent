@@ -591,6 +591,20 @@ pre {
   color: #374151;
 }
 
+.model-badge {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  padding: 4px 10px;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: 650;
+}
+
 .audit-part {
   display: grid;
   gap: 10px;

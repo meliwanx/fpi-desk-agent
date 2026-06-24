@@ -62,6 +62,77 @@ class TestListMessages:
         assert data["offset"] == 0
         assert len(data["messages"]) == 2
 
+    async def test_list_hides_internal_messages_before_paginating(self, app_client, session_factory):
+        async with session_factory() as db:
+            async with db.begin():
+                s = await create_session(db, title="Internal noise")
+                sid = s.id
+
+                user_one = await create_message(db, session_id=sid, data={"role": "user"})
+                await create_part(db, message_id=user_one.id, session_id=sid, data={"type": "text", "text": "one"})
+
+                internal_user = await create_message(
+                    db,
+                    session_id=sid,
+                    data={"role": "user", "system": True},
+                )
+                await create_part(
+                    db,
+                    message_id=internal_user.id,
+                    session_id=sid,
+                    data={"type": "text", "text": "hidden nudge"},
+                )
+
+                internal_assistant = await create_message(
+                    db,
+                    session_id=sid,
+                    data={"role": "assistant", "agent": "memory", "system": True},
+                )
+                await create_part(
+                    db,
+                    message_id=internal_assistant.id,
+                    session_id=sid,
+                    data={"type": "text", "text": "hidden memory usage"},
+                )
+
+                step_only = await create_message(db, session_id=sid, data={"role": "assistant"})
+                await create_part(
+                    db,
+                    message_id=step_only.id,
+                    session_id=sid,
+                    data={"type": "step-start", "step": 1},
+                )
+                await create_part(
+                    db,
+                    message_id=step_only.id,
+                    session_id=sid,
+                    data={"type": "step-finish", "reason": "stop", "tokens": {}, "cost": 0.0},
+                )
+
+                visible_assistant = await create_message(db, session_id=sid, data={"role": "assistant"})
+                await create_part(
+                    db,
+                    message_id=visible_assistant.id,
+                    session_id=sid,
+                    data={"type": "step-start", "step": 1},
+                )
+                await create_part(
+                    db,
+                    message_id=visible_assistant.id,
+                    session_id=sid,
+                    data={"type": "text", "text": "visible answer"},
+                )
+
+                user_two = await create_message(db, session_id=sid, data={"role": "user"})
+                await create_part(db, message_id=user_two.id, session_id=sid, data={"type": "text", "text": "two"})
+
+        resp = await app_client.get(f"/api/messages/{sid}", params={"offset": -1, "limit": 2})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 3
+        assert data["offset"] == 1
+        assert [msg["id"] for msg in data["messages"]] == [visible_assistant.id, user_two.id]
+
 
 class TestGetMessage:
     async def test_existing(self, app_client, session_factory):

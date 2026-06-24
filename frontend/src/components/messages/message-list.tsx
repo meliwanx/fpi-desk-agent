@@ -11,6 +11,7 @@ import { FileChip } from "@/components/chat/file-chip";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { FileAttachment } from "@/types/chat";
 import { extractTextFromPartResponses } from "@/lib/utils";
+import { chatMessageIsVisible, partHasVisibleChatContent } from "@/lib/message-visibility";
 import type { MessageResponse, PartData } from "@/types/message";
 
 /** A user message or a group of consecutive assistant messages. */
@@ -45,6 +46,10 @@ function groupMessages(messages: MessageResponse[]): MessageGroup[] {
   };
 
   for (const msg of messages) {
+    if (!chatMessageIsVisible(msg)) {
+      continue;
+    }
+
     if (msg.data.role === "assistant") {
       if (isStandaloneAssistantMessage(msg)) {
         flushBatch();
@@ -52,13 +57,6 @@ function groupMessages(messages: MessageResponse[]): MessageGroup[] {
         continue;
       }
       assistantBatch.push(msg);
-    } else if (
-      msg.data.role === "user" &&
-      (msg.data as unknown as Record<string, unknown>).system
-    ) {
-      // System-injected user messages (continuations, nudges) are invisible
-      // and must NOT break the assistant message grouping.
-      continue;
     } else {
       flushBatch();
       groups.push({ kind: "user", message: msg });
@@ -256,9 +254,7 @@ export function MessageList({
   const hasActiveStream = !!streamId;
   const hasVisibleStreamingReplacement = useMemo(() => {
     if (streamingText.trim() || streamingReasoning.trim()) return true;
-    return streamingParts.some(
-      (part) => part.type !== "step-start" && part.type !== "step-finish",
-    );
+    return streamingParts.some(partHasVisibleChatContent);
   }, [streamingParts, streamingReasoning, streamingText]);
 
   // Don't show the optimistic user bubble if the DB-fetched messages already
@@ -406,7 +402,7 @@ export function MessageList({
           </div>
         )}
 
-        {messages.length === 0 && !isGenerating ? (
+        {groups.length === 0 && !isGenerating && !showPendingBubble ? (
           <div className="flex items-center justify-center h-full text-[var(--text-tertiary)] text-sm">
             No messages yet
           </div>

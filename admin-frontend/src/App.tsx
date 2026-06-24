@@ -179,6 +179,8 @@ interface TranscriptMessage {
   id: string;
   role: string;
   data: Record<string, unknown>;
+  model_id: string | null;
+  provider_id: string | null;
   parts: TranscriptPart[];
 }
 
@@ -218,6 +220,8 @@ interface AuditEntry extends TranscriptPart {
     id: string;
     role: string;
     data: Record<string, unknown>;
+    model_id: string | null;
+    provider_id: string | null;
     time_created: string;
   };
   session: AuditSession | null;
@@ -302,6 +306,11 @@ function roleLabel(role: string): string {
     system: "系统",
     tool: "工具",
   }[role] || role || "消息";
+}
+
+function modelLabel(modelId?: string | null, providerId?: string | null): string {
+  if (providerId && modelId) return `${providerId} / ${modelId}`;
+  return modelId || providerId || "";
 }
 
 function partTypeLabel(type: string): string {
@@ -794,6 +803,9 @@ function Sessions({ api, token }: { api: ReturnType<typeof useApi>; token: strin
             <article className="message" key={message.id}>
               <div className="message-head">
                 <span className={`role-badge ${message.role}`}>{roleLabel(message.role)}</span>
+                {modelLabel(message.model_id, message.provider_id) && (
+                  <span className="model-badge">模型：{modelLabel(message.model_id, message.provider_id)}</span>
+                )}
                 <span className="muted">{message.parts.length} 条内容</span>
               </div>
               {message.parts.map((part) => (
@@ -898,6 +910,9 @@ function AllAuditInfo({ api, token }: { api: ReturnType<typeof useApi>; token: s
               <div className="detail-meta">
                 <span>{selectedEntry.session?.title || selectedEntry.session?.id || "-"}</span>
                 <span>{roleLabel(selectedEntry.message.role)}</span>
+                {modelLabel(selectedEntry.message.model_id, selectedEntry.message.provider_id) && (
+                  <span>模型：{modelLabel(selectedEntry.message.model_id, selectedEntry.message.provider_id)}</span>
+                )}
                 <span>{compactDate(selectedEntry.time_created)}</span>
               </div>
             )}

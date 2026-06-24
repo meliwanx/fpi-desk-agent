@@ -7,6 +7,7 @@ import { API, IS_DESKTOP, getBackendToken, getBackendUrl, queryKeys } from "@/li
 import { isRemoteMode } from "@/lib/remote-connection";
 import { desktopAPI } from "@/lib/tauri-api";
 import { api } from "@/lib/api";
+import { latestVisibleAssistantMessage } from "@/lib/message-visibility";
 import { SSE_EVENTS } from "@/types/streaming";
 import { notifyBackgroundFinish } from "@/lib/background-notify";
 import { useChatStore } from "@/stores/chat-store";
@@ -215,7 +216,9 @@ export async function startStream(sessionId: string, streamId: string): Promise<
     const data = qc.getQueryData<InfiniteData<PaginatedMessages>>(
       queryKeys.messages.list(sid),
     );
-    const latestMessage = data?.pages.at(-1)?.messages.at(-1);
+    const latestMessage = latestVisibleAssistantMessage(
+      data?.pages.flatMap((page) => page.messages) ?? [],
+    );
     if (!latestMessage || latestMessage.data.role !== "assistant") return false;
     return latestMessage.parts.some((part) => {
       if (part.data.type !== "step-finish") return false;
@@ -224,7 +227,7 @@ export async function startStream(sessionId: string, streamId: string): Promise<
   };
 
   const canFinalizeFromPayload = (messages: PaginatedMessages | null | undefined) => {
-    const latestMessage = messages?.messages.at(-1);
+    const latestMessage = latestVisibleAssistantMessage(messages?.messages ?? []);
     if (!latestMessage || latestMessage.data.role !== "assistant") return false;
     return latestMessage.parts.some((part) => {
       if (part.data.type !== "step-finish") return false;

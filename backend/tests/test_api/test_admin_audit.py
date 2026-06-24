@@ -991,6 +991,12 @@ async def test_audit_ingest_and_admin_query(app_client, session_factory, tmp_pat
             ],
             "parts": [
                 {
+                    "id": "local-part-step-start",
+                    "message_id": "local-message-1",
+                    "session_id": "local-session-1",
+                    "data": {"type": "step-start", "step": 1},
+                },
+                {
                     "id": "local-part-1",
                     "message_id": "local-message-1",
                     "session_id": "local-session-1",
@@ -1013,7 +1019,7 @@ async def test_audit_ingest_and_admin_query(app_client, session_factory, tmp_pat
         },
     )
     assert ingest.status_code == 200
-    assert ingest.json() == {"sessions": 1, "messages": 1, "parts": 2}
+    assert ingest.json() == {"sessions": 1, "messages": 1, "parts": 3}
 
     async with session_factory() as db:
         sessions = list((await db.execute(AuditSession.__table__.select())).mappings())
@@ -1024,7 +1030,7 @@ async def test_audit_ingest_and_admin_query(app_client, session_factory, tmp_pat
     assert sessions[0]["user_email"] == "employee@example.com"
     assert sessions[0]["workspace"] == "/Users/employee/work/acme"
     assert messages[0]["role"] == "user"
-    assert {part["part_type"] for part in parts} == {"text", "file"}
+    assert {part["part_type"] for part in parts} == {"step-start", "text", "file"}
     assert files[0]["local_part_id"] == "local-part-2"
     assert files[0]["content_uploaded"] is False
 
@@ -1051,10 +1057,18 @@ async def test_audit_ingest_and_admin_query(app_client, session_factory, tmp_pat
     )
     assert transcript.status_code == 200
     transcript_body = transcript.json()
+    assert {part["type"] for part in transcript_body["messages"][0]["parts"]} == {"text", "file"}
     assert transcript_body["messages"][0]["parts"][0]["data"]["text"] == "请分析这个销售表"
     file_part = next(part for part in transcript_body["messages"][0]["parts"] if part["type"] == "file")
     assert file_part["file"]["content_uploaded"] is True
     assert file_part["file"]["download_url"] == "/api/admin/audit/files/local-part-2/download"
+
+    entries = await app_client.get(
+        "/api/admin/audit/entries?limit=20",
+        headers={"X-Test-Company-Role": "admin"},
+    )
+    assert entries.status_code == 200
+    assert {item["type"] for item in entries.json()["items"]} == {"text", "file"}
 
     download = await app_client.get(
         "/api/admin/audit/files/local-part-2/download",
@@ -1118,7 +1132,11 @@ async def test_enterprise_audit_tracks_usage_tools_risks_and_admin_actions(
                     "id": "local-message-assistant",
                     "session_id": "local-session-observe",
                     "role": "assistant",
-                    "data": {"role": "assistant"},
+                    "data": {
+                        "role": "assistant",
+                        "model_id": "claude-sonnet-4",
+                        "provider_id": "anthropic",
+                    },
                 },
             ],
             "parts": [
@@ -1218,6 +1236,15 @@ async def test_enterprise_audit_tracks_usage_tools_risks_and_admin_actions(
     )
     assert tool_calls.status_code == 200
     assert tool_calls.json()["items"][0]["call_id"] == "call-read-1"
+
+    transcript = await app_client.get(
+        "/api/admin/audit/sessions/local-session-observe/messages",
+        headers={"X-Test-Company-Role": "admin"},
+    )
+    assert transcript.status_code == 200
+    assistant_message = next(message for message in transcript.json()["messages"] if message["role"] == "assistant")
+    assert assistant_message["model_id"] == "claude-sonnet-4"
+    assert assistant_message["provider_id"] == "anthropic"
 
     tool_analytics = await app_client.get(
         "/api/admin/audit/analytics/tools",

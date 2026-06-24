@@ -27,6 +27,10 @@ assert.match(adminApp, /className="session-table/, "admin session audit should r
 assert.match(adminApp, /\/api\/admin\/feedback\/\$\{encodeURIComponent\(feedbackId\)\}/, "admin feedback page should delete feedback items");
 assert.match(adminApp, /model\.enabled/, "admin model policy should expose model enable/disable state");
 assert.match(adminApp, /禁用/, "admin model policy should expose a disable action instead of only deleting models");
+assert.match(adminApp, /model_id:\s*string\s*\|\s*null/, "admin transcript messages should carry the reply model id");
+assert.match(adminApp, /provider_id:\s*string\s*\|\s*null/, "admin transcript messages should carry the reply provider id");
+assert.match(adminApp, /message\.model_id/, "admin transcript should render per-message model information");
+assert.match(adminApp, /模型：/, "admin transcript should label reply model information in Chinese");
 assert.match(adminStyles, /\.app-shell\s*{[^}]*height:\s*100vh/s, "admin shell should fit the viewport height");
 assert.match(adminStyles, /\.app-shell\s*{[^}]*overflow:\s*hidden/s, "admin shell should prevent document-level scrolling");
 assert.match(adminStyles, /\.sidebar\s*{[^}]*height:\s*100vh/s, "admin sidebar should be constrained to the viewport");

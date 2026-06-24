@@ -52,6 +52,7 @@ _VPN_HINT_RE = re.compile(
     r"(订阅|subscription|clash|v2ray|trojan|shadowsocks|sing-box|surge|quantumult|proxy|vpn)",
     re.IGNORECASE,
 )
+_ADMIN_INTERNAL_AUDIT_PART_TYPES = ("step-start", "step_start")
 
 
 class AdminUserResponse(BaseModel):
@@ -851,6 +852,24 @@ def _datetime_iso(value: datetime) -> str:
     return as_shanghai(value).isoformat()
 
 
+def _message_model_id(message: AuditMessage, session: AuditSession | None = None) -> str | None:
+    value = message.data.get("model_id") if isinstance(message.data, dict) else None
+    if value:
+        return str(value)
+    if message.role == "assistant" and session is not None and session.model_id:
+        return session.model_id
+    return None
+
+
+def _message_provider_id(message: AuditMessage, session: AuditSession | None = None) -> str | None:
+    value = message.data.get("provider_id") if isinstance(message.data, dict) else None
+    if value:
+        return str(value)
+    if message.role == "assistant" and session is not None and session.provider_id:
+        return session.provider_id
+    return None
+
+
 def _is_session_online(
     session: CompanySessionRecord,
     *,
@@ -1552,6 +1571,9 @@ async def get_audit_session_messages(
     db: DbDep,
 ) -> dict[str, Any]:
     _require_admin(request)
+    session = (
+        await db.execute(select(AuditSession).where(AuditSession.local_session_id == session_id))
+    ).scalar_one_or_none()
     messages = list(
         (
             await db.execute(
@@ -1573,6 +1595,7 @@ async def get_audit_session_messages(
                 await db.execute(
                     select(AuditPart)
                     .where(AuditPart.local_message_id.in_(message_ids))
+                    .where(~AuditPart.part_type.in_(_ADMIN_INTERNAL_AUDIT_PART_TYPES))
                     .order_by(AuditPart.time_created.asc())
                 )
             ).scalars().all()
@@ -1613,6 +1636,8 @@ async def get_audit_session_messages(
                 "id": message.local_message_id,
                 "role": message.role,
                 "data": message.data,
+                "model_id": _message_model_id(message, session),
+                "provider_id": _message_provider_id(message, session),
                 "time_created": _datetime_iso(message.time_created),
                 "parts": [
                     {
@@ -1679,6 +1704,7 @@ async def get_audit_session_messages(
                 ],
             }
             for message in messages
+            if parts_by_message.get(message.local_message_id)
         ],
     }
 
@@ -1706,7 +1732,7 @@ async def list_audit_entries(
         .join(AuditMessage, AuditMessage.local_message_id == AuditPart.local_message_id)
         .outerjoin(AuditSession, AuditSession.local_session_id == AuditPart.local_session_id)
     )
-    filters = []
+    filters = [~AuditPart.part_type.in_(_ADMIN_INTERNAL_AUDIT_PART_TYPES)]
     if role:
         filters.append(AuditMessage.role == role.strip())
     if part_type:
@@ -1765,6 +1791,8 @@ async def list_audit_entries(
                     "id": message.local_message_id,
                     "role": message.role,
                     "data": message.data,
+                    "model_id": _message_model_id(message, session),
+                    "provider_id": _message_provider_id(message, session),
                     "time_created": _datetime_iso(message.time_created),
                 },
                 "session": (

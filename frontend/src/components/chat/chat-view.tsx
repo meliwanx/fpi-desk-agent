@@ -13,6 +13,7 @@ import { useActivityStore } from "@/stores/activity-store";
 import { useWorkspaceStore, type WorkspaceTodo, type WorkspaceFile } from "@/stores/workspace-store";
 import { api } from "@/lib/api";
 import { API, queryKeys } from "@/lib/constants";
+import { latestVisibleAssistantMessage } from "@/lib/message-visibility";
 import { ChatHeader } from "./chat-header";
 import { ChatForm } from "./chat-form";
 import { MessageList } from "@/components/messages/message-list";
@@ -131,10 +132,8 @@ export function ChatView({ sessionId }: ChatViewProps) {
   const handleCopyLast = useCallback(() => {
     if (!messages || messages.length === 0) return;
 
-    // Find last assistant message
-    const lastAssistantMessage = [...messages]
-      .reverse()
-      .find((msg) => (msg.data as { role: string }).role === "assistant");
+    // Find last user-visible assistant message.
+    const lastAssistantMessage = latestVisibleAssistantMessage(messages);
 
     if (!lastAssistantMessage) {
       toast.error("No assistant message found");
