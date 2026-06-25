@@ -250,7 +250,7 @@ class OpenAICompatProvider(BaseProvider):
 
         except Exception as e:
             logger.error("Stream error for model %s: %s", model, e, exc_info=True)
-            yield StreamChunk(type="error", data={"message": str(e)})
+            raise
 
     def _build_messages(
         self,
