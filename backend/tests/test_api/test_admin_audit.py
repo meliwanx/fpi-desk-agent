@@ -717,7 +717,7 @@ async def test_employee_update_policy_serves_local_asset_and_counts_downloads(ap
             "/api/app/update-policy?current_version=1.4.0&platform=windows&arch=x64"
         )
         assert same_version_missing_hash.status_code == 200
-        assert same_version_missing_hash.json()["update_available"] is True
+        assert same_version_missing_hash.json()["update_available"] is False
         assert same_version_missing_hash.json()["force_update"] is False
 
         download = await app_client.get(payload["download_url"])

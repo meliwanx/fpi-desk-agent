@@ -174,7 +174,7 @@ def build_update_response(
     latest_sha256 = (download_sha256 or "").strip().lower()
 
     version_update_available = bool(latest_version) and _compare_versions(current, latest_version) < 0
-    package_update_available = bool(latest_sha256) and current_sha256 != latest_sha256
+    package_update_available = bool(latest_sha256 and current_sha256) and current_sha256 != latest_sha256
     below_minimum = bool(min_supported_version) and _compare_versions(current, min_supported_version) < 0
     update_available = enabled and (version_update_available or package_update_available or below_minimum)
     force_update = bool(
