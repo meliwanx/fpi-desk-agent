@@ -1,4 +1,10 @@
 {
+  "sim-data-agent": {
+    "name": "SIM 数据中台",
+    "url": "http://127.0.0.1:9982/mcp/sim-data/mcp",
+    "description": "查询公司租户 3 的数仓表结构、血缘、语义指标、业务术语、只读 PGSQL 和 CSV 导出",
+    "category": "data"
+  },
   "slack": {
     "name": "Slack",
     "url": "https://mcp.slack.com/mcp",
