@@ -5,6 +5,10 @@ const updateHook = readFileSync(
   new URL("../../src/hooks/use-update-check.ts", import.meta.url),
   "utf8",
 );
+const updateBanner = readFileSync(
+  new URL("../../src/components/desktop/update-banner.tsx", import.meta.url),
+  "utf8",
+);
 
 const tauriApi = readFileSync(
   new URL("../../src/lib/tauri-api.ts", import.meta.url),
@@ -41,8 +45,20 @@ assert.match(
 
 assert.match(
   updateHook,
-  /downloadAndInstall\(/,
-  "enterprise app updates should install the signed updater package instead of opening a DMG/EXE",
+  /\.download\(/,
+  "enterprise app updates should download the signed updater package before asking the user to install",
+);
+
+assert.match(
+  updateHook,
+  /\.install\(/,
+  "enterprise app updates should install the already-downloaded signed updater package inside the app",
+);
+
+assert.doesNotMatch(
+  updateHook,
+  /\.downloadAndInstall\(/,
+  "enterprise app updates should not install automatically before the user chooses the restart/install timing",
 );
 
 assert.match(
@@ -65,62 +81,104 @@ assert.match(
 
 assert.match(
   updateHook,
-  /fallbackDownloadAndOpen/,
-  "enterprise app updates should keep the legacy package opener only as a fallback for unsigned/manual packages",
+  /readyToInstall/,
+  "enterprise app updates should enter a ready-to-install confirmation state after the package is downloaded",
+);
+
+assert.doesNotMatch(
+  updateHook,
+  /downloadManualUpdatePackage|PENDING_MANUAL_UPDATE_PATH_KEY|downloadUpdatePackage|applyDownloadedUpdate|downloadUpdateAndOpen/,
+  "enterprise app updates should not keep a manual DMG/EXE fallback path",
 );
 
 assert.match(
   updateHook,
-  /downloadUpdateAndOpen/,
-  "enterprise app updates should still support legacy package fallback for existing admin uploads",
+  /download_sha256/,
+  "enterprise app updates may keep backend package hashes for display and audit metadata",
 );
 
-assert.match(
+assert.doesNotMatch(
   updateHook,
-  /expectedSha256/,
-  "enterprise app updates should pass the backend-provided sha256 to the native downloader",
+  /CURRENT_PACKAGE_SHA_KEY|current_package_sha256/,
+  "enterprise app update checks should not use package hash identity to decide whether a version update is needed",
+);
+
+assert.doesNotMatch(
+  updateHook,
+  /localStorage\.setItem\(\s*CURRENT_PACKAGE_SHA_KEY/,
+  "enterprise app updates should not mark a same-version hash as installed state",
+);
+
+assert.doesNotMatch(
+  updateHook,
+  /pendingUpdate\?\.latest_package_sha256|localStorage\.setItem\(\s*DISMISSED_KEY\s*,\s*[^)]*latest_package_sha256/,
+  "enterprise app updates should dismiss non-forced reminders by version label, not package sha256",
 );
 
 assert.match(
+  updateBanner,
+  /fixed[\s\S]+bottom-4[\s\S]+left-4/,
+  "non-forced enterprise updates should appear as a bottom-left floating reminder",
+);
+
+assert.match(
+  updateBanner,
+  /updateInstallNow[\s\S]+updateInstallLater/,
+  "downloaded enterprise updates should ask whether to install immediately or on next startup",
+);
+
+assert.doesNotMatch(
+  updateBanner,
+  /available && readyToInstall[\s\S]+fixed inset-0/,
+  "downloaded non-forced enterprise updates should not show a centered modal",
+);
+
+assert.doesNotMatch(
+  updateBanner,
+  /initial=\{\{\s*height:\s*0/,
+  "non-forced enterprise updates should not reserve inline layout height in the main app",
+);
+
+assert.doesNotMatch(
   tauriApi,
-  /downloadUpdateAndOpen: \(\{ url, defaultName, expectedSha256 \}\) =>\s*invoke/,
-  "Tauri API should expose an installer download/open command for legacy fallback",
+  /downloadUpdatePackage|applyDownloadedUpdate|downloadUpdateAndOpen/,
+  "Tauri API should not expose manual update package commands for DMG/EXE fallback installs",
 );
 
-assert.match(
+assert.doesNotMatch(
   tauriApi,
   /onUpdateDownloadProgress/,
-  "Tauri API should expose update download progress events",
+  "Tauri API should not expose manual update download progress events",
 );
 
-assert.match(
+assert.doesNotMatch(
   tauriCommands,
-  /emit\([\s\S]*"update-download-progress"/,
-  "Rust update download command should emit progress events",
+  /update-download-progress/,
+  "Rust should not implement a separate manual update downloader",
 );
 
-assert.match(
+assert.doesNotMatch(
   tauriCommands,
   /actual_sha256[\s\S]+eq_ignore_ascii_case/,
-  "Rust update download command should verify the downloaded package hash before installation",
+  "Rust should not verify manual DMG/EXE update hashes for app updates",
 );
 
-assert.match(
+assert.doesNotMatch(
   tauriCommands,
-  /Command::new\(&file_path\)[\s\S]+\.arg\("\/S"\)/,
-  "Windows legacy update installer should be launched silently instead of showing the first-install wizard",
+  /pub async fn apply_downloaded_update/,
+  "Rust side should not apply downloaded DMG/EXE fallback packages",
 );
 
-assert.match(
+assert.doesNotMatch(
   tauriCommands,
-  /pub async fn download_update_and_open/,
-  "Rust side should implement an update package download/open command",
+  /pub async fn download_update_package|pub async fn download_update_and_open/,
+  "Rust side should not implement a manual update package download command",
 );
 
-assert.match(
+assert.doesNotMatch(
   tauriLib,
-  /commands::download_update_and_open/,
-  "Rust update download/open command should be registered with Tauri",
+  /commands::download_update_package|commands::apply_downloaded_update|commands::download_update_and_open/,
+  "Rust manual update package commands should not be registered with Tauri",
 );
 
 assert.match(

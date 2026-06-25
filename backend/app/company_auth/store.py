@@ -137,12 +137,14 @@ class CompanyUpdatePolicy:
 class CompanyUpdateAsset:
     id: str
     platform: str
+    name: str
     version: str
     original_filename: str
     stored_filename: str
     mime_type: str
     size_bytes: int
     sha256: str
+    md5: str
     signature: str
     uploaded_by_user_id: str
     uploaded_by_email: str
@@ -279,12 +281,14 @@ class CompanyAuthStore:
             self.metadata,
             Column("id", String(32), primary_key=True),
             Column("platform", String(20), nullable=False, index=True),
+            Column("name", String(255), nullable=False, default=""),
             Column("version", String(64), nullable=False, index=True),
             Column("original_filename", String(512), nullable=False, default=""),
             Column("stored_filename", String(512), nullable=False),
             Column("mime_type", String(255), nullable=False, default=""),
             Column("size_bytes", Integer, nullable=False, default=0),
             Column("sha256", String(64), nullable=False),
+            Column("md5", String(32), nullable=False, default=""),
             Column("signature", Text, nullable=True),
             Column("uploaded_by_user_id", String(32), nullable=False, default=""),
             Column("uploaded_by_email", String(255), nullable=False, default=""),
@@ -521,6 +525,8 @@ class CompanyAuthStore:
         update_asset_existing = {column["name"] for column in inspector.get_columns(self.update_assets.name)}
         update_asset_table = sync_conn.dialect.identifier_preparer.quote(self.update_assets.name)
         update_asset_columns = {
+            "name": "VARCHAR(255) NOT NULL DEFAULT ''",
+            "md5": "VARCHAR(32) NOT NULL DEFAULT ''",
             "signature": "TEXT NULL",
         }
         for name, ddl_type in update_asset_columns.items():
@@ -949,12 +955,14 @@ class CompanyAuthStore:
         self,
         *,
         platform: str,
+        name: str = "",
         version: str,
         original_filename: str,
         stored_filename: str,
         mime_type: str,
         size_bytes: int,
         sha256: str,
+        md5: str = "",
         signature: str = "",
         uploaded_by_user_id: str,
         uploaded_by_email: str,
@@ -967,6 +975,9 @@ class CompanyAuthStore:
         normalized_sha = str(sha256 or "").strip().lower()
         if len(normalized_sha) != 64:
             raise ValueError("Update asset SHA-256 must be 64 hex characters")
+        normalized_md5 = str(md5 or "").strip().lower()
+        if normalized_md5 and len(normalized_md5) != 32:
+            raise ValueError("Update asset MD5 must be 32 hex characters")
 
         asset_id = generate_ulid()
         now = shanghai_now()
@@ -975,12 +986,14 @@ class CompanyAuthStore:
                 insert(self.update_assets).values(
                     id=asset_id,
                     platform=normalized_platform,
+                    name=str(name or "").strip()[:255],
                     version=normalized_version,
                     original_filename=str(original_filename or "").strip(),
                     stored_filename=str(stored_filename or "").strip(),
                     mime_type=str(mime_type or "").strip(),
                     size_bytes=max(0, int(size_bytes or 0)),
                     sha256=normalized_sha,
+                    md5=normalized_md5,
                     signature=str(signature or "").strip(),
                     uploaded_by_user_id=str(uploaded_by_user_id or "").strip(),
                     uploaded_by_email=str(uploaded_by_email or "").strip(),
@@ -998,7 +1011,7 @@ class CompanyAuthStore:
     async def list_update_assets(self) -> list[CompanyUpdateAsset]:
         async with self.engine.connect() as conn:
             result = await conn.execute(
-                select(self.update_assets).order_by(self.update_assets.c.time_created.asc())
+                select(self.update_assets).order_by(self.update_assets.c.time_created.desc())
             )
             return [self._update_asset_from_mapping(row) for row in result.mappings().all()]
 
@@ -1143,12 +1156,14 @@ class CompanyAuthStore:
         return CompanyUpdateAsset(
             id=row["id"],
             platform=row["platform"],
+            name=row.get("name") or "",
             version=row["version"],
             original_filename=row["original_filename"],
             stored_filename=row["stored_filename"],
             mime_type=row["mime_type"],
             size_bytes=int(row["size_bytes"] or 0),
             sha256=row["sha256"],
+            md5=row.get("md5") or "",
             signature=row["signature"] or "",
             uploaded_by_user_id=row["uploaded_by_user_id"],
             uploaded_by_email=row["uploaded_by_email"],
@@ -1327,8 +1342,16 @@ class CompanyAuthStore:
         latest_version = str(payload.get("latest_version") or "").strip().lstrip("vV")
         min_supported_version = str(payload.get("min_supported_version") or "").strip().lstrip("vV")
         enabled = bool(payload.get("enabled", False))
-        if strict and enabled and not latest_version:
-            raise ValueError("Latest version is required when update policy is enabled")
+        has_selected_asset = any(
+            str(payload.get(key) or "").strip()
+            for key in ("macos_asset_id", "windows_asset_id", "linux_asset_id", "default_asset_id")
+        )
+        has_legacy_download = any(
+            str(payload.get(key) or "").strip()
+            for key in ("macos_download_url", "windows_download_url", "linux_download_url", "default_download_url")
+        )
+        if strict and enabled and not latest_version and not has_selected_asset and not has_legacy_download:
+            raise ValueError("Latest version or update asset is required when update policy is enabled")
 
         return CompanyUpdatePolicy(
             enabled=enabled,

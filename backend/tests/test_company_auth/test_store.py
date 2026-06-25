@@ -481,6 +481,18 @@ async def test_update_policy_defaults_and_updates(tmp_path):
 
         reloaded = await store.get_update_policy()
         assert reloaded == updated
+
+        asset_only_policy = await store.update_update_policy(
+            enabled=True,
+            latest_version="",
+            min_supported_version="",
+            force_update=False,
+            release_notes="按安装包 hash 判断",
+            macos_asset_id="asset-macos-latest",
+        )
+        assert asset_only_policy.enabled is True
+        assert asset_only_policy.latest_version == ""
+        assert asset_only_policy.macos_asset_id == "asset-macos-latest"
     finally:
         await store.dispose()
 
@@ -492,12 +504,14 @@ async def test_update_assets_persist_metadata_and_download_counts(tmp_path):
     try:
         asset = await store.create_update_asset(
             platform="macos",
+            name="macOS 1.4.0 正式包",
             version="v1.4.0",
             original_filename="FPI Agent 1.4.0.dmg",
             stored_filename="asset-1.dmg",
             mime_type="application/x-apple-diskimage",
             size_bytes=12345,
             sha256="a" * 64,
+            md5="b" * 32,
             signature="signed-updater-package-signature",
             uploaded_by_user_id="admin-1",
             uploaded_by_email="admin@example.com",
@@ -505,10 +519,12 @@ async def test_update_assets_persist_metadata_and_download_counts(tmp_path):
         )
 
         assert asset.platform == "macos"
+        assert asset.name == "macOS 1.4.0 正式包"
         assert asset.version == "1.4.0"
         assert asset.original_filename == "FPI Agent 1.4.0.dmg"
         assert asset.download_count == 0
         assert asset.uploaded_by_email == "admin@example.com"
+        assert asset.md5 == "b" * 32
         assert asset.signature == "signed-updater-package-signature"
 
         listed = await store.list_update_assets()

@@ -1,30 +1,44 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { Sun, Moon, Monitor, RefreshCw, Check, Eye, EyeOff, LogOut } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { Sun, Moon, Monitor, RefreshCw, Check, Eye, EyeOff, LogOut, Copy, Terminal } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useTranslation } from "react-i18next";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { clearCompanySession, readCompanySession } from "@/lib/company-auth";
-import { API, IS_DESKTOP } from "@/lib/constants";
+import { API, IS_DESKTOP, getBackendUrl } from "@/lib/constants";
+import { desktopAPI } from "@/lib/tauri-api";
 import { enterpriseApi } from "@/lib/enterprise-api";
 import { TextPart } from "@/components/parts/text-part";
 import { AppearanceCustomize } from "@/components/settings/appearance-customize";
 import { useUpdateCheck } from "@/hooks/use-update-check";
+import { useSettingsStore } from "@/stores/settings-store";
 
 export function GeneralTab() {
   const { t, i18n } = useTranslation('settings');
   const { theme, resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   const [appVersion, setAppVersion] = useState("0.0.1");
-  const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "up-to-date" | "downloading" | "error">("idle");
+  const [updateStatus, setUpdateStatus] = useState<
+    "idle" | "checking" | "available" | "up-to-date" | "downloading" | "ready" | "installing" | "error"
+  >("idle");
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [accountName, setAccountName] = useState("员工");
   const [accountEmail, setAccountEmail] = useState("");
+  const [developerMode, setDeveloperMode] = useState(false);
+  const [backendUrl, setBackendUrl] = useState("未连接");
+  const [platformName, setPlatformName] = useState("browser");
+  const [diagnosticsCopied, setDiagnosticsCopied] = useState(false);
   const enterpriseUpdate = useUpdateCheck();
+  const selectedModel = useSettingsStore((s) => s.selectedModel);
+  const selectedProviderId = useSettingsStore((s) => s.selectedProviderId);
+  const activeProvider = useSettingsStore((s) => s.activeProvider);
+  const selectedAgent = useSettingsStore((s) => s.selectedAgent);
+  const workMode = useSettingsStore((s) => s.workMode);
+  const reasoningEnabled = useSettingsStore((s) => s.reasoningEnabled);
 
   useEffect(() => {
     setMounted(true);
@@ -44,10 +58,52 @@ export function GeneralTab() {
   }, []);
 
   useEffect(() => {
+    if (!developerMode) return;
+    if (!IS_DESKTOP) {
+      setBackendUrl("web");
+      setPlatformName("browser");
+      return;
+    }
+    getBackendUrl()
+      .then(setBackendUrl)
+      .catch((error) => setBackendUrl(error instanceof Error ? error.message : String(error)));
+    desktopAPI
+      .getPlatform()
+      .then(setPlatformName)
+      .catch(() => setPlatformName("unknown"));
+  }, [developerMode]);
+
+  useEffect(() => {
     if (updateStatus === "downloading") {
       setDownloadProgress(enterpriseUpdate.progress);
+      if (enterpriseUpdate.readyToInstall) {
+        setUpdateStatus("ready");
+      }
     }
-  }, [enterpriseUpdate.progress, updateStatus]);
+  }, [enterpriseUpdate.progress, enterpriseUpdate.readyToInstall, updateStatus]);
+
+  useEffect(() => {
+    if (!["downloading", "ready", "installing"].includes(updateStatus)) return;
+    if (enterpriseUpdate.error) {
+      setUpdateError(enterpriseUpdate.error);
+      setUpdateStatus("error");
+      return;
+    }
+    if (
+      updateStatus === "installing" &&
+      !enterpriseUpdate.installing &&
+      !enterpriseUpdate.readyToInstall &&
+      !enterpriseUpdate.available
+    ) {
+      setUpdateStatus("idle");
+    }
+  }, [
+    enterpriseUpdate.available,
+    enterpriseUpdate.error,
+    enterpriseUpdate.installing,
+    enterpriseUpdate.readyToInstall,
+    updateStatus,
+  ]);
 
   const checkForUpdate = useCallback(async () => {
     if (!IS_DESKTOP) return;
@@ -77,16 +133,38 @@ export function GeneralTab() {
 
   const doUpdate = useCallback(async () => {
     if (!IS_DESKTOP) return;
-    setUpdateStatus("downloading");
-    setUpdateError(null);
-    try {
-      setDownloadProgress(0);
-      await enterpriseUpdate.downloadAndInstall();
-      setDownloadProgress(100);
-      setTimeout(() => setUpdateStatus("available"), 1200);
+      setUpdateStatus("downloading");
+      setUpdateError(null);
+      try {
+        setDownloadProgress(0);
+        await enterpriseUpdate.downloadUpdate();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       console.error("Update install failed:", message);
+      setUpdateError(message);
+      setUpdateStatus("error");
+    }
+  }, [enterpriseUpdate]);
+
+  const installUpdateNow = useCallback(async () => {
+    setUpdateStatus("installing");
+    setUpdateError(null);
+    try {
+      await enterpriseUpdate.installNow();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setUpdateError(message);
+      setUpdateStatus("error");
+    }
+  }, [enterpriseUpdate]);
+
+  const installUpdateLater = useCallback(async () => {
+    setUpdateStatus("installing");
+    setUpdateError(null);
+    try {
+      await enterpriseUpdate.installLater();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
       setUpdateError(message);
       setUpdateStatus("error");
     }
@@ -100,6 +178,53 @@ export function GeneralTab() {
     }
     clearCompanySession();
     window.location.reload();
+  }, []);
+
+  const diagnostics = useMemo(() => ({
+    appVersion,
+    platform: platformName,
+    backendUrl,
+    selectedModel,
+    selectedProviderId,
+    activeProvider,
+    selectedAgent,
+    workMode,
+    reasoningEnabled,
+    updateStatus,
+    updateVersion,
+    updateReadyToInstall: enterpriseUpdate.readyToInstall,
+    updateProgress: enterpriseUpdate.progress,
+    updateError: enterpriseUpdate.error || updateError,
+    user: accountEmail || accountName,
+  }), [
+    accountEmail,
+    accountName,
+    activeProvider,
+    appVersion,
+    backendUrl,
+    enterpriseUpdate.error,
+    enterpriseUpdate.progress,
+    enterpriseUpdate.readyToInstall,
+    platformName,
+    reasoningEnabled,
+    selectedAgent,
+    selectedModel,
+    selectedProviderId,
+    updateError,
+    updateStatus,
+    updateVersion,
+    workMode,
+  ]);
+
+  const copyDiagnostics = useCallback(async () => {
+    await navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2));
+    setDiagnosticsCopied(true);
+    window.setTimeout(() => setDiagnosticsCopied(false), 1600);
+  }, [diagnostics]);
+
+  const toggleDevtools = useCallback(async () => {
+    if (!IS_DESKTOP) return;
+    await desktopAPI.toggleDevtools();
   }, []);
 
   const [showPreview, setShowPreview] = useState(false);
@@ -255,10 +380,74 @@ export function GeneralTab() {
           {t('about')}
         </h2>
         <div className="text-ui-caption text-[var(--text-secondary)] space-y-1">
-          <p>{t('aboutVersion', { version: appVersion })}</p>
+          <button
+            type="button"
+            className="cursor-default text-left hover:text-[var(--text-primary)]"
+            onDoubleClick={() => setDeveloperMode(true)}
+            aria-label="打开开发者模式"
+          >
+            {t('aboutVersion', { version: appVersion })}
+          </button>
           <p>{t('aboutDesc')}</p>
           <p>{t('aboutCopyright')}</p>
         </div>
+        {developerMode && (
+          <div
+            data-testid="developer-mode-panel"
+            className="mt-4 rounded-xl border border-[var(--border-default)] bg-[var(--surface-secondary)] p-4"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-ui-body font-semibold text-[var(--text-primary)]">
+                  开发者模式
+                </h3>
+                <p className="mt-1 text-ui-caption text-[var(--text-tertiary)]">
+                  运行诊断、模型状态和本地调试入口。
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" className="h-7 text-ui-caption" onClick={copyDiagnostics}>
+                  <Copy className="mr-1.5 h-3.5 w-3.5" />
+                  {diagnosticsCopied ? "已复制" : "复制诊断"}
+                </Button>
+                {IS_DESKTOP && (
+                  <Button variant="outline" size="sm" className="h-7 text-ui-caption" onClick={toggleDevtools}>
+                    <Terminal className="mr-1.5 h-3.5 w-3.5" />
+                    打开开发者工具
+                  </Button>
+                )}
+              </div>
+            </div>
+            <dl className="mt-4 grid grid-cols-1 gap-2 text-ui-caption sm:grid-cols-2">
+              {[
+                ["应用版本", appVersion],
+                ["平台", platformName],
+                ["后端地址", backendUrl],
+                ["模型", selectedModel || "-"],
+                ["Provider", selectedProviderId || "-"],
+                ["Provider 分组", activeProvider || "-"],
+                ["Agent", selectedAgent],
+                ["工作模式", workMode],
+                ["Reasoning", reasoningEnabled ? "enabled" : "disabled"],
+                ["更新状态", updateStatus],
+                ["目标版本", updateVersion || "-"],
+                ["下载进度", `${enterpriseUpdate.progress}%`],
+              ].map(([label, value]) => (
+                <div key={label} className="min-w-0 rounded-lg bg-[var(--surface-chat)] px-3 py-2">
+                  <dt className="text-[var(--text-tertiary)]">{label}</dt>
+                  <dd className="mt-0.5 truncate font-medium text-[var(--text-secondary)]" title={value}>
+                    {value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            {(enterpriseUpdate.error || updateError) && (
+              <p className="mt-3 break-all text-ui-caption text-[var(--color-destructive)]">
+                {enterpriseUpdate.error || updateError}
+              </p>
+            )}
+          </div>
+        )}
         {IS_DESKTOP && (
           <div className="mt-3">
             {updateStatus === "idle" && (
@@ -280,7 +469,7 @@ export function GeneralTab() {
             )}
             {updateStatus === "available" && (
               <Button size="sm" className="text-ui-caption h-7" onClick={doUpdate}>
-                {t('updateNow')} — v{updateVersion}
+                {t('updateDownload')} — v{updateVersion}
               </Button>
             )}
             {updateStatus === "downloading" && (
@@ -293,6 +482,22 @@ export function GeneralTab() {
                 </div>
                 <span className="text-ui-caption text-[var(--text-secondary)]">{downloadProgress}%</span>
               </div>
+            )}
+            {updateStatus === "ready" && (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" className="text-ui-caption h-7" onClick={installUpdateNow}>
+                  {t("updateInstallNow")}
+                </Button>
+                <Button variant="outline" size="sm" className="text-ui-caption h-7" onClick={installUpdateLater}>
+                  {t("updateInstallLater")}
+                </Button>
+              </div>
+            )}
+            {updateStatus === "installing" && (
+              <Button variant="outline" size="sm" className="text-ui-caption h-7" disabled>
+                <RefreshCw className="h-3 w-3 mr-1.5 animate-spin" />
+                {t("updateInstalling")}
+              </Button>
             )}
             {updateStatus === "error" && (
               <div className="space-y-1.5">

@@ -7,6 +7,7 @@ const visibility = readFileSync(resolve(root, "src/lib/message-visibility.ts"), 
 const messageList = readFileSync(resolve(root, "src/components/messages/message-list.tsx"), "utf8");
 const streamRegistry = readFileSync(resolve(root, "src/lib/session-stream-registry.ts"), "utf8");
 const chatView = readFileSync(resolve(root, "src/components/chat/chat-view.tsx"), "utf8");
+const chatStore = readFileSync(resolve(root, "src/stores/chat-store.ts"), "utf8");
 
 assert.match(
   visibility,
@@ -32,6 +33,36 @@ assert.match(
   messageList,
   /streamingParts\.some\(partHasVisibleChatContent\)/,
   "streaming replacement detection should ignore internal step markers",
+);
+assert.doesNotMatch(
+  messageList,
+  /messages\.some\(\(m\)[\s\S]+fullText\.includes\(pendingUserText\)/,
+  "optimistic user bubbles must not be hidden just because an older message has the same short text",
+);
+assert.match(
+  messageList,
+  /latestVisiblePersistedUserMatchesPending/,
+  "optimistic user bubble dedupe should only consider the latest visible persisted user message",
+);
+assert.match(
+  chatStore,
+  /pendingUserSentAt/,
+  "optimistic user sends should record a send timestamp for repeated short-text prompts",
+);
+assert.match(
+  messageList,
+  /pendingUserSentAt/,
+  "message-list should receive the optimistic send timestamp",
+);
+assert.match(
+  messageList,
+  /Date\.parse\(message\.time_created\)[\s\S]+Date\.parse\(pendingUserSentAt\)/,
+  "optimistic bubble dedupe should compare persisted message time to the current send time",
+);
+assert.match(
+  messageList,
+  /messageTime\s*<\s*pendingTime[\s\S]+return false/,
+  "older persisted user messages with the same text must not hide the current optimistic bubble",
 );
 assert.match(
   streamRegistry,

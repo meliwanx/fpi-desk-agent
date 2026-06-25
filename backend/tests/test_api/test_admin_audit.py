@@ -267,6 +267,7 @@ async def test_admin_can_upload_update_asset_and_bind_policy(app_client, tmp_pat
             "/api/admin/update-assets/upload",
             data={
                 "platform": "macos",
+                "name": "macOS 1.4.0 正式安装包",
                 "version": "v1.4.0",
                 "signature": "signed-updater-package-signature",
             },
@@ -282,13 +283,19 @@ async def test_admin_can_upload_update_asset_and_bind_policy(app_client, tmp_pat
         assert uploaded.status_code == 200
         asset = uploaded.json()
         assert asset["platform"] == "macos"
+        assert asset["name"] == "macOS 1.4.0 正式安装包"
         assert asset["version"] == "1.4.0"
         assert asset["original_filename"] == "FPI Agent 1.4.0.dmg"
         assert asset["size_bytes"] == len(b"installer-bytes")
         assert asset["download_count"] == 0
         assert asset["uploaded_by_email"] == "admin@example.com"
+        assert asset["md5"] == hashlib.md5(b"installer-bytes").hexdigest()
         assert len(asset["sha256"]) == 64
         assert asset["signature"] == "signed-updater-package-signature"
+
+        listed = await app_client.get("/api/admin/update-assets")
+        assert listed.status_code == 200
+        assert listed.json()["items"][0]["id"] == asset["id"]
 
         saved_asset = await store.get_update_asset(asset["id"])
         assert saved_asset is not None
@@ -314,6 +321,8 @@ async def test_admin_can_upload_update_asset_and_bind_policy(app_client, tmp_pat
         policy = updated.json()
         assert policy["macos_asset_id"] == asset["id"]
         assert policy["macos_asset"]["id"] == asset["id"]
+        assert policy["macos_asset"]["name"] == "macOS 1.4.0 正式安装包"
+        assert policy["macos_asset"]["md5"] == hashlib.md5(b"installer-bytes").hexdigest()
         assert policy["macos_asset"]["uploaded_by_display_name"] == "Admin"
         assert policy["macos_asset"]["signature"] == "signed-updater-package-signature"
     finally:
@@ -639,24 +648,28 @@ async def test_employee_update_policy_serves_local_asset_and_counts_downloads(ap
     try:
         windows_asset = await store.create_update_asset(
             platform="windows",
+            name="Windows 1.4.0 正式包",
             version="1.4.0",
             original_filename="FPI Agent Setup.exe",
             stored_filename="windows.exe",
             mime_type="application/vnd.microsoft.portable-executable",
             size_bytes=len(windows_bytes),
             sha256=hashlib.sha256(windows_bytes).hexdigest(),
+            md5=hashlib.md5(windows_bytes).hexdigest(),
             uploaded_by_user_id="admin-1",
             uploaded_by_email="admin@example.com",
             uploaded_by_display_name="Admin",
         )
         default_asset = await store.create_update_asset(
             platform="default",
+            name="默认 1.4.0 包",
             version="1.4.0",
             original_filename="FPI Agent.zip",
             stored_filename="default.zip",
             mime_type="application/zip",
             size_bytes=len(default_bytes),
             sha256=hashlib.sha256(default_bytes).hexdigest(),
+            md5=hashlib.md5(default_bytes).hexdigest(),
             uploaded_by_user_id="admin-1",
             uploaded_by_email="admin@example.com",
             uploaded_by_display_name="Admin",
@@ -677,9 +690,28 @@ async def test_employee_update_policy_serves_local_asset_and_counts_downloads(ap
         assert response.status_code == 200
         payload = response.json()
         assert payload["update_available"] is True
+        assert payload["latest_package_name"] == "Windows 1.4.0 正式包"
+        assert payload["latest_package_sha256"] == hashlib.sha256(windows_bytes).hexdigest()
+        assert payload["latest_package_md5"] == hashlib.md5(windows_bytes).hexdigest()
         assert f"/download/{windows_asset.id}" in payload["download_url"]
         assert payload["download_filename"] == "FPI Agent Setup.exe"
         assert payload["download_sha256"] == hashlib.sha256(windows_bytes).hexdigest()
+
+        current_hash = await app_client.get(
+            "/api/app/update-policy"
+            f"?current_version=1.3.0&platform=windows&arch=x64&current_package_sha256={windows_asset.sha256}"
+        )
+        assert current_hash.status_code == 200
+        assert current_hash.json()["update_available"] is True
+
+        same_version_different_hash = await app_client.get(
+            "/api/app/update-policy"
+            "?current_version=1.4.0&platform=windows&arch=x64&current_package_sha256="
+            + ("0" * 64)
+        )
+        assert same_version_different_hash.status_code == 200
+        assert same_version_different_hash.json()["update_available"] is False
+        assert same_version_different_hash.json()["force_update"] is False
 
         download = await app_client.get(payload["download_url"])
         assert download.status_code == 200
@@ -780,7 +812,7 @@ async def test_employee_update_manifest_serves_signed_tauri_assets(app_client, t
         await store.dispose()
 
 
-async def test_employee_update_policy_uses_platform_asset_version_when_policy_is_newer(app_client, tmp_path):
+async def test_employee_update_policy_uses_selected_asset_version_not_hash(app_client, tmp_path):
     store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
     await store.startup()
     app_client.app.state.company_auth_store = store
@@ -807,12 +839,14 @@ async def test_employee_update_policy_uses_platform_asset_version_when_policy_is
     try:
         windows_asset = await store.create_update_asset(
             platform="windows",
+            name="Windows hotfix rebuild",
             version="1.3.0",
             original_filename="FPI Agent Setup.exe",
             stored_filename="windows.exe",
             mime_type="application/vnd.microsoft.portable-executable",
             size_bytes=len(windows_bytes),
             sha256=hashlib.sha256(windows_bytes).hexdigest(),
+            md5=hashlib.md5(windows_bytes).hexdigest(),
             uploaded_by_user_id="admin-1",
             uploaded_by_email="admin@example.com",
             uploaded_by_display_name="Admin",
@@ -827,13 +861,24 @@ async def test_employee_update_policy_uses_platform_asset_version_when_policy_is
         )
 
         response = await app_client.get(
-            "/api/app/update-policy?current_version=1.3.0&platform=windows&arch=x64"
+            "/api/app/update-policy"
+            "?current_version=1.3.0&platform=windows&arch=x64&current_package_sha256="
+            + ("0" * 64)
         )
         assert response.status_code == 200
         payload = response.json()
         assert payload["latest_version"] == "1.3.0"
         assert payload["update_available"] is False
         assert payload["force_update"] is False
+        assert payload["latest_package_sha256"] == windows_asset.sha256
+
+        current = await app_client.get(
+            "/api/app/update-policy"
+            f"?current_version=1.3.0&platform=windows&arch=x64&current_package_sha256={windows_asset.sha256}"
+        )
+        assert current.status_code == 200
+        assert current.json()["update_available"] is False
+        assert current.json()["force_update"] is False
     finally:
         await store.dispose()
 

@@ -24,8 +24,10 @@ npm run check:release-version
 
 GitHub Actions runs the same version metadata check before producing Windows and macOS installers.
 
-The Tauri runtime reports `desktop-tauri/src-tauri/tauri.conf.json` as the installed app version. If this value is stale, update checks will be wrong.
+The Tauri runtime reports `desktop-tauri/src-tauri/tauri.conf.json` as the installed app version. If this value is stale, in-app Tauri updater manifests can be wrong.
 
-Backend update policy should compare the client version against the selected platform asset version. Do not use a macOS package version to force Windows users, or the reverse.
+Enterprise backend update policy uses the selected platform asset SHA-256 as the installed package identity. The admin console records every uploaded package and the administrator manually chooses the latest package for macOS, Windows, Linux, or the default fallback slot. A client is current only when its stored package identity SHA-256 equals that selected latest package SHA-256.
 
-`sha256` is for downloaded package integrity verification. It must not replace SemVer for update ordering because the same version can be repackaged with a different hash.
+SemVer is still required for human-readable release naming, package labels, Tauri metadata, and signed updater manifest compatibility. It is not the source of truth for enterprise update detection because the same version can be rebuilt with a different package hash.
+
+SHA-256 also remains the downloaded package integrity check before installation. MD5 is recorded for quick admin-side comparison only and must not be used as the security check.

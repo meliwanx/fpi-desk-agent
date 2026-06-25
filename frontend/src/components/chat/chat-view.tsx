@@ -40,6 +40,7 @@ export function ChatView({ sessionId }: ChatViewProps) {
     isCompacting,
     streamId,
     pendingUserText,
+    pendingUserSentAt,
     pendingAttachments,
     streamingParts,
     streamingText,
@@ -173,6 +174,7 @@ export function ChatView({ sessionId }: ChatViewProps) {
         isGenerating={isGenerating}
         streamId={streamId}
         pendingUserText={pendingUserText}
+        pendingUserSentAt={pendingUserSentAt}
         pendingAttachments={pendingAttachments}
         streamingParts={streamingParts}
         streamingText={streamingText}

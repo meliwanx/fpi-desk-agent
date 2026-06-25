@@ -407,6 +407,41 @@ label {
   word-break: break-all;
 }
 
+.section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.section-title h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.section-title span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.block {
+  display: block;
+}
+
+.update-history-table td {
+  vertical-align: top;
+}
+
+.update-history-table code {
+  display: block;
+  max-width: 240px;
+  color: #475569;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
 .file-button {
   width: fit-content;
   min-width: 96px;
@@ -801,6 +836,12 @@ pre {
   border-color: rgba(180, 35, 24, .25);
   background: rgba(180, 35, 24, .08);
   color: var(--danger);
+}
+
+.pill.success {
+  border-color: rgba(22, 163, 74, .25);
+  background: rgba(22, 163, 74, .08);
+  color: #15803d;
 }
 
 .file-list {

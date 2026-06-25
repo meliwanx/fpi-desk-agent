@@ -128,11 +128,13 @@ class AdminUpdatePolicyRequest(BaseModel):
 class AdminUpdateAssetResponse(BaseModel):
     id: str
     platform: str
+    name: str
     version: str
     original_filename: str
     mime_type: str
     size_bytes: int
     sha256: str
+    md5: str
     signature: str
     uploaded_by_user_id: str
     uploaded_by_email: str
@@ -164,6 +166,10 @@ class AdminUpdatePolicyResponse(BaseModel):
     windows_download_url: str
     linux_download_url: str
     default_download_url: str
+
+
+class AdminUpdateAssetListResponse(BaseModel):
+    items: list[AdminUpdateAssetResponse]
 
 
 class AdminFeedbackResponse(BaseModel):
@@ -349,11 +355,13 @@ def _public_update_asset(asset: CompanyUpdateAsset) -> AdminUpdateAssetResponse:
     return AdminUpdateAssetResponse(
         id=asset.id,
         platform=asset.platform,
+        name=asset.name,
         version=asset.version,
         original_filename=asset.original_filename,
         mime_type=asset.mime_type,
         size_bytes=asset.size_bytes,
         sha256=asset.sha256,
+        md5=asset.md5,
         signature=asset.signature,
         uploaded_by_user_id=asset.uploaded_by_user_id,
         uploaded_by_email=asset.uploaded_by_email,
@@ -769,11 +777,22 @@ async def update_admin_update_policy(
     return await _public_update_policy(policy, store)
 
 
+@router.get("/admin/update-assets", response_model=AdminUpdateAssetListResponse)
+async def list_admin_update_assets(request: Request) -> AdminUpdateAssetListResponse:
+    _require_admin(request)
+    store = _company_store(request)
+    if not hasattr(store, "list_update_assets"):
+        return AdminUpdateAssetListResponse(items=[])
+    assets = await store.list_update_assets()
+    return AdminUpdateAssetListResponse(items=[_public_update_asset(asset) for asset in assets])
+
+
 @router.post("/admin/update-assets/upload", response_model=AdminUpdateAssetResponse)
 async def upload_admin_update_asset(
     request: Request,
     settings: SettingsDep,
     platform: str = Form(...),
+    name: str = Form(""),
     version: str = Form(...),
     signature: str = Form(""),
     file: UploadFile = File(...),
@@ -787,6 +806,7 @@ async def upload_admin_update_asset(
     target = storage_dir / stored_filename
 
     digest = hashlib.sha256()
+    md5_digest = hashlib.md5()
     size = 0
     try:
         with target.open("wb") as handle:
@@ -796,6 +816,7 @@ async def upload_admin_update_asset(
                     break
                 size += len(chunk)
                 digest.update(chunk)
+                md5_digest.update(chunk)
                 handle.write(chunk)
     except Exception:
         if target.exists():
@@ -810,12 +831,14 @@ async def upload_admin_update_asset(
     try:
         asset = await store.create_update_asset(
             platform=platform,
+            name=name or original_filename,
             version=version,
             original_filename=original_filename,
             stored_filename=stored_filename,
             mime_type=mime_type,
             size_bytes=size,
             sha256=digest.hexdigest(),
+            md5=md5_digest.hexdigest(),
             signature=signature,
             uploaded_by_user_id=user.id,
             uploaded_by_email=user.email,

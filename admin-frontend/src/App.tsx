@@ -250,11 +250,13 @@ interface UpdatePolicy {
 interface UpdateAsset {
   id: string;
   platform: string;
+  name: string;
   version: string;
   original_filename: string;
   mime_type: string;
   size_bytes: number;
   sha256: string;
+  md5: string;
   signature: string;
   uploaded_by_user_id: string;
   uploaded_by_email: string;
@@ -262,6 +264,10 @@ interface UpdateAsset {
   download_count: number;
   time_created: string;
   time_updated: string;
+}
+
+interface UpdateAssetList {
+  items: UpdateAsset[];
 }
 
 type UpdateAssetIdKey = "macos_asset_id" | "windows_asset_id" | "linux_asset_id" | "default_asset_id";
@@ -1464,13 +1470,20 @@ function ModelPolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
 
 function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
   const [policy, setPolicy] = useState<UpdatePolicy | null>(null);
+  const [assets, setAssets] = useState<UpdateAsset[]>([]);
   const [message, setMessage] = useState("");
   const [uploadingSlot, setUploadingSlot] = useState<string | null>(null);
+  const [packageName, setPackageName] = useState<Record<string, string>>({});
+  const [assetVersions, setAssetVersions] = useState<Record<string, string>>({});
   const [assetSignatures, setAssetSignatures] = useState<Record<string, string>>({});
 
   async function loadPolicy() {
-    const data = await api<UpdatePolicy>("/api/admin/update-policy");
-    setPolicy(data);
+    const [policyData, assetData] = await Promise.all([
+      api<UpdatePolicy>("/api/admin/update-policy"),
+      api<UpdateAssetList>("/api/admin/update-assets").catch(() => ({ items: [] })),
+    ]);
+    setPolicy(policyData);
+    setAssets(assetData.items || []);
   }
 
   useEffect(() => {
@@ -1482,26 +1495,26 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
     setPolicy({ ...policy, ...patch });
   }
 
-  async function savePolicy() {
-    if (!policy) return;
+  async function savePolicy(nextPolicy = policy) {
+    if (!nextPolicy) return;
     setMessage("");
     try {
       const saved = await api<UpdatePolicy>("/api/admin/update-policy", {
         method: "PUT",
         body: JSON.stringify({
-          enabled: policy.enabled,
-          latest_version: policy.latest_version,
-          min_supported_version: policy.min_supported_version,
-          force_update: policy.force_update,
-          release_notes: policy.release_notes,
-          macos_asset_id: policy.macos_asset_id,
-          windows_asset_id: policy.windows_asset_id,
-          linux_asset_id: policy.linux_asset_id,
-          default_asset_id: policy.default_asset_id,
-          macos_download_url: policy.macos_download_url,
-          windows_download_url: policy.windows_download_url,
-          linux_download_url: policy.linux_download_url,
-          default_download_url: policy.default_download_url,
+          enabled: nextPolicy.enabled,
+          latest_version: nextPolicy.latest_version,
+          min_supported_version: nextPolicy.min_supported_version,
+          force_update: nextPolicy.force_update,
+          release_notes: nextPolicy.release_notes,
+          macos_asset_id: nextPolicy.macos_asset_id,
+          windows_asset_id: nextPolicy.windows_asset_id,
+          linux_asset_id: nextPolicy.linux_asset_id,
+          default_asset_id: nextPolicy.default_asset_id,
+          macos_download_url: nextPolicy.macos_download_url,
+          windows_download_url: nextPolicy.windows_download_url,
+          linux_download_url: nextPolicy.linux_download_url,
+          default_download_url: nextPolicy.default_download_url,
         }),
       });
       setPolicy(saved);
@@ -1511,16 +1524,33 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
     }
   }
 
+  function slotForPlatform(platform: string) {
+    return UPDATE_ASSET_SLOTS.find((slot) => slot.platform === platform) || UPDATE_ASSET_SLOTS[3];
+  }
+
+  function setLatestAsset(slot: (typeof UPDATE_ASSET_SLOTS)[number], asset: UpdateAsset) {
+    if (!policy) return;
+    setPolicy({
+      ...policy,
+      latest_version: asset.version,
+      [slot.assetIdKey]: asset.id,
+      [slot.assetKey]: asset,
+    });
+    setMessage(`${slot.label} 已选择 ${asset.name || asset.original_filename}，保存策略后生效`);
+  }
+
   async function uploadAsset(slot: (typeof UPDATE_ASSET_SLOTS)[number], file: File | null) {
     if (!policy || !file) return;
-    const version = policy.latest_version.trim();
+    const version = (assetVersions[slot.platform] || policy.latest_version || "").trim();
     if (!version) {
-      setMessage("请先填写最新版号，再上传安装包");
+      setMessage("请先填写这个安装包的版本号，再上传安装包");
       return;
     }
+    const name = (packageName[slot.platform] || `${slot.label} ${version}`).trim();
 
     const form = new FormData();
     form.set("platform", slot.platform);
+    form.set("name", name);
     form.set("version", version);
     form.set("signature", (assetSignatures[slot.platform] ?? policy[slot.assetKey]?.signature ?? "").trim());
     form.set("file", file);
@@ -1532,12 +1562,9 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
         method: "POST",
         body: form,
       });
-      setPolicy({
-        ...policy,
-        [slot.assetIdKey]: asset.id,
-        [slot.assetKey]: asset,
-      });
-      setMessage(`${slot.label} 安装包已上传，请保存策略后生效`);
+      setAssets((items) => [asset, ...items.filter((item) => item.id !== asset.id)]);
+      setPackageName({ ...packageName, [slot.platform]: "" });
+      setMessage(`${slot.label} 安装包已上传，已进入历史列表，可手动设为最新包`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "上传失败");
     } finally {
@@ -1570,20 +1597,20 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
           <button className="button" onClick={() => void savePolicy()}>保存策略</button>
         </div>
         <div className="hint">
-          直接上传各平台安装包，服务器会作为文件存储提供下载。最低可用版本以下的客户端会被强制更新；非强制更新时，旧版本仍可继续使用。
+          版本号用于展示和发布记录；员工端是否需要更新以当前安装包 SHA-256 是否等于所选最新包为准。上传的历史包都会保留，需要手动选择某个平台的最新包。
         </div>
         <div className="form-grid update-form">
-          <label className="model-field">
-            <span>最新版号</span>
-            <input
-              className="input"
-              placeholder="1.4.0"
-              value={policy.latest_version}
-              onChange={(event) => updatePolicy({ latest_version: event.target.value })}
+          <label className="model-field model-field-wide">
+            <span>更新说明</span>
+            <textarea
+              className="input textarea"
+              placeholder="本次更新修复了..."
+              value={policy.release_notes}
+              onChange={(event) => updatePolicy({ release_notes: event.target.value })}
             />
           </label>
-          <label className="model-field">
-            <span>最低可用版本</span>
+          <label className="model-field model-field-wide">
+            <span>兼容旧客户端的最低版本</span>
             <input
               className="input"
               placeholder="1.3.0"
@@ -1592,7 +1619,7 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
             />
           </label>
           <div className="model-field model-field-wide">
-            <span>安装包文件</span>
+            <span>上传新安装包</span>
             <div className="update-asset-grid">
               {UPDATE_ASSET_SLOTS.map((slot) => {
                 const asset = policy[slot.assetKey];
@@ -1605,17 +1632,41 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
                     </div>
                     {asset ? (
                       <div className="update-asset-meta">
-                        <b>{asset.original_filename}</b>
+                        <b>{asset.name || asset.original_filename}</b>
+                        <span>文件：{asset.original_filename}</span>
                         <span>{asset.mime_type || "文件"} · {formatNumber(asset.size_bytes)} bytes</span>
                         <span>上传人：{asset.uploaded_by_display_name || asset.uploaded_by_email || "-"}</span>
                         <span>上传时间：{compactDate(asset.time_created)}</span>
                         <span>下载次数：{formatNumber(asset.download_count)}</span>
                         <span>SHA-256：{asset.sha256.slice(0, 16)}...</span>
+                        <span>MD5：{asset.md5 ? `${asset.md5.slice(0, 16)}...` : "-"}</span>
                         <span>应用内更新签名：{asset.signature ? `${asset.signature.slice(0, 18)}...` : "未配置"}</span>
                       </div>
                     ) : (
                       <p className="muted">员工端匹配不到该平台包时会使用默认包。</p>
                     )}
+                    <input
+                      className="input"
+                      placeholder={`${slot.label} 包名，例如：${slot.label} 1.4.1 正式包`}
+                      value={packageName[slot.platform] || ""}
+                      onChange={(event) =>
+                        setPackageName({
+                          ...packageName,
+                          [slot.platform]: event.target.value,
+                        })
+                      }
+                    />
+                    <input
+                      className="input"
+                      placeholder="版本号，例如：1.4.1"
+                      value={assetVersions[slot.platform] || ""}
+                      onChange={(event) =>
+                        setAssetVersions({
+                          ...assetVersions,
+                          [slot.platform]: event.target.value,
+                        })
+                      }
+                    />
                     <textarea
                       className="input textarea"
                       placeholder="粘贴 Tauri .sig 文件内容；留空则只能打开安装包兜底"
@@ -1637,24 +1688,83 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
                           void uploadAsset(slot, selected);
                         }}
                       />
-                      {isUploading ? "上传中..." : asset ? "替换文件" : "上传文件"}
+                      {isUploading ? "上传中..." : "上传为历史包"}
                     </label>
                   </div>
                 );
               })}
             </div>
           </div>
-          <label className="model-field model-field-wide">
-            <span>更新说明</span>
-            <textarea
-              className="input textarea"
-              placeholder="本次更新修复了..."
-              value={policy.release_notes}
-              onChange={(event) => updatePolicy({ release_notes: event.target.value })}
-            />
-          </label>
         </div>
         {message && <p className={message.startsWith("已保存") ? "success" : "error"}>{message}</p>}
+      </section>
+      <section className="card">
+        <div className="section-title">
+          <h3>版本包历史</h3>
+          <span>共 {formatNumber(assets.length)} 个包</span>
+        </div>
+        <div className="table-scroll">
+          <table className="table update-history-table">
+            <thead>
+              <tr>
+                <th>状态</th>
+                <th>包名</th>
+                <th>平台</th>
+                <th>版本</th>
+                <th>文件</th>
+                <th>Hash</th>
+                <th>上传</th>
+                <th>下载</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {assets.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="muted">暂无上传记录</td>
+                </tr>
+              ) : (
+                assets.map((asset) => {
+                  const slot = slotForPlatform(asset.platform);
+                  const isLatest = policy[slot.assetIdKey] === asset.id;
+                  return (
+                    <tr key={asset.id}>
+                      <td>{isLatest ? <span className="pill success">最新</span> : <span className="muted">历史</span>}</td>
+                      <td>
+                        <strong>{asset.name || asset.original_filename}</strong>
+                        <span className="muted block">ID：{asset.id}</span>
+                      </td>
+                      <td>{slot.label}</td>
+                      <td>v{asset.version}</td>
+                      <td>
+                        <span>{asset.original_filename}</span>
+                        <span className="muted block">{formatNumber(asset.size_bytes)} bytes</span>
+                      </td>
+                      <td>
+                        <code>SHA：{asset.sha256.slice(0, 18)}...</code>
+                        <code>MD5：{asset.md5 ? `${asset.md5.slice(0, 18)}...` : "-"}</code>
+                      </td>
+                      <td>
+                        <span>{asset.uploaded_by_display_name || asset.uploaded_by_email || "-"}</span>
+                        <span className="muted block">{compactDate(asset.time_created)}</span>
+                      </td>
+                      <td>{formatNumber(asset.download_count)}</td>
+                      <td>
+                        <button
+                          className="button outline"
+                          disabled={isLatest}
+                          onClick={() => setLatestAsset(slot, asset)}
+                        >
+                          {isLatest ? "已是最新" : "设为最新"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
     </div>
   );

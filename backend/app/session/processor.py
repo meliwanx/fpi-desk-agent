@@ -1099,12 +1099,14 @@ class SessionProcessor:
         return "stop"
 
     async def _handle_empty_output_after_retries(self) -> bool:
-        """Return True if the step produced nothing after retries (caller continues the loop).
+        """Convert an exhausted empty model stream into a visible assistant error.
 
-        The model produced nothing (no text, no tools, no reasoning) even after retries.
-        Rather than surfacing an error, delete the empty assistant message shell and let
-        the outer loop re-invoke the LLM with the full conversation context intact.
-        The hard step cap (50) prevents infinite looping.
+        A provider that repeatedly returns an empty stream (no text, no
+        reasoning, no tool calls) cannot be repaired by re-entering the agent
+        loop with the same conversation. Continuing used to create dozens of
+        internal-only step markers until the hard cap, leaving the chat visibly
+        blank. After per-request retries are exhausted, surface a concrete
+        message and let the normal persistence path finish the step.
         """
         sp = self._sp
         job = sp.job
@@ -1118,23 +1120,36 @@ class SessionProcessor:
         ):
             return False
 
-        logger.warning(
-            "LLM produced no output after retries for session %s, continuing loop",
-            job.session_id,
+        provider_id = getattr(getattr(sp, "provider", None), "id", None) or "unknown-provider"
+        model_id = getattr(sp, "model_id", None) or "unknown-model"
+        message = (
+            f"模型服务没有返回可显示内容（{provider_id}/{model_id}）。"
+            "请切换其他模型重试，或联系管理员检查该模型的接口配置。"
         )
-        # Publish a paired non-terminal STEP_FINISH so the frontend step tracker
-        # stays consistent without seeing an undeclared terminal reason.
+        logger.warning(
+            "LLM produced no output after retries for session %s, provider=%s model=%s; "
+            "surfacing visible error",
+            job.session_id,
+            provider_id,
+            model_id,
+        )
+        self._accumulated_text = message
+        self.finish_reason = "error"
+        job.publish(SSEEvent(TEXT_DELTA, {
+            "session_id": job.session_id,
+            "message_id": self._assistant_msg_id,
+            "text": message,
+        }))
         job.publish(SSEEvent(
-            STEP_FINISH,
+            AGENT_ERROR,
             {
-                "tokens": None,
-                "cost": 0.0,
-                "total_cost": sp.total_cost,
-                "reason": "tool_use",
+                "error_type": "EMPTY_MODEL_RESPONSE",
+                "error_message": message,
+                "model_id": model_id,
+                "provider_id": provider_id,
             },
         ))
-        await _delete_empty_assistant_messages(sp.session_factory, job.session_id)
-        return True
+        return False
 
     async def _persist_text_and_reasoning(self) -> None:
         """Persist accumulated text + reasoning as parts on the assistant message."""

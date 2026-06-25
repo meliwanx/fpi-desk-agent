@@ -1,10 +1,7 @@
 //! Tauri command handlers — the IPC bridge between frontend and Rust.
 
-use serde::Serialize;
-use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Emitter, WebviewWindow};
+use tauri::{AppHandle, WebviewWindow};
 use tauri_plugin_opener::OpenerExt;
-use tokio::io::AsyncWriteExt;
 
 use crate::{backend::BackendState, tray, PendingNavigationState};
 
@@ -58,6 +55,17 @@ pub fn window_close(window: WebviewWindow) -> Result<(), String> {
 #[tauri::command]
 pub fn is_maximized(window: WebviewWindow) -> Result<bool, String> {
     window.is_maximized().map_err(|e| e.to_string())
+}
+
+/// Toggle the WebView developer tools.
+#[tauri::command]
+pub fn toggle_devtools(window: WebviewWindow) -> Result<(), String> {
+    if window.is_devtools_open() {
+        window.close_devtools();
+    } else {
+        window.open_devtools();
+    }
+    Ok(())
 }
 
 /// Get the current platform.
@@ -146,141 +154,6 @@ pub async fn download_and_save(
         .map_err(|e| format!("Failed to write file: {e}"))?;
 
     Ok(true)
-}
-
-fn safe_download_name(default_name: &str) -> String {
-    let last_segment = default_name
-        .trim()
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or("")
-        .chars()
-        .map(|ch| {
-            if ch.is_control() || matches!(ch, ':' | '*' | '?' | '"' | '<' | '>' | '|') {
-                '_'
-            } else {
-                ch
-            }
-        })
-        .collect::<String>();
-    let trimmed = last_segment
-        .trim_matches(|ch| ch == '.' || ch == ' ')
-        .trim();
-    if trimmed.is_empty() {
-        "fpi-agent-update.bin".to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
-#[derive(Clone, Serialize)]
-struct UpdateDownloadProgress {
-    downloaded: u64,
-    total: Option<u64>,
-    progress: u8,
-}
-
-fn emit_update_download_progress(
-    app: &AppHandle,
-    downloaded: u64,
-    total: Option<u64>,
-) -> Result<(), String> {
-    let progress = total
-        .filter(|value| *value > 0)
-        .map(|value| ((downloaded.saturating_mul(100) / value).min(100)) as u8)
-        .unwrap_or(0);
-    app.emit(
-        "update-download-progress",
-        UpdateDownloadProgress {
-            downloaded,
-            total,
-            progress,
-        },
-    )
-    .map_err(|e| e.to_string())
-}
-
-fn open_update_package(app: &AppHandle, file_path: &std::path::Path) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        let _ = app;
-        std::process::Command::new(&file_path)
-            .arg("/S")
-            .spawn()
-            .map_err(|e| format!("Failed to start silent installer: {e}"))?;
-        return Ok(());
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        app.opener()
-            .open_path(file_path.to_string_lossy().to_string(), None::<&str>)
-            .map_err(|e| format!("Failed to open update package: {e}"))
-    }
-}
-
-/// Download an update package inside the app flow and open it with the OS installer.
-#[tauri::command]
-pub async fn download_update_and_open(
-    app: AppHandle,
-    url: String,
-    default_name: String,
-    expected_sha256: Option<String>,
-) -> Result<String, String> {
-    let mut response = reqwest::get(&url)
-        .await
-        .map_err(|e| format!("Download failed: {e}"))?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(format!("Download failed with status {status}"));
-    }
-
-    let update_dir = std::env::temp_dir().join("fpi-agent-updates");
-    tokio::fs::create_dir_all(&update_dir)
-        .await
-        .map_err(|e| format!("Failed to create update directory: {e}"))?;
-    let file_path = update_dir.join(safe_download_name(&default_name));
-    let mut file = tokio::fs::File::create(&file_path)
-        .await
-        .map_err(|e| format!("Failed to create update package: {e}"))?;
-    let total = response.content_length();
-    let mut downloaded = 0_u64;
-    let mut hasher = Sha256::new();
-    emit_update_download_progress(&app, downloaded, total)?;
-
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|e| format!("Download stream failed: {e}"))?
-    {
-        file.write_all(&chunk)
-            .await
-            .map_err(|e| format!("Failed to write update package: {e}"))?;
-        hasher.update(&chunk);
-        downloaded = downloaded.saturating_add(chunk.len() as u64);
-        emit_update_download_progress(&app, downloaded, total)?;
-    }
-    file.flush()
-        .await
-        .map_err(|e| format!("Failed to flush update package: {e}"))?;
-
-    let actual_sha256 = format!("{:x}", hasher.finalize());
-    if let Some(expected) = expected_sha256
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        if !actual_sha256.eq_ignore_ascii_case(expected) {
-            let _ = tokio::fs::remove_file(&file_path).await;
-            return Err(format!(
-                "Update package hash mismatch: expected {expected}, got {actual_sha256}"
-            ));
-        }
-    }
-
-    let path_string = file_path.to_string_lossy().to_string();
-    open_update_package(&app, &file_path)?;
-    Ok(path_string)
 }
 
 /// Replace the tray's recent chat list with the given sessions (top first).

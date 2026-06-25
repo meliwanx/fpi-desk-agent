@@ -10,11 +10,11 @@ mod tray;
 
 use backend::BackendState;
 use log::{error, info};
-use tokio::sync::Mutex;
 use tauri::{Emitter, Manager};
+use tauri_plugin_deep_link::DeepLinkExt;
 #[cfg(target_os = "macos")]
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
-use tauri_plugin_deep_link::DeepLinkExt;
+use tokio::sync::Mutex;
 use url::Url;
 
 pub struct PendingNavigationState(Mutex<Option<String>>);
@@ -82,10 +82,10 @@ pub fn run() {
             commands::window_maximize,
             commands::window_close,
             commands::is_maximized,
+            commands::toggle_devtools,
             commands::get_platform,
             commands::open_external,
             commands::download_and_save,
-            commands::download_update_and_open,
             commands::update_tray_recents,
         ])
         // -- Setup --

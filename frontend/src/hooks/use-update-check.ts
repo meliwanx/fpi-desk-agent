@@ -1,5 +1,6 @@
 "use client";
 
+import type { Update as TauriUpdate } from "@tauri-apps/plugin-updater";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { API, IS_DESKTOP } from "@/lib/constants";
 import { getCompanySessionToken } from "@/lib/company-auth";
@@ -18,6 +19,10 @@ export interface EnterpriseUpdatePolicy {
   update_available: boolean;
   force_update: boolean;
   release_notes: string;
+  latest_package_id?: string;
+  latest_package_name?: string;
+  latest_package_sha256?: string;
+  latest_package_md5?: string;
   download_url: string;
   download_filename?: string;
   download_size_bytes?: number;
@@ -34,13 +39,17 @@ interface UpdateState {
   downloadFilename: string | null;
   downloadSha256: string | null;
   downloading: boolean;
+  readyToInstall: boolean;
+  installing: boolean;
   progress: number;
   dismissed: boolean;
   error: string | null;
 }
 
 interface UpdateInfo extends Omit<UpdateState, "dismissed"> {
-  downloadAndInstall: () => Promise<void>;
+  downloadUpdate: () => Promise<void>;
+  installNow: () => Promise<void>;
+  installLater: () => Promise<void>;
   dismiss: () => void;
   checkNow: () => Promise<EnterpriseUpdatePolicy | null>;
 }
@@ -54,6 +63,8 @@ let state: UpdateState = {
   downloadFilename: null,
   downloadSha256: null,
   downloading: false,
+  readyToInstall: false,
+  installing: false,
   progress: 0,
   dismissed: false,
   error: null,
@@ -61,6 +72,7 @@ let state: UpdateState = {
 
 const listeners = new Set<() => void>();
 let pendingUpdate: EnterpriseUpdatePolicy | null = null;
+let pendingTauriUpdate: TauriUpdate | null = null;
 let initialized = false;
 
 function setState(patch: Partial<UpdateState>) {
@@ -103,6 +115,8 @@ export async function checkForUpdates(): Promise<EnterpriseUpdatePolicy | null> 
         downloadFilename: update.download_filename || null,
         downloadSha256: update.download_sha256 || null,
         downloading: false,
+        readyToInstall: false,
+        installing: false,
         progress: 0,
         dismissed: false,
         error: null,
@@ -120,6 +134,8 @@ export async function checkForUpdates(): Promise<EnterpriseUpdatePolicy | null> 
         downloadUrl: update.download_url || null,
         downloadFilename: update.download_filename || null,
         downloadSha256: update.download_sha256 || null,
+        readyToInstall: false,
+        installing: false,
         dismissed: true,
         error: null,
       });
@@ -134,6 +150,8 @@ export async function checkForUpdates(): Promise<EnterpriseUpdatePolicy | null> 
       downloadUrl: update.download_url || null,
       downloadFilename: update.download_filename || null,
       downloadSha256: update.download_sha256 || null,
+      readyToInstall: false,
+      installing: false,
       dismissed: false,
       error: null,
     });
@@ -146,16 +164,6 @@ export async function checkForUpdates(): Promise<EnterpriseUpdatePolicy | null> 
   }
 }
 
-function fallbackUpdateFilename(downloadUrl: string, version: string | null): string {
-  try {
-    const segment = decodeURIComponent(new URL(downloadUrl).pathname.split("/").pop() || "");
-    if (segment.includes(".")) return segment;
-  } catch {
-    // Fall through to version-based name.
-  }
-  return `fpi-agent-${version || "update"}.bin`;
-}
-
 function updaterAuthHeaders(): Record<string, string> | undefined {
   const token = getCompanySessionToken();
   return token ? { "X-FPI-Session": token } : undefined;
@@ -165,18 +173,25 @@ function clampProgress(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
-async function installWithTauriUpdater(): Promise<boolean> {
-  const [{ check }, { relaunch }] = await Promise.all([
-    import("@tauri-apps/plugin-updater"),
-    import("@tauri-apps/plugin-process"),
-  ]);
+function closePendingTauriUpdate() {
+  void pendingTauriUpdate?.close().catch((error) => {
+    console.warn("Failed to close pending updater resource:", error);
+  });
+  pendingTauriUpdate = null;
+}
+
+async function downloadWithTauriUpdater(): Promise<boolean> {
+  const { check } = await import("@tauri-apps/plugin-updater");
   const headers = updaterAuthHeaders();
   const update = await check({ headers, timeout: 15_000 });
   if (!update) return false;
 
+  closePendingTauriUpdate();
+  pendingTauriUpdate = update;
+
   let downloaded = 0;
   let total = 0;
-  await update.downloadAndInstall((event) => {
+  await update.download((event) => {
     if (event.event === "Started") {
       downloaded = 0;
       total = event.data.contentLength || 0;
@@ -192,54 +207,93 @@ async function installWithTauriUpdater(): Promise<boolean> {
   }, { headers, timeout: 30 * 60 * 1000 });
 
   setState({ progress: 100 });
-  await relaunch();
   return true;
 }
 
-async function fallbackDownloadAndOpen() {
-  const downloadUrl = pendingUpdate?.download_url || state.downloadUrl;
-  if (!downloadUrl) {
-    throw new Error("未配置可用的更新包，请在后台上传签名 updater 包或安装包");
-  }
-  const defaultName =
-    pendingUpdate?.download_filename ||
-    state.downloadFilename ||
-    fallbackUpdateFilename(downloadUrl, pendingUpdate?.latest_version || state.version);
-  const expectedSha256 = pendingUpdate?.download_sha256 || state.downloadSha256 || null;
-  const cleanupProgress = desktopAPI.onUpdateDownloadProgress((event) => {
-    setState({ progress: clampProgress(event.progress || 0) });
-  });
+async function downloadUpdate() {
+  setState({ downloading: true, readyToInstall: false, installing: false, error: null, progress: 0 });
   try {
-    await desktopAPI.downloadUpdateAndOpen({ url: downloadUrl, defaultName, expectedSha256 });
-  } finally {
-    cleanupProgress();
+    const downloadedInApp = await downloadWithTauriUpdater();
+    if (downloadedInApp) {
+      setState({
+        downloading: false,
+        readyToInstall: true,
+        progress: 100,
+      });
+      return;
+    }
+    setState({
+      error: "未找到签名的应用内更新包，请在后台上传 Tauri updater 包和 .sig 签名文件。",
+      downloading: false,
+      readyToInstall: false,
+      progress: 0,
+    });
+  } catch (updaterError) {
+    console.warn("In-app updater failed:", updaterError);
+    closePendingTauriUpdate();
+    const message = updaterError instanceof Error ? updaterError.message : String(updaterError);
+    setState({ error: message, downloading: false, readyToInstall: false });
   }
 }
 
-async function downloadAndInstall() {
-  setState({ downloading: true, error: null, progress: 0 });
-  try {
-    const installedInApp = await installWithTauriUpdater();
-    if (!installedInApp) {
-      await fallbackDownloadAndOpen();
-    }
-    setState({ downloading: false, progress: 100 });
-  } catch (updaterError) {
-    console.warn("In-app updater failed, falling back to package installer:", updaterError);
-    try {
-      await fallbackDownloadAndOpen();
-      setState({ downloading: false, progress: 100 });
-    } catch (fallbackError) {
-      console.error("Update download failed:", fallbackError);
-      const message = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-      setState({ error: message, downloading: false });
-    }
+async function installDownloadedUpdate(relaunchAfterInstall: boolean) {
+  if (!state.readyToInstall) {
+    await downloadUpdate();
   }
+  if (!pendingTauriUpdate) {
+    setState({
+      error: "更新包还没有下载完成，请先下载更新包。",
+      downloading: false,
+      installing: false,
+      readyToInstall: false,
+    });
+    return;
+  }
+  setState({ installing: true, error: null });
+  try {
+    const update = pendingTauriUpdate;
+    await update.install();
+    pendingTauriUpdate = null;
+    await update.close().catch((error) => {
+      console.warn("Failed to close installed updater resource:", error);
+    });
+
+    if (relaunchAfterInstall) {
+      const { relaunch } = await import("@tauri-apps/plugin-process");
+      await relaunch();
+      return;
+    }
+
+    rememberDismissedUpdate();
+    setState({
+      available: false,
+      readyToInstall: false,
+      installing: false,
+      dismissed: true,
+    });
+  } catch (error) {
+    console.error("Update install failed:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    setState({ error: message, installing: false });
+  }
+}
+
+async function installNow() {
+  await installDownloadedUpdate(true);
+}
+
+async function installLater() {
+  await installDownloadedUpdate(false);
+}
+
+function rememberDismissedUpdate() {
+  const version = pendingUpdate?.latest_version || state.version;
+  if (version) localStorage.setItem(DISMISSED_KEY, version);
 }
 
 function dismiss() {
   if (state.forceUpdate) return;
-  if (state.version) localStorage.setItem(DISMISSED_KEY, state.version);
+  rememberDismissedUpdate();
   setState({ dismissed: true, available: false });
 }
 
@@ -262,6 +316,8 @@ const serverSnapshot: UpdateState = {
   downloadFilename: null,
   downloadSha256: null,
   downloading: false,
+  readyToInstall: false,
+  installing: false,
   progress: 0,
   dismissed: false,
   error: null,
@@ -277,7 +333,9 @@ export function useUpdateCheck(): UpdateInfo {
     () => state,
     () => serverSnapshot,
   );
-  const boundDownload = useCallback(() => downloadAndInstall(), []);
+  const boundDownload = useCallback(() => downloadUpdate(), []);
+  const boundInstallNow = useCallback(() => installNow(), []);
+  const boundInstallLater = useCallback(() => installLater(), []);
   const boundDismiss = useCallback(() => dismiss(), []);
   const boundCheck = useCallback(() => checkForUpdates(), []);
 
@@ -290,9 +348,13 @@ export function useUpdateCheck(): UpdateInfo {
     downloadFilename: snapshot.downloadFilename,
     downloadSha256: snapshot.downloadSha256,
     downloading: snapshot.downloading,
+    readyToInstall: snapshot.readyToInstall,
+    installing: snapshot.installing,
     progress: snapshot.progress,
     error: snapshot.error,
-    downloadAndInstall: boundDownload,
+    downloadUpdate: boundDownload,
+    installNow: boundInstallNow,
+    installLater: boundInstallLater,
     dismiss: boundDismiss,
     checkNow: boundCheck,
   };

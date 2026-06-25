@@ -485,7 +485,12 @@ export function useChat(currentSessionId?: string) {
           return {
             sessions: {
               ...s.sessions,
-              [currentSessionId]: { ...cur, pendingUserText: null, pendingAttachments: null },
+              [currentSessionId]: {
+                ...cur,
+                pendingUserText: null,
+                pendingUserSentAt: null,
+                pendingAttachments: null,
+              },
             },
           };
         });
@@ -600,6 +605,7 @@ export function useChat(currentSessionId?: string) {
     isCompacting: session.isCompacting,
     streamId: session.streamId,
     pendingUserText: session.pendingUserText,
+    pendingUserSentAt: session.pendingUserSentAt,
     pendingAttachments: session.pendingAttachments,
     streamingParts: session.streamingParts,
     streamingText: session.streamingText,

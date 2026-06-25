@@ -75,6 +75,8 @@ interface MessageListProps {
   streamId: string | null;
   /** Optimistic user message text shown before the API confirms. */
   pendingUserText: string | null;
+  /** Client-side send timestamp for the optimistic user bubble. */
+  pendingUserSentAt?: string | null;
   /** Attachments for the optimistic user bubble. */
   pendingAttachments?: FileAttachment[] | null;
   streamingParts: PartData[];
@@ -100,6 +102,7 @@ export function MessageList({
   isGenerating,
   streamId,
   pendingUserText,
+  pendingUserSentAt,
   pendingAttachments,
   streamingParts,
   streamingText,
@@ -257,20 +260,31 @@ export function MessageList({
     return streamingParts.some(partHasVisibleChatContent);
   }, [streamingParts, streamingReasoning, streamingText]);
 
+  const latestVisiblePersistedUserMatchesPending = useMemo(() => {
+    if (!pendingUserText) return false;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const message = messages[i];
+      if (!chatMessageIsVisible(message)) continue;
+      if ((message.data as { role: string }).role !== "user") return false;
+      const messageTime = Date.parse(message.time_created);
+      const pendingTime = pendingUserSentAt ? Date.parse(pendingUserSentAt) : Number.NaN;
+      if (Number.isFinite(messageTime) && Number.isFinite(pendingTime) && messageTime < pendingTime) {
+        return false;
+      }
+      const fullText = extractTextFromPartResponses(message.parts);
+      return fullText.includes(pendingUserText);
+    }
+    return false;
+  }, [pendingUserText, pendingUserSentAt, messages]);
+
   // Don't show the optimistic user bubble if the DB-fetched messages already
-  // contain a matching user message. This prevents duplicates after navigating
-  // from /c/new to /c/{sessionId} (where useMessages fetches the persisted
-  // user message while pendingUserText is still set in the global store).
+  // end with the same user message created for the current send. The timestamp
+  // guard prevents an older repeated short prompt like "你好" from hiding the
+  // fresh optimistic bubble while the backend is still creating the new row.
   const showPendingBubble = useMemo(() => {
     if (!pendingUserText) return false;
-    if (messages.length === 0) return true;
-    const hasPendingInDb = messages.some((m) => {
-      if ((m.data as { role: string }).role !== "user") return false;
-      const fullText = extractTextFromPartResponses(m.parts);
-      return fullText.includes(pendingUserText);
-    });
-    return !hasPendingInDb;
-  }, [pendingUserText, messages]);
+    return !latestVisiblePersistedUserMatchesPending;
+  }, [latestVisiblePersistedUserMatchesPending, pendingUserText]);
 
   // Only show the loading state on the very first load (no cached/placeholder data).
   // When switching sessions with keepPreviousData, messages.length > 0 so we

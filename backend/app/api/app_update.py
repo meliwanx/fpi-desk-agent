@@ -20,11 +20,16 @@ router = APIRouter()
 class AppUpdatePolicyResponse(BaseModel):
     enabled: bool
     current_version: str
+    current_package_sha256: str = ""
     latest_version: str
     min_supported_version: str
     update_available: bool
     force_update: bool
     release_notes: str
+    latest_package_id: str = ""
+    latest_package_name: str = ""
+    latest_package_sha256: str = ""
+    latest_package_md5: str = ""
     download_url: str
     download_filename: str = ""
     download_size_bytes: int = 0
@@ -108,22 +113,29 @@ def _download_url_for_asset(request: Request, asset: Any) -> str:
         return str(request.url_for("download_app_update_asset", asset_id=asset.id))
 
 
-async def _local_download_info_for_platform(request: Request, policy: Any, platform: str) -> tuple[str, str, int, str, str]:
+async def _local_download_info_for_platform(
+    request: Request,
+    policy: Any,
+    platform: str,
+) -> tuple[str, str, int, str, str, str, str, str]:
     asset_id = _asset_id_for_platform(policy, platform)
     if not asset_id:
-        return "", "", 0, "", ""
+        return "", "", 0, "", "", "", "", ""
     store = _company_store(request)
     if not hasattr(store, "get_update_asset"):
-        return "", "", 0, "", ""
+        return "", "", 0, "", "", "", "", ""
     asset = await store.get_update_asset(asset_id)
     if asset is None:
-        return "", "", 0, "", ""
+        return "", "", 0, "", "", "", "", ""
     return (
         _download_url_for_asset(request, asset),
         asset.original_filename or "",
         int(asset.size_bytes or 0),
         str(asset.version or ""),
         str(asset.sha256 or ""),
+        str(asset.id or ""),
+        str(getattr(asset, "name", "") or ""),
+        str(getattr(asset, "md5", "") or ""),
     )
 
 
@@ -139,11 +151,15 @@ def build_update_response(
     policy: Any,
     *,
     current_version: str,
+    current_package_sha256: str = "",
     platform: str,
     download_url: str | None = None,
     download_filename: str = "",
     download_size_bytes: int = 0,
     download_sha256: str = "",
+    latest_package_id: str = "",
+    latest_package_name: str = "",
+    latest_package_md5: str = "",
     effective_latest_version: str | None = None,
 ) -> AppUpdatePolicyResponse:
     enabled = bool(_policy_value(policy, "enabled", False))
@@ -154,19 +170,30 @@ def build_update_response(
         latest_version,
     )
     current = (current_version or "").strip().lstrip("vV")
+    current_sha256 = (current_package_sha256 or "").strip().lower()
+    latest_sha256 = (download_sha256 or "").strip().lower()
 
-    update_available = enabled and bool(latest_version) and _compare_versions(current, latest_version) < 0
+    version_update_available = bool(latest_version) and _compare_versions(current, latest_version) < 0
     below_minimum = bool(min_supported_version) and _compare_versions(current, min_supported_version) < 0
-    force_update = bool(update_available and (bool(_policy_value(policy, "force_update", False)) or below_minimum))
+    update_available = enabled and (version_update_available or below_minimum)
+    force_update = bool(
+        update_available
+        and (bool(_policy_value(policy, "force_update", False)) or below_minimum)
+    )
 
     return AppUpdatePolicyResponse(
         enabled=enabled,
         current_version=current,
+        current_package_sha256=current_sha256,
         latest_version=latest_version,
         min_supported_version=min_supported_version,
         update_available=update_available,
         force_update=force_update,
         release_notes=str(_policy_value(policy, "release_notes", "") or ""),
+        latest_package_id=latest_package_id,
+        latest_package_name=latest_package_name,
+        latest_package_sha256=latest_sha256,
+        latest_package_md5=latest_package_md5,
         download_url=download_url if download_url is not None else _legacy_download_url_for_platform(policy, platform),
         download_filename=download_filename,
         download_size_bytes=download_size_bytes,
@@ -241,25 +268,35 @@ async def _signed_manifest_platforms(
 async def get_app_update_policy(
     request: Request,
     current_version: str = "",
+    current_package_sha256: str = "",
     platform: str = "",
     arch: str = "",
 ) -> AppUpdatePolicyResponse:
     del arch
     policy = await _company_store(request).get_update_policy()
-    local_download_url, download_filename, download_size_bytes, asset_version, download_sha256 = await _local_download_info_for_platform(
-        request,
-        policy,
-        platform,
-    )
+    (
+        local_download_url,
+        download_filename,
+        download_size_bytes,
+        asset_version,
+        download_sha256,
+        latest_package_id,
+        latest_package_name,
+        latest_package_md5,
+    ) = await _local_download_info_for_platform(request, policy, platform)
     download_url = local_download_url or _legacy_download_url_for_platform(policy, platform)
     return build_update_response(
         policy,
         current_version=current_version,
+        current_package_sha256=current_package_sha256,
         platform=platform,
         download_url=download_url,
         download_filename=download_filename,
         download_size_bytes=download_size_bytes,
         download_sha256=download_sha256,
+        latest_package_id=latest_package_id,
+        latest_package_name=latest_package_name,
+        latest_package_md5=latest_package_md5,
         effective_latest_version=asset_version or None,
     )
 

@@ -69,21 +69,14 @@ pub fn set_tray_recents(app: &AppHandle, recents: &[TrayRecent]) -> tauri::Resul
 
 fn build_menu(app: &AppHandle, recents: &[TrayRecent]) -> tauri::Result<Menu<tauri::Wry>> {
     let new_chat = MenuItem::with_id(app, "new_chat", "新建对话", true, None::<&str>)?;
-    let search_chats =
-        MenuItem::with_id(app, "search_chats", "搜索对话…", true, None::<&str>)?;
+    let search_chats = MenuItem::with_id(app, "search_chats", "搜索对话…", true, None::<&str>)?;
 
     let recent_submenu = build_recent_submenu(app, recents)?;
 
     let show_window =
         MenuItem::with_id(app, "show_window", "打开聚光办公助理", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
-    let check_updates = MenuItem::with_id(
-        app,
-        "check_updates",
-        "检查更新…",
-        true,
-        None::<&str>,
-    )?;
+    let check_updates = MenuItem::with_id(app, "check_updates", "检查更新…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出聚光办公助理", true, None::<&str>)?;
 
     Menu::with_items(
@@ -108,8 +101,7 @@ fn build_recent_submenu(
     recents: &[TrayRecent],
 ) -> tauri::Result<Submenu<tauri::Wry>> {
     if recents.is_empty() {
-        let empty =
-            MenuItem::with_id(app, "recent_empty", "暂无最近对话", false, None::<&str>)?;
+        let empty = MenuItem::with_id(app, "recent_empty", "暂无最近对话", false, None::<&str>)?;
         return Submenu::with_items(app, "最近对话", true, &[&empty]);
     }
 
@@ -117,7 +109,13 @@ fn build_recent_submenu(
     for r in recents {
         let label = format_title(r.title.as_deref());
         let id = format!("{RECENT_PREFIX}{}", r.id);
-        items.push(Box::new(MenuItem::with_id(app, id, label, true, None::<&str>)?));
+        items.push(Box::new(MenuItem::with_id(
+            app,
+            id,
+            label,
+            true,
+            None::<&str>,
+        )?));
     }
     items.push(Box::new(PredefinedMenuItem::separator(app)?));
     items.push(Box::new(MenuItem::with_id(
@@ -134,7 +132,10 @@ fn build_recent_submenu(
 }
 
 fn format_title(raw: Option<&str>) -> String {
-    let title = raw.map(str::trim).filter(|s| !s.is_empty()).unwrap_or("未命名对话");
+    let title = raw
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("未命名对话");
     if title.chars().count() <= MAX_TITLE_CHARS {
         return title.to_string();
     }
