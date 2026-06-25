@@ -19,9 +19,9 @@ class WriteTool(ToolDefinition):
     @property
     def description(self) -> str:
         return (
-            "Create a new file or overwrite an existing file with the given content. "
-            "Use the artifact tool for self-contained visual artifacts. "
-            "After writing a final user-facing file, call present_file to show it."
+            "创建新文件，或用指定内容覆盖已有文件。"
+            "自包含的可视化 artifact 应使用 artifact 工具。"
+            "写入最终面向用户的文件后，调用 present_file 展示。"
         )
 
     def parameters_schema(self) -> dict[str, Any]:
@@ -30,11 +30,11 @@ class WriteTool(ToolDefinition):
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Absolute or relative path to the file to write",
+                    "description": "要写入的绝对路径或相对路径",
                 },
                 "content": {
                     "type": "string",
-                    "description": "The content to write to the file",
+                    "description": "要写入文件的内容",
                 },
             },
             "required": ["file_path", "content"],

@@ -21,8 +21,7 @@ class ApplyPatchTool(ToolDefinition):
     @property
     def description(self) -> str:
         return (
-            "Apply a patch to create, update, or delete files. "
-            "Uses a lightweight format:\n"
+            "应用补丁来创建、更新或删除文件。使用以下轻量格式：\n"
             "*** Begin Patch\n"
             "*** Add File: path\n"
             "+new line\n"
@@ -32,7 +31,7 @@ class ApplyPatchTool(ToolDefinition):
             "+new line\n"
             "*** Delete File: path\n"
             "*** End Patch\n\n"
-            "More token-efficient than individual edit calls for multi-file changes."
+            "对于多文件修改，这比多次单独调用 edit 更节省上下文。"
         )
 
     def parameters_schema(self) -> dict[str, Any]:
@@ -41,7 +40,7 @@ class ApplyPatchTool(ToolDefinition):
             "properties": {
                 "patch_text": {
                     "type": "string",
-                    "description": "The patch content in *** Begin/End Patch format",
+                    "description": "*** Begin Patch / *** End Patch 格式的补丁内容",
                 },
             },
             "required": ["patch_text"],

@@ -42,37 +42,28 @@ class ToolSearchTool(ToolDefinition):
     def description(self) -> str:
         """Dynamic description listing deferred tool names."""
         base = (
-            "Fetch full schema definitions for deferred tools so they can "
-            "be called.\n\n"
-            "Deferred tools are listed below by name. Until you fetch their "
-            "schemas via this tool, they cannot be called — the LLM does not "
-            "receive their parameter definitions.\n\n"
-            "After calling this tool, the matched tools become available in "
-            "subsequent turns with full schemas.\n\n"
-            "Query forms:\n"
-            '- "select:tool_name" or "select:tool1,tool2" — fetch exact tools by name\n'
-            '- "keyword1 keyword2" — keyword search, returns up to max_results matches'
+            "获取延迟加载工具的完整 schema，使这些工具可被调用。\n\n"
+            "下面只列出延迟加载工具名称。调用本工具获取 schema 之前，"
+            "这些工具不会进入模型的可调用工具列表。\n\n"
+            "调用本工具后，匹配到的工具会在后续轮次中带完整 schema 可用。\n\n"
+            "查询格式：\n"
+            '- "select:tool_name" 或 "select:tool1,tool2"：按名称精确获取工具\n'
+            '- "关键词1 关键词2"：关键词搜索，最多返回 max_results 个匹配项'
         )
 
         deferred = self._get_deferred_tools()
         if not deferred:
-            return base + "\n\nNo deferred tools are currently available."
+            return base + "\n\n当前没有可延迟加载的工具。"
 
         shown = deferred[: self._MAX_LISTED]
         remaining = len(deferred) - len(shown)
 
-        lines = [base, "", "Available deferred tools:"]
+        lines = [base, "", "可延迟加载工具："]
         for tool in shown:
-            desc = tool.description or ""
-            # Strip MCP prefix for brevity in listing
-            if desc.startswith("[MCP:"):
-                desc = desc.split("]", 1)[-1].strip()
-            if len(desc) > self._MAX_DESC_CHARS:
-                desc = desc[: self._MAX_DESC_CHARS - 3] + "..."
-            lines.append(f"- {tool.id}: {desc}")
+            lines.append(f"- {tool.id}")
 
         if remaining > 0:
-            lines.append(f"  (and {remaining} more — search by keyword to find them)")
+            lines.append(f"  （还有 {remaining} 个，可通过关键词搜索查找）")
 
         return "\n".join(lines)
 
@@ -83,13 +74,13 @@ class ToolSearchTool(ToolDefinition):
                 "query": {
                     "type": "string",
                     "description": (
-                        'Search query. Use "select:tool_name" for exact match, '
-                        "or keywords for fuzzy search."
+                        '搜索查询。使用 "select:tool_name" 精确匹配，'
+                        "或使用关键词进行模糊搜索。"
                     ),
                 },
                 "max_results": {
                     "type": "integer",
-                    "description": "Maximum number of results to return (default: 5).",
+                    "description": "最多返回结果数量（默认 5）。",
                 },
             },
             "required": ["query"],
@@ -101,7 +92,7 @@ class ToolSearchTool(ToolDefinition):
 
         deferred = self._get_deferred_tools()
         if not deferred:
-            return ToolResult(output="No deferred tools available.", title="Tool search")
+            return ToolResult(output="当前没有可延迟加载的工具。", title="工具搜索")
 
         # --- Match ---
         if query.startswith("select:"):
@@ -113,8 +104,8 @@ class ToolSearchTool(ToolDefinition):
         if not matches:
             available = ", ".join(t.id for t in deferred[:20])
             return ToolResult(
-                output=f"No matching deferred tools for query: {query}\n\nAvailable: {available}",
-                title="Tool search: no results",
+                output=f"没有找到匹配的延迟加载工具：{query}\n\n可用工具：{available}",
+                title="工具搜索：没有结果",
             )
 
         # --- Mark discovered ---
@@ -129,16 +120,16 @@ class ToolSearchTool(ToolDefinition):
             sections.append(
                 f"### {spec['name']}\n"
                 f"{spec['description']}\n\n"
-                f"Parameters:\n```json\n"
+                f"参数：\n```json\n"
                 f"{json.dumps(spec['parameters'], indent=2, ensure_ascii=False)}\n"
                 f"```"
             )
 
         output = "\n\n".join(sections)
-        ctx.publish_metadata(title=f"Found {len(matches)} tool(s)")
+        ctx.publish_metadata(title=f"找到 {len(matches)} 个工具")
         return ToolResult(
             output=output,
-            title=f"Found {len(matches)} tool(s)",
+            title=f"找到 {len(matches)} 个工具",
             metadata={"discovered": [t.id for t in matches]},
         )
 

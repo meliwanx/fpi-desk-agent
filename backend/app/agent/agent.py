@@ -29,7 +29,7 @@ def _load_prompt(name: str) -> str:
 BUILTIN_AGENTS: dict[str, AgentInfo] = {
     "build": AgentInfo(
         name="build",
-        description="Full-featured AI assistant with all tools",
+        description="具备完整工具能力的办公助理",
         mode="primary",
         tools=[],  # Empty = all tools (filtered by permissions)
         permissions=Ruleset(rules=[
@@ -44,7 +44,7 @@ BUILTIN_AGENTS: dict[str, AgentInfo] = {
     ),
     "plan": AgentInfo(
         name="plan",
-        description="Read-only analysis and planning mode",
+        description="只读分析和计划模式",
         mode="primary",
         tools=[],
         permissions=Ruleset(rules=[
@@ -64,7 +64,7 @@ BUILTIN_AGENTS: dict[str, AgentInfo] = {
     ),
     "explore": AgentInfo(
         name="explore",
-        description="Fast search and exploration subagent",
+        description="用于快速搜索和探索的子任务助理",
         mode="subagent",
         tools=["read", "glob", "grep", "search", "bash", "web_fetch", "web_search", "skill"],
         permissions=Ruleset(rules=[
@@ -81,7 +81,7 @@ BUILTIN_AGENTS: dict[str, AgentInfo] = {
     ),
     "general": AgentInfo(
         name="general",
-        description="General-purpose subagent with full access",
+        description="具备常规工具能力的通用子任务助理",
         mode="subagent",
         tools=[],
         permissions=Ruleset(rules=[
@@ -96,7 +96,7 @@ BUILTIN_AGENTS: dict[str, AgentInfo] = {
     ),
     "compaction": AgentInfo(
         name="compaction",
-        description="Context summarization agent (no tools)",
+        description="上下文摘要助理（无工具）",
         mode="hidden",
         tools=[],
         permissions=Ruleset(rules=[
@@ -106,7 +106,7 @@ BUILTIN_AGENTS: dict[str, AgentInfo] = {
     ),
     "title": AgentInfo(
         name="title",
-        description="Session title generator (no tools)",
+        description="会话标题生成助理（无工具）",
         mode="hidden",
         tools=[],
         permissions=Ruleset(rules=[
@@ -117,7 +117,7 @@ BUILTIN_AGENTS: dict[str, AgentInfo] = {
     ),
     "summary": AgentInfo(
         name="summary",
-        description="Change summary generator (no tools)",
+        description="变更摘要生成助理（无工具）",
         mode="hidden",
         tools=[],
         permissions=Ruleset(rules=[
@@ -216,7 +216,7 @@ def _agent_from_dict(name: str, config: dict[str, Any]) -> AgentInfo:
 
     return AgentInfo(
         name=name,
-        description=config.get("description", f"Custom agent: {name}"),
+        description=config.get("description", f"自定义助理：{name}"),
         mode=config.get("mode", "primary"),
         tools=config.get("tools", []),
         permissions=permissions,
@@ -275,7 +275,7 @@ def _parse_agent_markdown(path: Path) -> AgentInfo:
 
     return AgentInfo(
         name=name,
-        description=frontmatter.get("description", f"Custom agent: {name}"),
+        description=frontmatter.get("description", f"自定义助理：{name}"),
         mode=frontmatter.get("mode", "primary"),
         tools=frontmatter.get("tools", []),
         permissions=permissions,

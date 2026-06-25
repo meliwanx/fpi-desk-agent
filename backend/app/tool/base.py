@@ -122,7 +122,7 @@ class ToolDefinition(ABC):
             # Schema validation — catch LLM hallucinated arguments early
             validation_error = self.validate_args(args)
             if validation_error:
-                return ToolResult(error=f"Invalid arguments for {self.id}: {validation_error}")
+                return ToolResult(error=f"{self.id} 的参数无效：{validation_error}")
 
             result = await self.execute(args, ctx)
             # Truncate output — save full text to file if oversized

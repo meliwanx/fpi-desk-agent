@@ -243,12 +243,10 @@ def _presentation_reminder(tool_id: str, metadata: dict[str, Any] | None) -> str
 
     joined = ", ".join(candidates[:5])
     return (
-        "\n\n<reminder>Potential final deliverable file(s) were created: "
-        f"{joined}. If these are final files the user asked for, call present_file "
-        "for each user-facing deliverable before your final response. Mention "
-        "supporting data files separately unless the user asked to open or share "
-        "them. Do not present temporary scripts, scratch files, logs, helper "
-        "files, or intermediate outputs.</reminder>"
+        "\n\n<reminder>可能已经创建最终交付文件："
+        f"{joined}。如果这些是用户要求的最终文件，请在最终回复前对每个面向用户的交付文件调用 present_file。"
+        "辅助数据文件单独说明即可，除非用户明确要求打开或分享。"
+        "不要展示临时脚本、草稿文件、日志、辅助文件或中间产物。</reminder>"
     )
 
 
@@ -385,7 +383,7 @@ async def run_generation(
         }))
     except Exception:
         logger.exception("Generation error for stream %s", job.stream_id)
-        job.publish(SSEEvent(AGENT_ERROR, {"error_message": "An internal error occurred. Please try again."}))
+        job.publish(SSEEvent(AGENT_ERROR, {"error_message": "发生内部错误，请稍后重试。"}))
     finally:
         job.complete()
 

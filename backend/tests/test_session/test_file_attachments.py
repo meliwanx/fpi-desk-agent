@@ -10,7 +10,7 @@ def test_directory_attachment_renders_as_directory_reference(tmp_path):
     folder.mkdir()
 
     content = _build_user_content_with_files(
-        "Please summarize this folder.",
+        "请总结这个文件夹。",
         [
             {
                 "name": "source",
@@ -21,8 +21,8 @@ def test_directory_attachment_renders_as_directory_reference(tmp_path):
         ],
     )
 
-    assert content[0] == {"type": "text", "text": "Please summarize this folder."}
+    assert content[0] == {"type": "text", "text": "请总结这个文件夹。"}
     assert content[1]["type"] == "text"
     assert "<directory" in content[1]["text"]
     assert str(folder) in content[1]["text"]
-    assert "Use the Read, Glob, Grep, or code_execute tools" in content[1]["text"]
+    assert "请使用 read、glob、grep 或 code_execute" in content[1]["text"]

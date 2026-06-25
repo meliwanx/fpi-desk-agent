@@ -24,11 +24,9 @@ class GlobTool(ToolDefinition):
     @property
     def description(self) -> str:
         return (
-            "Find files matching a glob pattern. "
-            "Supports patterns like '**/*.py', 'src/**/*.ts', etc. "
-            "Defaults to the active workspace; use an explicit absolute path "
-            "to search another local folder read-only. "
-            "Returns matching file paths sorted by modification time."
+            "按 glob 模式查找文件。支持 '**/*.py'、'src/**/*.ts' 等模式。"
+            "默认在当前工作区搜索；也可以提供明确绝对路径，只读搜索本机其他目录。"
+            "结果按修改时间排序返回匹配文件路径。"
         )
 
     def parameters_schema(self) -> dict[str, Any]:
@@ -37,11 +35,11 @@ class GlobTool(ToolDefinition):
             "properties": {
                 "pattern": {
                     "type": "string",
-                    "description": "Glob pattern to match files against (e.g. '**/*.py')",
+                    "description": "用于匹配文件的 glob 模式（例如 '**/*.py'）",
                 },
                 "path": {
                     "type": "string",
-                    "description": "Directory to search in (defaults to project directory)",
+                    "description": "搜索目录（默认当前项目目录）",
                 },
             },
             "required": ["pattern"],

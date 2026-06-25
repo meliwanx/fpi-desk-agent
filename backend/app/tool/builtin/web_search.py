@@ -30,9 +30,8 @@ class WebSearchTool(ToolDefinition):
     @property
     def description(self) -> str:
         return (
-            "Search the web for information. Returns search results with titles and URLs. "
-            "For time-sensitive queries, include the current year in the search query "
-            "to get recent results."
+            "联网搜索信息，返回包含标题和 URL 的搜索结果。"
+            "对于时效性问题，请在查询中加入当前年份，以便获得较新的结果。"
         )
 
     def parameters_schema(self) -> dict[str, Any]:
@@ -41,11 +40,11 @@ class WebSearchTool(ToolDefinition):
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "The search query",
+                    "description": "搜索关键词",
                 },
                 "max_results": {
                     "type": "integer",
-                    "description": "Maximum number of results (default: 10)",
+                    "description": "最多返回结果数量（默认 10）",
                     "default": 10,
                 },
             },

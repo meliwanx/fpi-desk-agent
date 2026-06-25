@@ -473,9 +473,7 @@ class SessionPrompt:
             self.job.session_id,
         )
         await self._inject_system_message(
-            "[System: You have reached the maximum number of steps. "
-            "Stop using tools and provide a final summary of what you "
-            "have accomplished and any remaining work.]"
+            "[系统：你已达到最大步骤数。请停止使用工具，用中文总结已经完成的工作和仍未完成的事项。]"
         )
         return False
 
@@ -660,8 +658,8 @@ class SessionPrompt:
                 if self._consecutive_compact_failures >= self._MAX_CONSECUTIVE_COMPACT_FAILURES:
                     self.job.publish(SSEEvent(AGENT_ERROR, {
                         "error_message": (
-                            "Context compression failed repeatedly. "
-                            "Please start a new conversation."
+                            "上下文压缩连续失败。"
+                            "请新建一个对话后继续。"
                         ),
                     }))
                     return True
@@ -683,10 +681,9 @@ class SessionPrompt:
                 len(incomplete),
             )
             await self._inject_system_message(
-                "[System: Context was compacted. Your active todo list:\n"
+                "[系统：上下文已压缩。你当前的待办列表：\n"
                 f"{todo_summary}\n"
-                "Continue working on these tasks. Call the todo tool to "
-                "update status as you complete each one.]"
+                "请继续处理这些任务。每完成一项后调用 `todo` 工具更新状态。所有思考、计划和回复都必须使用中文。]"
             )
         return False
 
@@ -729,8 +726,7 @@ class SessionPrompt:
                 len(self.request.attachments),
             )
             await self._inject_system_message(
-                "[System: You have access to tools. Please use them to "
-                "analyze the attached files and provide a thorough response.]"
+                "[系统：你可以使用工具。请用工具分析附件，并用中文给出完整回复。]"
             )
             return False
 
@@ -751,10 +747,9 @@ class SessionPrompt:
                 _cfg().max_continuation_attempts,
             )
             await self._inject_system_message(
-                f"[System: You have {len(incomplete)} incomplete todo(s): "
+                f"[系统：你还有 {len(incomplete)} 个未完成待办："
                 f"{incomplete_names}. "
-                f"Continue working on them. Call the todo tool to update "
-                f"status, then use tools to complete each task.]"
+                f"请继续处理。先调用 `todo` 工具更新状态，再使用工具完成每个任务。所有说明必须使用中文。]"
             )
             return False
 
@@ -775,11 +770,8 @@ class SessionPrompt:
                 self.job.session_id,
             )
             await self._inject_system_message(
-                "[System: You completed your work but produced no visible "
-                "response text. The user cannot see your reasoning or tool "
-                "activity. Please provide a clear, helpful summary of what "
-                "you found and accomplished. Do NOT use any tools — just "
-                "respond with text.]"
+                "[系统：你已经完成工作，但没有产生用户可见的回复文本。用户看不到你的推理或工具活动。"
+                "请直接用中文总结你发现了什么、完成了什么。不要再使用任何工具，只输出文本。]"
             )
             return False
 

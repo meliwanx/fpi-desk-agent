@@ -173,7 +173,7 @@ def _on_task_done(task: asyncio.Task[None], *, job: GenerationJob) -> None:
     if exc is not None:
         logger.error("Unhandled exception in generation task %s: %s", task.get_name(), exc, exc_info=exc)
         try:
-            job.publish(SSEEvent(AGENT_ERROR, {"error_message": "An internal error occurred. Please try again."}))
+            job.publish(SSEEvent(AGENT_ERROR, {"error_message": "发生内部错误，请稍后重试。"}))
         except Exception:
             logger.exception("Failed to publish AGENT_ERROR for task %s", task.get_name())
 

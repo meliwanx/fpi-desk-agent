@@ -533,7 +533,7 @@ async def get_message_history_for_llm(
         has_summary_text = any(
             p.data
             and p.data.get("type") == "text"
-            and str(p.data.get("text", "")).startswith("[Context Summary]")
+            and str(p.data.get("text", "")).startswith(("【上下文摘要】", "[Context Summary]"))
             for p in msg.parts
         )
         if has_compaction_part and has_summary_text:
@@ -739,7 +739,7 @@ def _build_user_content_with_files(
                 "type": "text",
                 "text": (
                     f'\n<directory name="{name}" path="{path}">\n'
-                    f'[Directory attached. Use the Read, Glob, Grep, or code_execute tools with this path to inspect its contents.]\n'
+                    f"[已附加目录。请使用 read、glob、grep 或 code_execute，并带上这个路径检查目录内容。]\n"
                     f"</directory>\n"
                 ),
             })
@@ -762,7 +762,7 @@ def _build_user_content_with_files(
                     "type": "text",
                     "text": (
                         f'\n<file name="{name}" path="{path}">\n'
-                        f"[Image file — could not read. Use the Read tool to view it.]\n"
+                        f"[图片文件无法读取。请使用 read 工具查看。]\n"
                         f"</file>\n"
                     ),
                 })
@@ -780,9 +780,9 @@ def _build_user_content_with_files(
                         f'\n<file name="{name}" path="{path}" lines="{total_lines}" showing="1-{min(total_lines, _DATA_PREVIEW_LINES)}">\n'
                         f"{preview}\n"
                         f"</file>\n"
-                        f"[Data file with {total_lines} rows. "
-                        f'Use code_execute with `pd.read_csv("{path}")` to analyze the full dataset. '
-                        f"Do NOT calculate from this preview.]\n"
+                        f"[数据文件共 {total_lines} 行。"
+                        f'请使用 code_execute 和 `pd.read_csv("{path}")` 分析完整数据集。'
+                        f"不要只基于这段预览计算。]\n"
                     ),
                 })
             except Exception:
@@ -791,7 +791,7 @@ def _build_user_content_with_files(
                     "type": "text",
                     "text": (
                         f'\n<file name="{name}" path="{path}">\n'
-                        f'[Data file. Use code_execute with pd.read_csv("{path}") to analyze it.]\n'
+                        f'[数据文件。请使用 code_execute 和 pd.read_csv("{path}") 分析。]\n'
                         f"</file>\n"
                     ),
                 })
@@ -819,7 +819,7 @@ def _build_user_content_with_files(
                             f'\n<file name="{name}" path="{path}" lines="{len(lines)}" showing="1-{_PREVIEW_LINES}">\n'
                             f"{preview}\n"
                             f"</file>\n"
-                            f'[File has {len(lines)} total lines. Use the Read tool with file_path="{path}" to see the full content.]\n'
+                            f'[文件共 {len(lines)} 行。请使用 read 工具并传入 file_path="{path}" 查看完整内容。]\n'
                         ),
                     })
             except Exception:
@@ -828,7 +828,7 @@ def _build_user_content_with_files(
                     "type": "text",
                     "text": (
                         f'\n<file name="{name}" path="{path}">\n'
-                        f'[Could not read file. Use the Read tool with file_path="{path}" to access it.]\n'
+                        f'[无法读取文件。请使用 read 工具并传入 file_path="{path}" 访问。]\n'
                         f"</file>\n"
                     ),
                 })
@@ -838,7 +838,7 @@ def _build_user_content_with_files(
                 "type": "text",
                 "text": (
                     f'\n<file name="{name}" path="{path}" size="{size}" mime="{mime}">\n'
-                    f'[Binary file. Use the Read tool with file_path="{path}" to access it.]\n'
+                    f'[二进制文件。请使用 read 工具并传入 file_path="{path}" 访问。]\n'
                     f"</file>\n"
                 ),
             })

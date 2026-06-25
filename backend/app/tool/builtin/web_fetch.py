@@ -27,8 +27,8 @@ class WebFetchTool(ToolDefinition):
     @property
     def description(self) -> str:
         return (
-            "Fetch content from a URL and return it as readable markdown. "
-            "Useful for reading documentation, API responses, and web pages."
+            "获取指定 URL 的内容，并转换为可读 Markdown 返回。"
+            "适用于阅读文档、接口响应和网页内容。"
         )
 
     def parameters_schema(self) -> dict[str, Any]:
@@ -37,11 +37,11 @@ class WebFetchTool(ToolDefinition):
             "properties": {
                 "url": {
                     "type": "string",
-                    "description": "The URL to fetch",
+                    "description": "要获取的 URL",
                 },
                 "max_length": {
                     "type": "integer",
-                    "description": "Maximum content length to return (default: 50000)",
+                    "description": "最多返回的内容长度（默认 50000）",
                     "default": 50000,
                 },
             },

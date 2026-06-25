@@ -21,13 +21,13 @@ class InvalidTool(ToolDefinition):
 
     @property
     def description(self) -> str:
-        return "Fallback for unrecognized tool calls"
+        return "无法识别工具调用时的兜底工具"
 
     def parameters_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "The unrecognized tool name"},
+                "name": {"type": "string", "description": "无法识别的工具名称"},
             },
         }
 

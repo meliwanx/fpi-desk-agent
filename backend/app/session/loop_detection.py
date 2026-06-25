@@ -29,14 +29,14 @@ _DEFAULT_WINDOW_SIZE = 20
 _DEFAULT_MAX_SESSIONS = 200
 
 WARNING_MSG = (
-    "[LOOP DETECTED] You are repeating the same tool calls with identical arguments. "
-    "Stop calling tools and produce your final answer now. If you cannot complete "
-    "the task, summarize what you accomplished so far."
+    "[检测到循环] 你正在重复调用相同工具且参数相同。"
+    "请停止调用工具，立即用中文给出最终答复。"
+    "如果无法完成任务，请用中文总结目前已经完成的内容。"
 )
 
 HARD_STOP_MSG = (
-    "[FORCED STOP] Repeated tool calls exceeded the safety limit. "
-    "Producing final answer with results collected so far."
+    "[强制停止] 重复工具调用已超过安全限制。"
+    "请基于目前收集到的结果，用中文给出最终答复。"
 )
 
 

@@ -29,11 +29,9 @@ class GrepTool(ToolDefinition):
     @property
     def description(self) -> str:
         return (
-            "Search file contents using regex patterns. "
-            "Supports file type filtering and context lines. "
-            "Defaults to the active workspace; use an explicit absolute path "
-            "to search another local file or folder read-only. "
-            "Returns matching lines with file paths and line numbers."
+            "使用正则表达式搜索文件内容。支持文件类型过滤和上下文行。"
+            "默认在当前工作区搜索；也可以提供明确绝对路径，只读搜索本机其他文件或目录。"
+            "返回匹配行、文件路径和行号。"
         )
 
     def parameters_schema(self) -> dict[str, Any]:
@@ -42,29 +40,29 @@ class GrepTool(ToolDefinition):
             "properties": {
                 "pattern": {
                     "type": "string",
-                    "description": "Regex pattern to search for",
+                    "description": "要搜索的正则表达式",
                 },
                 "path": {
                     "type": "string",
-                    "description": "File or directory to search in (default: current dir)",
+                    "description": "要搜索的文件或目录（默认当前目录）",
                 },
                 "glob": {
                     "type": "string",
-                    "description": "Glob pattern to filter files (e.g. '*.py', '*.{ts,tsx}')",
+                    "description": "用于过滤文件的 glob 模式（例如 '*.py'、'*.{ts,tsx}'）",
                 },
                 "case_insensitive": {
                     "type": "boolean",
-                    "description": "Case insensitive search",
+                    "description": "是否忽略大小写",
                     "default": False,
                 },
                 "context": {
                     "type": "integer",
-                    "description": "Number of context lines before and after match",
+                    "description": "匹配行前后各返回多少上下文行",
                     "default": 0,
                 },
                 "max_results": {
                     "type": "integer",
-                    "description": "Maximum number of matching lines to return",
+                    "description": "最多返回匹配行数量",
                     "default": 100,
                 },
             },

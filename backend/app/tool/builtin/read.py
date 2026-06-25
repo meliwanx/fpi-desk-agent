@@ -34,14 +34,11 @@ class ReadTool(ToolDefinition):
     @property
     def description(self) -> str:
         return (
-            "Read a file from the filesystem. Supports offset/limit for paging "
-            "through large files. Can also list directory contents. "
-            "Relative paths resolve inside the active workspace by default; "
-            "explicit absolute paths can inspect local files elsewhere on this computer. "
-            "Natively handles ALL file types including PDF, DOCX, XLSX, PPTX, "
-            "and images (PNG, JPG, etc.) — no skill or plugin needed, just call read directly. "
-            "Use 'pages' to read specific pages of a PDF or a named sheet in XLSX. "
-            "Use 'format=json' for structured spreadsheet output."
+            "读取本机文件或列出目录内容。支持 offset/limit 分页读取大文件。"
+            "相对路径默认解析到当前工作区；显式绝对路径可只读查看本机其他位置。"
+            "可直接处理 PDF、DOCX、XLSX、PPTX、图片等常见文件类型，无需额外技能或插件。"
+            "读取 PDF/PPTX 指定页或 XLSX 指定工作表时使用 pages。"
+            "需要结构化表格输出时使用 format=json。"
         )
 
     def parameters_schema(self) -> dict[str, Any]:
@@ -50,26 +47,26 @@ class ReadTool(ToolDefinition):
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Absolute or relative path to the file to read",
+                    "description": "要读取的绝对路径或相对路径",
                 },
                 "offset": {
                     "type": "integer",
-                    "description": "Line number to start reading from (1-based)",
+                    "description": "开始读取的行号（从 1 开始）",
                     "default": 1,
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum number of lines to read",
+                    "description": "最多读取的行数",
                     "default": 2000,
                 },
                 "pages": {
                     "type": "string",
-                    "description": "Page range for PDFs/PPTX (e.g. '1-3' or '5'), or sheet name for XLSX (e.g. 'Revenue')",
+                    "description": "PDF/PPTX 的页码范围（例如 '1-3' 或 '5'），或 XLSX 的工作表名称（例如 'Revenue'）",
                 },
                 "format": {
                     "type": "string",
                     "enum": ["json"],
-                    "description": "Set to 'json' for structured spreadsheet output (XLSX/CSV)",
+                    "description": "设置为 'json' 时输出结构化表格数据（XLSX/CSV）",
                 },
             },
             "required": ["file_path"],
@@ -160,7 +157,7 @@ class ReadTool(ToolDefinition):
             parts.append(" | ".join(padded))
 
         parts.append("")
-        parts.append("Use code_execute for analysis.")
+        parts.append("需要进一步分析时，请使用 code_execute。")
 
         return ToolResult(
             output="\n".join(parts),
@@ -180,7 +177,7 @@ class ReadTool(ToolDefinition):
             raise ImportError("openpyxl is not installed")
 
         wb = load_workbook(resolved, read_only=True, data_only=True)
-        parts = [f"File: {os.path.basename(file_path)}", f"Sheets: {', '.join(wb.sheetnames)}", ""]
+        parts = [f"文件：{os.path.basename(file_path)}", f"工作表：{', '.join(wb.sheetnames)}", ""]
 
         all_metadata: dict[str, Any] = {"source": "filesystem", "format": "xlsx", "sheets": {}}
 
@@ -194,15 +191,15 @@ class ReadTool(ToolDefinition):
                     break
 
             if not rows:
-                parts.append(f"=== {sheet_name}: (empty) ===")
+                parts.append(f"=== {sheet_name}：（空）===")
                 continue
 
             headers = rows[0]
             data_rows = rows[1:]
             total_rows = ws.max_row - 1 if ws.max_row else 0
 
-            parts.append(f"=== {sheet_name} ({total_rows:,} rows, {len(headers)} cols) ===")
-            parts.append("Columns: " + ", ".join(headers))
+            parts.append(f"=== {sheet_name}（{total_rows:,} 行，{len(headers)} 列）===")
+            parts.append("列：" + ", ".join(headers))
             parts.append("")
             parts.append(" | ".join(headers))
             parts.append(" | ".join(["---"] * len(headers)))
@@ -218,7 +215,7 @@ class ReadTool(ToolDefinition):
 
         wb.close()
 
-        parts.append("Use code_execute for analysis.")
+        parts.append("需要进一步分析时，请使用 code_execute。")
 
         return ToolResult(
             output="\n".join(parts),
@@ -259,7 +256,7 @@ class ReadTool(ToolDefinition):
             data_url = f"data:{mime_type};base64,{b64}"
 
             return ToolResult(
-                output=f"[Image: {os.path.basename(file_path)}]",
+                output=f"[图片：{os.path.basename(file_path)}]",
                 title=os.path.basename(file_path),
                 metadata={
                     "source": "filesystem",
@@ -268,7 +265,7 @@ class ReadTool(ToolDefinition):
                 },
             )
         except Exception as e:
-            return ToolResult(error=f"Cannot read image {file_path}: {e}")
+            return ToolResult(error=f"无法读取图片 {file_path}：{e}")
 
     # ------------------------------------------------------------------
     # Filesystem fallback path
@@ -287,7 +284,7 @@ class ReadTool(ToolDefinition):
         limit = args.get("limit", 2000)
 
         if not os.path.exists(file_path):
-            return ToolResult(error=f"File not found: {file_path}")
+            return ToolResult(error=f"文件不存在：{file_path}")
 
         # Directory listing
         if os.path.isdir(file_path):
@@ -296,11 +293,11 @@ class ReadTool(ToolDefinition):
                 listing = "\n".join(entries)
                 return ToolResult(
                     output=listing,
-                    title=f"Listed {len(entries)} entries in {os.path.basename(file_path)}",
+                    title=f"已列出 {os.path.basename(file_path)} 中的 {len(entries)} 项",
                     metadata={"source": "filesystem"},
                 )
             except PermissionError:
-                return ToolResult(error=f"Permission denied: {file_path}")
+                return ToolResult(error=f"没有权限访问：{file_path}")
 
         # Binary document extraction (PDF, DOCX, XLSX, PPTX)
         if is_supported_binary(file_path):
@@ -310,7 +307,7 @@ class ReadTool(ToolDefinition):
                 return ToolResult(error=str(e))
             except Exception as e:
                 return ToolResult(
-                    error=f"Cannot read {os.path.basename(file_path)}: {e}"
+                    error=f"无法读取 {os.path.basename(file_path)}：{e}"
                 )
 
             result = self._format_lines(text, file_path, offset, limit)
@@ -343,7 +340,7 @@ class ReadTool(ToolDefinition):
             output = "\n".join(output_lines)
 
             if end < total_lines:
-                output += f"\n\n... ({total_lines - end} more lines)"
+                output += f"\n\n...（还有 {total_lines - end} 行）"
 
             return ToolResult(
                 output=output,
@@ -352,9 +349,9 @@ class ReadTool(ToolDefinition):
             )
 
         except UnicodeDecodeError:
-            return ToolResult(error=f"Cannot read binary file: {file_path}")
+            return ToolResult(error=f"无法读取二进制文件：{file_path}")
         except PermissionError:
-            return ToolResult(error=f"Permission denied: {file_path}")
+            return ToolResult(error=f"没有权限访问：{file_path}")
 
     # ------------------------------------------------------------------
     # Helpers

@@ -360,6 +360,6 @@ async def run_task_batch(
         )
     except Exception:
         logger.exception("Task batch failed for stream %s", job.stream_id)
-        job.publish(SSEEvent(AGENT_ERROR, {"error_message": "Task batch failed. Please try again."}))
+        job.publish(SSEEvent(AGENT_ERROR, {"error_message": "任务批处理失败，请稍后重试。"}))
     finally:
         job.complete()

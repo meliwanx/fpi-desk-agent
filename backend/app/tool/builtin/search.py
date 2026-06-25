@@ -27,12 +27,11 @@ class SearchTool(ToolDefinition):
     @property
     def description(self) -> str:
         return (
-            "Full-text search across indexed workspace files only. "
-            "Only use this when a workspace folder is selected and indexed; "
-            "if no workspace is set or workspace results are insufficient, use glob/grep/read with explicit paths. "
-            "Finds relevant files and passages by keyword. "
-            "Returns ranked results with file paths and context snippets. "
-            "Use this for broad discovery; use grep for exact pattern matching."
+            "仅在已建立索引的工作区文件中做全文搜索。"
+            "只有用户选择了工作区文件夹且索引可用时才使用。"
+            "如果没有工作区，或搜索结果不足，请改用 glob、grep、read 并提供明确路径。"
+            "该工具按关键词查找相关文件和片段，并返回带路径和上下文片段的排序结果。"
+            "广泛探索时使用 search；精确正则匹配时使用 grep。"
         )
 
     def parameters_schema(self) -> dict[str, Any]:
@@ -41,19 +40,19 @@ class SearchTool(ToolDefinition):
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Keywords or natural language search query",
+                    "description": "关键词或自然语言搜索查询",
                 },
                 "path": {
                     "type": "string",
-                    "description": "Limit search to a subdirectory (optional)",
+                    "description": "限制搜索到某个子目录（可选）",
                 },
                 "file_types": {
                     "type": "string",
-                    "description": "Comma-separated file extensions to include (e.g. 'py,ts,md')",
+                    "description": "用逗号分隔的文件扩展名过滤条件（例如 'py,ts,md'）",
                 },
                 "max_results": {
                     "type": "integer",
-                    "description": "Maximum number of results to return",
+                    "description": "最多返回结果数量",
                     "default": 20,
                 },
             },

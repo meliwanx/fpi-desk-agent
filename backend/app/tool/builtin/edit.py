@@ -26,10 +26,10 @@ class EditTool(ToolDefinition):
     @property
     def description(self) -> str:
         return (
-            "Make precise edits to a file by replacing exact string matches. "
-            "Two modes: (1) Single edit — provide old_string and new_string at top level. "
-            "(2) Batch edit — provide an edits array for multiple sequential replacements "
-            "(all succeed or none are applied). Use replace_all=true to replace all occurrences."
+            "通过精确字符串匹配替换来修改文件。"
+            "两种模式：1. 单次编辑，在顶层提供 old_string 和 new_string；"
+            "2. 批量编辑，提供 edits 数组按顺序执行多个替换。"
+            "批量模式会整体成功或整体失败。需要替换所有匹配项时设置 replace_all=true。"
         )
 
     def parameters_schema(self) -> dict[str, Any]:
@@ -38,38 +38,38 @@ class EditTool(ToolDefinition):
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Path to the file to edit",
+                    "description": "要编辑的文件路径",
                 },
                 "old_string": {
                     "type": "string",
-                    "description": "The exact string to find and replace (single edit mode)",
+                    "description": "要查找并替换的精确字符串（单次编辑模式）",
                 },
                 "new_string": {
                     "type": "string",
-                    "description": "The replacement string (single edit mode)",
+                    "description": "替换后的字符串（单次编辑模式）",
                 },
                 "replace_all": {
                     "type": "boolean",
-                    "description": "Replace all occurrences (default: false, single edit mode)",
+                    "description": "是否替换所有匹配项（默认 false，单次编辑模式）",
                     "default": False,
                 },
                 "edits": {
                     "type": "array",
-                    "description": "Ordered list of edits for batch mode (mutually exclusive with old_string/new_string)",
+                    "description": "批量编辑的有序列表；与 old_string/new_string 互斥",
                     "items": {
                         "type": "object",
                         "properties": {
                             "old_string": {
                                 "type": "string",
-                                "description": "The exact string to find and replace",
+                                "description": "要查找并替换的精确字符串",
                             },
                             "new_string": {
                                 "type": "string",
-                                "description": "The replacement string",
+                                "description": "替换后的字符串",
                             },
                             "replace_all": {
                                 "type": "boolean",
-                                "description": "Replace all occurrences (default: false)",
+                                "description": "是否替换所有匹配项（默认 false）",
                                 "default": False,
                             },
                         },

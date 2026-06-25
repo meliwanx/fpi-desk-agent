@@ -48,11 +48,11 @@ def create_plugin_agent(plugin: PluginMeta, skill_names: list[str]) -> AgentInfo
     """
     skills_list = "\n".join(f"- `{name}`" for name in skill_names)
     prompt = (
-        f"You are a specialised **{plugin.name}** assistant.\n\n"
+        f"你是专用于 **{plugin.name}** 的助理。\n\n"
         f"{plugin.description}\n\n"
-        f"## Available skills\n\n"
+        f"## 可用技能\n\n"
         f"{skills_list}\n\n"
-        f"Use the `skill` tool to load any of the above skills when needed."
+        f"需要时使用 `skill` 工具加载上面的技能。所有思考、计划和回复必须使用中文。"
     )
 
     return AgentInfo(

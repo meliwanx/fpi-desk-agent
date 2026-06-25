@@ -54,10 +54,10 @@ _MODEL_PREFIX = "openyak-"
 
 # Available agents exposed as model IDs.
 _AGENT_MODELS = {
-    "openyak-build": {"agent": "build", "description": "Full-featured assistant with all tools"},
-    "openyak-plan": {"agent": "plan", "description": "Read-only analysis and planning"},
-    "openyak-explore": {"agent": "explore", "description": "Fast search and exploration"},
-    "openyak-general": {"agent": "general", "description": "General-purpose assistant"},
+    "openyak-build": {"agent": "build", "description": "具备完整工具能力的助理"},
+    "openyak-plan": {"agent": "plan", "description": "只读分析和计划"},
+    "openyak-explore": {"agent": "explore", "description": "快速搜索和探索"},
+    "openyak-general": {"agent": "general", "description": "通用助理"},
 }
 
 

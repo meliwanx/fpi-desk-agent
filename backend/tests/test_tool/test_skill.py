@@ -30,11 +30,11 @@ class TestSkillToolProperties:
 
     def test_description_no_skills(self):
         tool = SkillTool()
-        assert "No skills are currently available" in tool.description
+        assert "当前没有可用技能" in tool.description
 
     def test_description_no_registry(self):
         tool = SkillTool(skill_registry=None)
-        assert "No skills are currently available" in tool.description
+        assert "当前没有可用技能" in tool.description
 
     def test_description_with_skills(self, tmp_path: Path):
         skills_dir = tmp_path / ".openyak" / "skills" / "test-skill"
@@ -50,7 +50,7 @@ class TestSkillToolProperties:
         desc = tool.description
 
         assert "test-skill" in desc
-        assert "A test." in desc
+        assert "A test." not in desc
 
     def test_parameters_schema(self):
         tool = SkillTool()
@@ -66,7 +66,7 @@ class TestSkillToolExecute:
         skills_dir = tmp_path / ".openyak" / "skills" / "my-skill"
         skills_dir.mkdir(parents=True)
         (skills_dir / "SKILL.md").write_text(
-            "---\nname: my-skill\ndescription: My skill.\n---\n\n# Skill body\nInstructions here.",
+            "---\nname: my-skill\ndescription: 我的技能。\n---\n\n# 技能正文\n这里是指令。",
             encoding="utf-8",
         )
         registry = SkillRegistry()
@@ -77,9 +77,9 @@ class TestSkillToolExecute:
 
         assert result.success
         assert '<skill_content name="my-skill">' in result.output
-        assert "# Skill body" in result.output
-        assert "Instructions here." in result.output
-        assert result.title == "Loaded skill: my-skill"
+        assert "# 技能正文" in result.output
+        assert "这里是指令。" in result.output
+        assert result.title == "已加载技能：my-skill"
 
     @pytest.mark.asyncio
     async def test_execute_skill_not_found(self):
@@ -90,7 +90,7 @@ class TestSkillToolExecute:
         result = await tool.execute({"name": "nonexistent"}, _make_ctx())
 
         assert not result.success
-        assert "not found" in result.error
+        assert "不存在或已禁用" in result.error
 
     @pytest.mark.asyncio
     async def test_execute_no_registry(self):
@@ -98,7 +98,7 @@ class TestSkillToolExecute:
         result = await tool.execute({"name": "anything"}, _make_ctx())
 
         assert not result.success
-        assert "not initialised" in result.error
+        assert "尚未初始化" in result.error
 
     @pytest.mark.asyncio
     async def test_execute_lists_bundled_files(self, tmp_path: Path):

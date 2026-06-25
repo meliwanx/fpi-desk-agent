@@ -101,22 +101,20 @@ def truncate_output(
     # Build hint message
     if has_task_tool:
         hint = (
-            f"The tool call succeeded but the output was truncated. "
-            f"Full output saved to: {filepath}\n"
-            f"Use the Task tool to have explore agent process this file "
-            f"with Grep and Read (with offset/limit). "
-            f"Do NOT read the full file yourself — delegate to save context."
+            f"工具调用已成功，但输出过长已被截断。"
+            f"完整输出已保存到：{filepath}\n"
+            f"请使用 task 工具让 explore 子任务助理通过 grep 和 read（带 offset/limit）处理该文件。"
+            f"不要自己读取完整文件，以节省上下文。"
         )
     else:
         hint = (
-            f"The tool call succeeded but the output was truncated. "
-            f"Full output saved to: {filepath}\n"
-            f"Use Grep to search the full content or "
-            f"Read with offset/limit to view specific sections."
+            f"工具调用已成功，但输出过长已被截断。"
+            f"完整输出已保存到：{filepath}\n"
+            f"请使用 grep 搜索完整内容，或使用 read 配合 offset/limit 查看指定片段。"
         )
 
     if direction == "head":
-        message = f"{preview}\n\n...{removed} {unit} truncated...\n\n{hint}"
+        message = f"{preview}\n\n...已截断 {removed} {unit}...\n\n{hint}"
     else:
         message = f"...{removed} {unit} truncated...\n\n{hint}\n\n{preview}"
 

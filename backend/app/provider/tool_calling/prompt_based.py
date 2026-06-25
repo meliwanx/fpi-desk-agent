@@ -19,21 +19,21 @@ logger = logging.getLogger(__name__)
 
 # Template for injecting tool descriptions into system prompt
 TOOL_PROMPT_TEMPLATE = """
-# Available Tools
+# 可用工具
 
-You have access to the following tools. To use a tool, output a tool call in this exact format:
+你可以使用以下工具。需要调用工具时，必须严格按下面格式输出工具调用：
 
 <tool_call>
 {{"name": "tool_name", "arguments": {{"arg1": "value1", "arg2": "value2"}}}}
 </tool_call>
 
-You can make multiple tool calls in a single response. After each tool call, you will receive the result.
+一次回复中可以包含多个工具调用。每次工具调用后，系统会返回对应结果。
 
-## Tools
+## 工具列表
 
 {tool_descriptions}
 
-IMPORTANT: Only use the exact tool names listed above. Always use the <tool_call> XML tag format.
+重要：只能使用上面列出的准确工具名。必须始终使用 <tool_call> XML 标签格式。除工具名、参数名、JSON 字段和必要原文外，说明文字必须使用中文。
 """
 
 
@@ -47,15 +47,15 @@ def build_tool_prompt(tools: list[ToolDefinition]) -> str:
 
         param_lines = []
         for name, prop in props.items():
-            req = " (required)" if name in required else ""
+            req = "（必填）" if name in required else ""
             desc = prop.get("description", "")
             ptype = prop.get("type", "any")
             param_lines.append(f"    - {name}: {ptype}{req} — {desc}")
 
-        params_str = "\n".join(param_lines) if param_lines else "    (no parameters)"
+        params_str = "\n".join(param_lines) if param_lines else "    （无参数）"
 
         descriptions.append(
-            f"### {tool.id}\n{tool.description}\n\nParameters:\n{params_str}"
+            f"### {tool.id}\n{tool.description}\n\n参数：\n{params_str}"
         )
 
     tool_text = "\n\n".join(descriptions)
