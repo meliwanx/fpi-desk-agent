@@ -710,8 +710,15 @@ async def test_employee_update_policy_serves_local_asset_and_counts_downloads(ap
             + ("0" * 64)
         )
         assert same_version_different_hash.status_code == 200
-        assert same_version_different_hash.json()["update_available"] is False
+        assert same_version_different_hash.json()["update_available"] is True
         assert same_version_different_hash.json()["force_update"] is False
+
+        same_version_missing_hash = await app_client.get(
+            "/api/app/update-policy?current_version=1.4.0&platform=windows&arch=x64"
+        )
+        assert same_version_missing_hash.status_code == 200
+        assert same_version_missing_hash.json()["update_available"] is True
+        assert same_version_missing_hash.json()["force_update"] is False
 
         download = await app_client.get(payload["download_url"])
         assert download.status_code == 200
@@ -812,7 +819,7 @@ async def test_employee_update_manifest_serves_signed_tauri_assets(app_client, t
         await store.dispose()
 
 
-async def test_employee_update_policy_uses_selected_asset_version_not_hash(app_client, tmp_path):
+async def test_employee_update_policy_uses_selected_asset_hash_for_rebuilds(app_client, tmp_path):
     store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
     await store.startup()
     app_client.app.state.company_auth_store = store
@@ -868,8 +875,8 @@ async def test_employee_update_policy_uses_selected_asset_version_not_hash(app_c
         assert response.status_code == 200
         payload = response.json()
         assert payload["latest_version"] == "1.3.0"
-        assert payload["update_available"] is False
-        assert payload["force_update"] is False
+        assert payload["update_available"] is True
+        assert payload["force_update"] is True
         assert payload["latest_package_sha256"] == windows_asset.sha256
 
         current = await app_client.get(
