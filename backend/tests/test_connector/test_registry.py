@@ -12,6 +12,16 @@ from unittest.mock import patch
 from app.connector.registry import ConnectorRegistry
 
 
+class RecordingMcpManager:
+    def __init__(self) -> None:
+        self._config = {}
+        self.reconnect_calls = []
+
+    async def reconnect(self, name: str) -> bool:
+        self.reconnect_calls.append((name, dict(self._config.get(name, {}))))
+        return name in self._config
+
+
 class TestNormalizeUrl:
     def test_strips_trailing_slash(self):
         assert ConnectorRegistry._normalize_url("https://api.com/") == "https://api.com"
@@ -87,6 +97,32 @@ class TestRegisterCustom:
         reg.register_custom("my-tool", "My Tool", "https://my.tool/sse")
         with pytest.raises(ValueError):
             reg.register_custom("my-tool", "My Tool 2", "https://my.tool2/sse")
+
+    @pytest.mark.asyncio
+    async def test_custom_connector_syncs_to_mcp_config_before_enable(self, tmp_path: Path):
+        reg = self._make_registry(tmp_path)
+        mcp_manager = RecordingMcpManager()
+        reg._mcp_manager = mcp_manager
+
+        reg.register_custom("my-tool", "My Tool", "https://my.tool/sse")
+
+        assert mcp_manager._config["my-tool"] == {
+            "type": "remote",
+            "url": "https://my.tool/sse",
+            "enabled": False,
+        }
+
+        assert await reg.enable("my-tool") is True
+        assert mcp_manager.reconnect_calls == [
+            (
+                "my-tool",
+                {
+                    "type": "remote",
+                    "url": "https://my.tool/sse",
+                    "enabled": True,
+                },
+            )
+        ]
 
 
 class TestRemoveCustom:

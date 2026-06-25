@@ -84,6 +84,7 @@ class ConnectorRegistry:
                 # Add plugin reference if not already there
                 if plugin_name not in existing.referenced_by:
                     existing.referenced_by.append(plugin_name)
+                self._sync_mcp_config(existing)
                 connector_ids.append(existing.id)
                 continue
 
@@ -115,6 +116,7 @@ class ConnectorRegistry:
             )
 
             self._connectors[connector_id] = connector
+            self._sync_mcp_config(connector)
             connector_ids.append(connector_id)
 
         return connector_ids
@@ -142,6 +144,7 @@ class ConnectorRegistry:
             source="custom",
         )
         self._connectors[id] = connector
+        self._sync_mcp_config(connector)
 
         # Persist custom connector
         customs = self._persisted_state.setdefault("custom", [])
@@ -163,6 +166,9 @@ class ConnectorRegistry:
             return False
 
         del self._connectors[id]
+        if self._mcp_manager:
+            self._mcp_manager._config.pop(id, None)
+            self._mcp_manager._clients.pop(id, None)
 
         # Remove from persisted custom list
         customs = self._persisted_state.get("custom", [])
@@ -199,20 +205,10 @@ class ConnectorRegistry:
         self._inject_local_credentials()
 
         # Build MCP config dict from all connectors (enabled or not)
-        mcp_config: dict[str, Any] = {}
-        for cid, connector in self._connectors.items():
-            if connector.type == "local":
-                mcp_config[cid] = {
-                    "type": "local",
-                    "enabled": connector.enabled,
-                    **connector.local_config,
-                }
-            else:
-                mcp_config[cid] = {
-                    "type": "remote",
-                    "url": connector.url,
-                    "enabled": connector.enabled,
-                }
+        mcp_config: dict[str, Any] = {
+            cid: self._mcp_config_for(connector)
+            for cid, connector in self._connectors.items()
+        }
 
         self._mcp_manager = McpManager(mcp_config, project_dir=self._project_dir)
         await self._mcp_manager.startup()
@@ -255,6 +251,7 @@ class ConnectorRegistry:
 
         # Actually connect the MCP server
         if self._mcp_manager:
+            self._sync_mcp_config(connector)
             try:
                 await self._mcp_manager.reconnect(id)
             except Exception as e:
@@ -278,6 +275,7 @@ class ConnectorRegistry:
 
         # Disconnect the MCP server
         if self._mcp_manager:
+            self._sync_mcp_config(connector)
             client = self._mcp_manager._clients.get(id)
             if client:
                 try:
@@ -448,6 +446,25 @@ class ConnectorRegistry:
 
         if tokens and tokens.get("refresh_token"):
             env["GOOGLE_WORKSPACE_REFRESH_TOKEN"] = tokens["refresh_token"]
+
+    @staticmethod
+    def _mcp_config_for(connector: ConnectorInfo) -> dict[str, Any]:
+        if connector.type == "local":
+            return {
+                "type": "local",
+                "enabled": connector.enabled,
+                **connector.local_config,
+            }
+        return {
+            "type": "remote",
+            "url": connector.url,
+            "enabled": connector.enabled,
+        }
+
+    def _sync_mcp_config(self, connector: ConnectorInfo) -> None:
+        if not self._mcp_manager:
+            return
+        self._mcp_manager._config[connector.id] = self._mcp_config_for(connector)
 
     def _find_by_url(self, url: str) -> ConnectorInfo | None:
         """Find a connector by URL (for dedup)."""

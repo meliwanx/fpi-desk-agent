@@ -44,6 +44,16 @@ assert.match(
   /latestVisiblePersistedUserMatchesPending/,
   "optimistic user bubble dedupe should only consider the latest visible persisted user message",
 );
+assert.doesNotMatch(
+  messageList,
+  /\(message\.data as \{ role: string \}\)\.role !== "user"\) return false/,
+  "optimistic user bubble dedupe must ignore later assistant/tool shells and keep scanning for the current persisted user message",
+);
+assert.match(
+  messageList,
+  /if \(\(message\.data as \{ role: string \}\)\.role !== "user"\) continue/,
+  "optimistic user bubble dedupe should scan back to the latest visible user message",
+);
 assert.match(
   chatStore,
   /pendingUserSentAt/,

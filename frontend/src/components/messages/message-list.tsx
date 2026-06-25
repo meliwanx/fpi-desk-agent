@@ -265,7 +265,7 @@ export function MessageList({
     for (let i = messages.length - 1; i >= 0; i -= 1) {
       const message = messages[i];
       if (!chatMessageIsVisible(message)) continue;
-      if ((message.data as { role: string }).role !== "user") return false;
+      if ((message.data as { role: string }).role !== "user") continue;
       const messageTime = Date.parse(message.time_created);
       const pendingTime = pendingUserSentAt ? Date.parse(pendingUserSentAt) : Number.NaN;
       if (Number.isFinite(messageTime) && Number.isFinite(pendingTime) && messageTime < pendingTime) {
@@ -278,7 +278,7 @@ export function MessageList({
   }, [pendingUserText, pendingUserSentAt, messages]);
 
   // Don't show the optimistic user bubble if the DB-fetched messages already
-  // end with the same user message created for the current send. The timestamp
+  // include the same latest user message created for the current send. The timestamp
   // guard prevents an older repeated short prompt like "你好" from hiding the
   // fresh optimistic bubble while the backend is still creating the new row.
   const showPendingBubble = useMemo(() => {
@@ -303,7 +303,7 @@ export function MessageList({
         >
           {/* Show optimistic user bubble during loading so it doesn't flash
               away between navigation and message fetch completion */}
-          {pendingUserText && (
+          {showPendingBubble && (
             <div className="px-4 py-3">
               <div className="mx-auto max-w-3xl xl:max-w-4xl">
                 <div className="flex justify-end">
