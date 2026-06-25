@@ -84,7 +84,7 @@ export const SessionItem = memo(function SessionItem({
   const liveBucket = useChatSession(session.id);
   const isLive = liveBucket.isGenerating || liveBucket.isCompacting;
   const hasDirectory = !!session.directory && session.directory !== ".";
-  const deeplink = `openyak://chat?sessionId=${encodeURIComponent(session.id)}`;
+  const deeplink = `fpiagent://chat?sessionId=${encodeURIComponent(session.id)}`;
   const pinLabel = session.is_pinned
     ? t('unpin', { defaultValue: 'Unpin' })
     : t('pin', { defaultValue: 'Pin' });

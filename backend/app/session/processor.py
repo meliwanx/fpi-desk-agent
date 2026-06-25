@@ -66,6 +66,7 @@ from app.streaming.manager import GenerationJob
 from app.tool.context import ToolContext
 from app.tool.registry import ToolRegistry
 from app.config import get_settings
+from app.runtime_paths import workspace_output_dir
 from app.session.utils import (
     calculate_step_cost as _calculate_step_cost,
     compute_safe_max_tokens as _compute_safe_max_tokens,
@@ -289,7 +290,7 @@ async def _save_artifact_as_file(
     workspace: str | None,
     metadata: dict[str, Any],
 ) -> None:
-    """Save artifact content to openyak_written/ and track as a session file."""
+    """Save artifact content to fpiagent_written/ and track as a session file."""
     import re
     from pathlib import Path
 
@@ -317,7 +318,7 @@ async def _save_artifact_as_file(
         safe_title = safe_title[:100]
 
     filename = f"{safe_title}{ext}"
-    output_dir = Path(workspace).resolve() / "openyak_written"
+    output_dir = workspace_output_dir(workspace)
 
     try:
         output_dir.mkdir(parents=True, exist_ok=True)

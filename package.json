@@ -1,6 +1,6 @@
 {
   "name": "openyak",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "private": true,
   "license": "Apache-2.0",
   "description": "fpi-agent — local-first AI agent for desktop work",

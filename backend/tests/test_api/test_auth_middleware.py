@@ -176,13 +176,13 @@ class TestDenyByDefault:
         assert r.status_code == 401
 
     @pytest.mark.asyncio
-    async def test_root_requires_auth(self):
-        """``/`` also denies unauthenticated requests — CSRF is not the
-        only thing keeping a browser-driven POST at bay."""
+    async def test_unknown_root_route_stays_not_found(self):
+        """An unregistered root POST remains a 404. Newly registered top-level
+        routes are covered by the deny-by-default test above."""
         app = _make_app(_settings())
         async with await _client(app) as c:
             r = await c.post("/")
-        assert r.status_code == 401
+        assert r.status_code == 404
 
     @pytest.mark.asyncio
     async def test_static_asset_public(self):

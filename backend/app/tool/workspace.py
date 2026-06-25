@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from app.runtime_paths import WORKSPACE_OUTPUT_DIR_NAME, workspace_output_dir
+
 
 class WorkspaceViolation(Exception):
     """Raised when a path is outside the allowed workspace."""
@@ -80,17 +82,17 @@ def resolve_for_read(file_path: str, workspace: str | None) -> str:
 
 
 def get_default_output_dir(workspace: str | None) -> str | None:
-    """Return the ``openyak_written`` subdirectory of *workspace*, or ``None``."""
+    """Return the fpi-agent generated output directory, or ``None``."""
     if not workspace:
         return None
-    return str(Path(workspace).resolve() / "openyak_written")
+    return str(workspace_output_dir(workspace))
 
 
 def resolve_for_write(file_path: str, workspace: str | None) -> str:
     """Resolve a file path for write operations.
 
     If *workspace* is set and *file_path* is relative (not absolute),
-    resolve it against ``{workspace}/openyak_written/`` instead of cwd.
+    resolve it against ``{workspace}/fpiagent_written/`` instead of cwd.
     Workspace restriction is still enforced afterwards.
 
     Returns the resolved absolute path string.
@@ -98,7 +100,7 @@ def resolve_for_write(file_path: str, workspace: str | None) -> str:
     """
     p = Path(file_path)
     if workspace and not p.is_absolute():
-        output_dir = Path(workspace).resolve() / "openyak_written"
+        output_dir = Path(workspace).resolve() / WORKSPACE_OUTPUT_DIR_NAME
         resolved = (output_dir / file_path).resolve()
     else:
         resolved = p.resolve()

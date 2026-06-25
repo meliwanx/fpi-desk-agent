@@ -44,7 +44,7 @@ class TestTruncateOutput:
         result = truncate_output(text, workspace=tmp_workspace)
         assert result.truncated is True
         assert result.output_path is not None
-        assert "truncated" in result.content
+        assert "已截断" in result.content
         # Full output saved to file
         assert Path(result.output_path).exists()
         saved = Path(result.output_path).read_text(encoding="utf-8")
@@ -55,7 +55,7 @@ class TestTruncateOutput:
         text = "\n".join(["x" * 100 for _ in range(600)])
         result = truncate_output(text, workspace=tmp_workspace)
         assert result.truncated is True
-        assert "bytes" in result.content or "truncated" in result.content
+        assert "bytes" in result.content or "已截断" in result.content
         assert Path(result.output_path).exists()
 
     def test_head_direction(self, tmp_workspace):
@@ -80,14 +80,14 @@ class TestTruncateOutput:
         text = "\n".join(["line" for _ in range(MAX_LINES + 10)])
         result = truncate_output(text, workspace=tmp_workspace, has_task_tool=True)
         assert result.truncated is True
-        assert "Task tool" in result.content
-        assert "delegate" in result.content
+        assert "task 工具" in result.content
+        assert "子任务助理" in result.content
 
     def test_hint_without_task_tool(self, tmp_workspace):
         text = "\n".join(["line" for _ in range(MAX_LINES + 10)])
         result = truncate_output(text, workspace=tmp_workspace, has_task_tool=False)
         assert result.truncated is True
-        assert "Grep" in result.content
+        assert "grep" in result.content
 
     def test_custom_limits(self, tmp_workspace):
         text = "a\nb\nc\nd\ne\nf"
@@ -98,7 +98,7 @@ class TestTruncateOutput:
     def test_output_dir_created(self, tmp_workspace):
         text = "\n".join(["line" for _ in range(MAX_LINES + 10)])
         result = truncate_output(text, workspace=tmp_workspace)
-        output_dir = Path(tmp_workspace) / ".openyak" / "tool-output"
+        output_dir = Path(tmp_workspace) / ".fpiagent" / "tool-output"
         assert output_dir.exists()
         assert result.output_path is not None
 
@@ -118,7 +118,7 @@ class TestCleanup:
     """Tests for cleanup_old_outputs()."""
 
     def test_cleanup_removes_old_files(self, tmp_workspace):
-        output_dir = Path(tmp_workspace) / ".openyak" / "tool-output"
+        output_dir = Path(tmp_workspace) / ".fpiagent" / "tool-output"
         output_dir.mkdir(parents=True, exist_ok=True)
         # Create a file and backdate it
         old_file = output_dir / "old.txt"
@@ -135,6 +135,7 @@ class TestCleanup:
         assert removed == 1
         assert not old_file.exists()
         assert new_file.exists()
+
 
     def test_cleanup_no_dir(self, tmp_workspace):
         # Non-existent dir should not error

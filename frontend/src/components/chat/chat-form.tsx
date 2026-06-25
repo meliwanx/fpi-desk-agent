@@ -219,10 +219,9 @@ export function ChatForm({ isGenerating, isCompacting = false, onSend, onStop, c
   const { ref, resize } = useAutoResize();
   const dropTargetRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { data: providerModels, activeProvider } = useProviderModels();
+  const { data: providerModels } = useProviderModels();
   const selectedModel = useSettingsStore((s) => s.selectedModel);
   const selectedProviderId = useSettingsStore((s) => s.selectedProviderId);
-  const noModelsAvailable = !activeProvider || providerModels.length === 0;
   // Surface the vision constraint up front: an image is attached but the
   // selected model can't read images. The send is also blocked server-side and
   // in useChat, but that only fires on send — leaving the composer looking like
@@ -291,7 +290,7 @@ export function ChatForm({ isGenerating, isCompacting = false, onSend, onStop, c
     }
     return null;
   })();
-  const isInputDisabled = isGenerating || isCompacting || noModelsAvailable;
+  const isInputDisabled = isGenerating || isCompacting;
 
   const addAttachments = useCallback((files: FileAttachment[]) => {
     setAttachments((prev) => {
@@ -643,7 +642,7 @@ export function ChatForm({ isGenerating, isCompacting = false, onSend, onStop, c
               onSelect={handleSelect}
               onSubmit={handleSend}
               mentionActive={mentionActive}
-              placeholder={noModelsAvailable ? t('noModelPlaceholder') : hasWorkspace ? t('placeholder') + t('placeholderMention') : t('workspaceRequired')}
+              placeholder={hasWorkspace ? t('placeholder') + t('placeholderMention') : t('workspaceRequired')}
               className="min-h-[28px] max-h-[200px] py-1"
               disabled={isInputDisabled}
             />
@@ -691,7 +690,7 @@ export function ChatForm({ isGenerating, isCompacting = false, onSend, onStop, c
 
             <ChatActions
               isBusy={isGenerating || isCompacting}
-              canSend={hasWorkspace && (input.trim().length > 0 || attachments.length > 0) && !isIndexing && !isCompacting && !noModelsAvailable}
+              canSend={hasWorkspace && (input.trim().length > 0 || attachments.length > 0) && !isIndexing && !isCompacting}
               onSend={handleSend}
               onStop={onStop}
             />

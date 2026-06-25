@@ -8,6 +8,7 @@ from typing import Any
 
 import yaml
 
+from app.runtime_paths import APP_CONFIG_DIR_NAME
 from app.schemas.agent import AgentInfo, PermissionRule, Ruleset
 
 logger = logging.getLogger(__name__)
@@ -169,11 +170,11 @@ class AgentRegistry:
         settings_agents: dict[str, Any] | None = None,
         project_dir: str = ".",
     ) -> None:
-        """Load custom agents from settings YAML and .openyak/agents/*.md files.
+        """Load custom agents from settings YAML and .fpiagent/agents/*.md files.
 
         Sources (later overrides earlier):
         1. settings.agents dict from YAML config
-        2. .openyak/agents/*.md Markdown files in the project directory
+        2. .fpiagent/agents/*.md Markdown files in the project directory
         """
         # 1. Load from settings.agents dict
         if settings_agents:
@@ -185,9 +186,9 @@ class AgentRegistry:
                 except Exception:
                     logger.exception("Failed to load custom agent '%s' from config", name)
 
-        # 2. Discover .openyak/agents/*.md files
+        # 2. Discover .fpiagent/agents/*.md files
         for agents_dir in [
-            Path(project_dir) / ".openyak" / "agents",
+            Path(project_dir) / APP_CONFIG_DIR_NAME / "agents",
             Path(project_dir) / ".agents",
         ]:
             if not agents_dir.is_dir():

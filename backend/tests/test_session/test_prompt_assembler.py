@@ -152,7 +152,7 @@ class TestWorkspaceVsNoWorkspace:
         parts = assemble(_agent(), workspace="/srv/yak", **_PINNED)
         assert "# 工作区访问" in parts.dynamic
         assert "/srv/yak" in parts.dynamic
-        assert "openyak_written" in parts.dynamic
+        assert "fpiagent_written" in parts.dynamic
         assert "# 文件引用格式" not in parts.dynamic
 
     def test_no_workspace_emits_file_reference_format(self) -> None:
@@ -230,13 +230,14 @@ class TestLoadProjectInstructionsHelper:
         assert "Custom rules here." in result
 
     def test_first_match_wins(self, tmp_path) -> None:
-        # AGENTS.md takes precedence over .openyak/instructions.md.
+        # AGENTS.md takes precedence over .fpiagent/instructions.md.
         (tmp_path / "AGENTS.md").write_text("from-agents-md")
-        (tmp_path / ".openyak").mkdir()
-        (tmp_path / ".openyak" / "instructions.md").write_text("from-instructions-md")
+        (tmp_path / ".fpiagent").mkdir()
+        (tmp_path / ".fpiagent" / "instructions.md").write_text("from-instructions-md")
         result = load_project_instructions(str(tmp_path))
         assert "from-agents-md" in result
         assert "from-instructions-md" not in result
+
 
     def test_empty_file_treated_as_missing(self, tmp_path) -> None:
         (tmp_path / "AGENTS.md").write_text("   \n  ")

@@ -28,7 +28,7 @@ class TestPlanTool:
         assert result.metadata is not None
         assert result.metadata["switch_agent"] == "plan"
         assert result.output is not None
-        assert "plan mode" in result.output.lower()
+        assert "计划模式" in result.output
 
     @pytest.mark.asyncio
     async def test_exit_returns_switch_metadata(self):
@@ -37,21 +37,21 @@ class TestPlanTool:
         assert result.metadata is not None
         assert result.metadata["switch_agent"] == "build"
         assert result.output is not None
-        assert "build mode" in result.output.lower()
+        assert "构建模式" in result.output
 
     @pytest.mark.asyncio
     async def test_enter_while_in_plan_fails(self):
         tool = PlanTool()
         result = await tool.execute({"command": "enter"}, _make_ctx("plan"))
         assert not result.success
-        assert "already" in result.error.lower()
+        assert "已经是计划模式" in result.error
 
     @pytest.mark.asyncio
     async def test_exit_while_not_in_plan_fails(self):
         tool = PlanTool()
         result = await tool.execute({"command": "exit"}, _make_ctx("build"))
         assert not result.success
-        assert "not in plan" in result.error.lower()
+        assert "不在计划模式" in result.error
 
     def test_has_command_parameter(self):
         tool = PlanTool()

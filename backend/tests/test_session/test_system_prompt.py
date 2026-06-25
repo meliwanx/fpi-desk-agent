@@ -118,7 +118,7 @@ class TestSystemPrompt:
         assert "cache_control" not in blocks[1]
 
     def test_includes_skill_routing_when_skills_available(self, tmp_path: Path):
-        skills_dir = tmp_path / ".openyak" / "skills" / "sheet-helper"
+        skills_dir = tmp_path / ".fpiagent" / "skills" / "sheet-helper"
         skills_dir.mkdir(parents=True)
         (skills_dir / "SKILL.md").write_text(
             "---\nname: sheet-helper\ndescription: Helps with spreadsheet workflows.\n---\nUse for sheets.",

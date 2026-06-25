@@ -24,6 +24,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+from app.runtime_paths import (
+    APP_CONFIG_DIR_NAME,
+    WORKSPACE_OUTPUT_DIR_NAME,
+)
 from app.schemas.agent import AgentInfo
 
 _SKILL_ROUTING_BUDGET_CHARS = 8_000
@@ -146,8 +150,8 @@ def load_project_instructions(directory: str | None) -> str | None:
 
     candidates = [
         os.path.join(directory, "AGENTS.md"),
-        os.path.join(directory, ".openyak", "instructions.md"),
-        os.path.join(directory, ".openyak", "instructions"),
+        os.path.join(directory, APP_CONFIG_DIR_NAME, "instructions.md"),
+        os.path.join(directory, APP_CONFIG_DIR_NAME, "instructions"),
     ]
 
     for path in candidates:
@@ -258,7 +262,7 @@ def _environment_section(
 - 语言要求：所有思考、推理、计划、摘要和最终回复都必须使用中文。除代码、命令、路径、文件名、接口字段、JSON/XML 标签、工具名、模型名、品牌名、专有名词和引用原文外，默认不要输出英文。"""
 
     if workspace:
-        output_dir = str(Path(workspace) / "openyak_written")
+        output_dir = str(Path(workspace) / WORKSPACE_OUTPUT_DIR_NAME)
         section += f"""
 
 # 工作区访问

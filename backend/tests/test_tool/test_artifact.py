@@ -100,7 +100,7 @@ class TestArtifactTool:
             "new_str": "y",
         }, ctx)
         assert not result.success
-        assert "not found" in result.error.lower()
+        assert "没有找到" in result.error
 
     @pytest.mark.asyncio
     async def test_rewrite(self, tool: ArtifactTool):
@@ -138,4 +138,4 @@ class TestArtifactTool:
             "identifier": "doc",
         }, ctx)
         assert not result.success
-        assert "Unknown" in result.error
+        assert "未知命令" in result.error

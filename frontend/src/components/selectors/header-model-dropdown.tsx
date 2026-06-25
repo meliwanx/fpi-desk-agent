@@ -154,7 +154,7 @@ export function HeaderModelDropdown() {
   useEffect(() => {
     setSortBy(hasArena ? "popular" : "name");
   }, [hasArena]);
-  const noModels = !activeProvider || (models ?? []).length === 0;
+  const noModels = (models ?? []).length === 0;
   const arenaMap = useModelArenaMap(models);
   const visibleModels = useMemo(
     () => (models ?? []).filter((m) => !isLegacyFreeRouterModel(m)),
@@ -299,15 +299,15 @@ export function HeaderModelDropdown() {
     );
   }
 
-  // No models available — clicking navigates to provider settings instead of opening dropdown
+  // No models available — backend model policy has not returned usable models.
   if (noModels) {
     return (
       <button
         type="button"
-        onClick={() => router.push("/settings?tab=providers")}
-        className="inline-flex h-7 max-w-[220px] items-center gap-1.5 rounded-lg border-none bg-transparent px-3 text-[13px] font-semibold text-[var(--text-secondary)] shadow-none transition-colors hover:bg-[var(--surface-secondary)] focus:outline-none cursor-pointer"
+        disabled
+        className="inline-flex h-7 max-w-[220px] items-center gap-1.5 rounded-lg border-none bg-transparent px-3 text-[13px] font-semibold text-[var(--text-tertiary)] shadow-none focus:outline-none cursor-default"
       >
-        <span className="truncate">{t("setupProvider")}</span>
+        <span className="truncate">{t("noModelFound")}</span>
         <ChevronDown className="h-4 w-4 opacity-50 shrink-0" />
       </button>
     );

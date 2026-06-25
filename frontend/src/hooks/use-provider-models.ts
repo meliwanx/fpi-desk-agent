@@ -17,8 +17,8 @@ export function useProviderModels() {
     const modelsForBucket = (bucket: typeof activeProvider) => {
       if (!bucket) return [];
       if (bucket === "byok") {
-      // "byok" mode: show models from all BYOK providers
-      // (everything except subscription, Ollama, and custom/local endpoints)
+        // "byok" mode: show models from all BYOK providers
+        // (everything except subscription, Ollama, and custom/local endpoints)
         return allModels.filter((m) => isByokProviderId(m.provider_id));
       }
 
@@ -48,10 +48,16 @@ export function useProviderModels() {
     if (activeModels.length > 0) {
       return { data: activeModels, effectiveProvider: activeProvider };
     }
-    return {
-      data: modelsForBucket(defaultBucket),
-      effectiveProvider: defaultBucket,
-    };
+
+    const defaultModels = modelsForBucket(defaultBucket);
+    if (defaultModels.length > 0) {
+      return {
+        data: defaultModels,
+        effectiveProvider: defaultBucket,
+      };
+    }
+
+    return { data: allModels, effectiveProvider: null };
   }, [allModels, activeProvider, modelPolicy?.default_provider_id]);
 
   return {

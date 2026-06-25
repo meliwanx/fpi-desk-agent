@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 from app.connector.model import ConnectorInfo
 from app.mcp.manager import McpManager
 from app.mcp.tool_wrapper import McpToolWrapper
+from app.runtime_paths import APP_CONFIG_DIR_NAME
 from app.tool.base import ToolDefinition
 
 logger = logging.getLogger(__name__)
@@ -34,9 +35,9 @@ class ConnectorRegistry:
 
         # Persistence paths
         if project_dir:
-            self._state_path = Path(project_dir).resolve() / ".openyak" / "connectors.json"
+            self._state_path = Path(project_dir).resolve() / APP_CONFIG_DIR_NAME / "connectors.json"
         else:
-            self._state_path = Path.home() / ".openyak" / "connectors.json"
+            self._state_path = Path.home() / APP_CONFIG_DIR_NAME / "connectors.json"
 
         self._persisted_state = self._load_state()
 

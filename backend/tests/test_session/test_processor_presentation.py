@@ -8,9 +8,9 @@ def test_presentation_reminder_for_code_execute_deliverables():
         "code_execute",
         {
             "written_files": [
-                "/workspace/openyak_written/analyze_helper.py",
-                "/workspace/openyak_written/final_report.md",
-                "/workspace/openyak_written/final_summary.csv",
+                "/workspace/fpiagent_written/analyze_helper.py",
+                "/workspace/fpiagent_written/final_report.md",
+                "/workspace/fpiagent_written/final_summary.csv",
             ]
         },
     )
@@ -24,7 +24,7 @@ def test_presentation_reminder_for_code_execute_deliverables():
 def test_presentation_reminder_skips_temp_outputs():
     reminder = _presentation_reminder(
         "write",
-        {"file_path": "/workspace/openyak_written/temp_notes.md"},
+        {"file_path": "/workspace/fpiagent_written/temp_notes.md"},
     )
 
     assert reminder == ""
@@ -33,7 +33,7 @@ def test_presentation_reminder_skips_temp_outputs():
 def test_presentation_reminder_skips_non_file_tools():
     reminder = _presentation_reminder(
         "read",
-        {"file_path": "/workspace/openyak_written/final_report.md"},
+        {"file_path": "/workspace/fpiagent_written/final_report.md"},
     )
 
     assert reminder == ""

@@ -3,7 +3,7 @@
   "greetingInWorkspace": "What should we do in {{workspace}}?",
   "subtitle": "Describe the result you want and add files or broader access only when needed.",
   "placeholder": "Describe the result you want",
-  "noModelPlaceholder": "No model available — configure a provider in Settings first",
+  "noModelPlaceholder": "No model is available. Try again later or contact an administrator.",
   "placeholderMention": " (@ to mention files)",
   "attachFile": "Attach file",
   "imageNeedsVisionModel": "This model can't read images. Switch to a vision-capable model to send them.",
@@ -186,7 +186,7 @@
   "questionPreviewPlaceholder": "Select an option to see preview",
 
   "loadingModel": "Loading model into memory...",
-  "setupProvider": "Choose a model source to start",
-  "setupProviderDesc": "Use Rapid-MLX or Ollama locally, connect a local endpoint, or add your own provider key.",
-  "configureSettings": "Configure"
+  "setupProvider": "Model service is getting ready",
+  "setupProviderDesc": "Available models are loaded from the backend. You can start chatting as soon as they arrive.",
+  "configureSettings": "Refresh"
 }

@@ -376,7 +376,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.provider_registry = registry
     set_provider_registry(registry)
 
-    # Agent registry (built-in + custom agents from config / .openyak/agents/*.md)
+    # Agent registry (built-in + custom agents from config / .fpiagent/agents/*.md)
     agent_registry = AgentRegistry()
     agent_registry.load_custom_agents(settings.agents, settings.project_dir)
     app.state.agent_registry = agent_registry

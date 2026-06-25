@@ -10,6 +10,7 @@ from typing import Any
 
 from app.plugin.loader import PluginLoadResult, load_plugin, scan_plugins_dir
 from app.plugin.parser import PluginMeta
+from app.runtime_paths import APP_CONFIG_DIR_NAME
 from app.skill.model import SkillInfo
 from app.skill.registry import SkillRegistry
 
@@ -174,8 +175,8 @@ class PluginManager:
 
     def _resolve_enabled_path(self) -> Path | None:
         if self._project_dir:
-            return Path(self._project_dir).resolve() / ".openyak" / "plugins.enabled.json"
-        return Path.home() / ".openyak" / "plugins.enabled.json"
+            return Path(self._project_dir).resolve() / APP_CONFIG_DIR_NAME / "plugins.enabled.json"
+        return Path.home() / APP_CONFIG_DIR_NAME / "plugins.enabled.json"
 
     def _load_enabled(self) -> set[str]:
         if not self._enabled_path or not self._enabled_path.is_file():

@@ -51,7 +51,7 @@ class TestReadTool:
     async def test_read_nonexistent(self, tool: ReadTool):
         result = await tool.execute({"file_path": "/nonexistent/file.txt"}, _make_ctx())
         assert not result.success
-        assert "not found" in result.error.lower()
+        assert "文件不存在" in result.error
 
     @pytest.mark.asyncio
     async def test_read_directory(self, tool: ReadTool, tmp_path: Path):
