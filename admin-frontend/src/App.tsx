@@ -21,6 +21,7 @@ type Tab =
   | "users"
   | "actions"
   | "models"
+  | "connectors"
   | "updates";
 
 interface UserInfo {
@@ -34,6 +35,22 @@ interface UserInfo {
 interface LoginResponse {
   token: string;
   user: UserInfo;
+}
+
+interface ConnectorPolicyEntry {
+  connector_id: string;
+  name: string;
+  description: string;
+  category: string;
+  icon_url: string;
+  enabled: boolean;
+  status: string;
+  allowed_user_ids: string[];
+}
+
+interface ConnectorPolicy {
+  connectors: ConnectorPolicyEntry[];
+  users: UserInfo[];
 }
 
 interface Summary {
@@ -511,6 +528,7 @@ export function App() {
             ["users", "员工管理"],
             ["actions", "管控日志"],
             ["models", "模型管控"],
+            ["connectors", "连接器管控"],
             ["updates", "版本更新"],
           ].map(([key, label]) => (
             <button
@@ -547,6 +565,7 @@ export function App() {
         {tab === "users" && <Users api={api} />}
         {tab === "actions" && <AdminActions api={api} />}
         {tab === "models" && <ModelPolicyPanel api={api} />}
+        {tab === "connectors" && <ConnectorPolicyPanel api={api} />}
         {tab === "updates" && <UpdatePolicyPanel api={api} />}
       </main>
     </div>
@@ -565,6 +584,7 @@ function tabTitle(tab: Tab): string {
     users: "员工管理",
     actions: "管控日志",
     models: "模型管控",
+    connectors: "连接器管控",
     updates: "版本更新",
   }[tab];
 }
@@ -581,6 +601,7 @@ function tabSubtitle(tab: Tab): string {
     users: "创建员工账号、查看角色和启用状态。",
     actions: "追踪管理员的下载、踢号、批量管控等关键动作。",
     models: "统一控制客户端可见模型和默认模型。",
+    connectors: "按员工开放连接器能力，未授权员工客户端不可见也不可启用。",
     updates: "发布客户端版本策略，控制是否强制员工升级。",
   }[tab];
 }
@@ -1350,9 +1371,136 @@ function Users({ api }: { api: ReturnType<typeof useApi> }) {
   );
 }
 
+function ConnectorPolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
+  const [policy, setPolicy] = useState<ConnectorPolicy | null>(null);
+  const [message, setMessage] = useState("");
+
+  async function loadPolicy() {
+    const data = await api<ConnectorPolicy>("/api/admin/connector-policy");
+    setPolicy(data);
+  }
+
+  useEffect(() => {
+    void loadPolicy();
+  }, []);
+
+  function toggleUser(connectorId: string, userId: string, checked: boolean) {
+    if (!policy) return;
+    setPolicy({
+      ...policy,
+      connectors: policy.connectors.map((connector) => {
+        if (connector.connector_id !== connectorId) return connector;
+        const current = new Set(connector.allowed_user_ids);
+        if (checked) {
+          current.add(userId);
+        } else {
+          current.delete(userId);
+        }
+        return {
+          ...connector,
+          allowed_user_ids: Array.from(current),
+        };
+      }),
+    });
+  }
+
+  async function savePolicy() {
+    if (!policy) return;
+    setMessage("");
+    try {
+      const saved = await api<ConnectorPolicy>("/api/admin/connector-policy", {
+        method: "PUT",
+        body: JSON.stringify({
+          connectors: policy.connectors.map((connector) => ({
+            connector_id: connector.connector_id,
+            allowed_user_ids: connector.allowed_user_ids,
+          })),
+        }),
+      });
+      setPolicy(saved);
+      setMessage("已保存，员工客户端刷新连接器列表后生效");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "保存失败");
+    }
+  }
+
+  if (!policy) return <section className="card muted">加载中...</section>;
+
+  return (
+    <section className="card">
+      <div className="toolbar">
+        <div>
+          <h2>连接器开放范围</h2>
+          <p className="muted">默认不开放。勾选员工后，该员工才能在客户端看到并手动启用对应连接器。</p>
+        </div>
+        <button className="button outline" onClick={() => void loadPolicy()}>刷新</button>
+        <button className="button" onClick={() => void savePolicy()}>保存策略</button>
+      </div>
+
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>连接器</th>
+              <th>状态</th>
+              <th>开放员工</th>
+            </tr>
+          </thead>
+          <tbody>
+            {policy.connectors.map((connector) => (
+              <tr key={connector.connector_id}>
+                <td>
+                  <div className="connector-policy-name">
+                    {connector.icon_url && <img src={connector.icon_url} alt="" />}
+                    <div>
+                      <strong>{connector.name || connector.connector_id}</strong>
+                      <span>{connector.description || connector.connector_id}</span>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <span className={`pill ${connector.enabled ? "success" : "muted-pill"}`}>
+                    {connector.enabled ? "已启用" : "默认关闭"}
+                  </span>
+                </td>
+                <td>
+                  <div className="connector-user-grid">
+                    {policy.users.map((user) => (
+                      <label className="connector-user-choice" key={`${connector.connector_id}-${user.id}`}>
+                        <input
+                          type="checkbox"
+                          checked={connector.allowed_user_ids.includes(user.id)}
+                          disabled={user.is_active === false}
+                          onChange={(event) => toggleUser(connector.connector_id, user.id, event.target.checked)}
+                        />
+                        <span>{user.display_name || user.email}</span>
+                      </label>
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {policy.connectors.length === 0 && (
+              <tr>
+                <td colSpan={3} className="muted">当前没有可管控的连接器</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {message && <p className={message.startsWith("已保存") ? "success" : "error"}>{message}</p>}
+    </section>
+  );
+}
+
 function ModelPolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
   const [policy, setPolicy] = useState<ModelPolicy | null>(null);
   const [message, setMessage] = useState("");
+  const [dialog, setDialog] = useState<{
+    mode: "create" | "edit";
+    index: number | null;
+    model: ModelEntry;
+  } | null>(null);
 
   async function loadPolicy() {
     const data = await api<ModelPolicy>("/api/admin/model-policy");
@@ -1366,6 +1514,42 @@ function ModelPolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
   function updateModel(index: number, patch: Partial<ModelEntry>) {
     if (!policy) return;
     setPolicy(updateModelInPolicy(policy, index, patch));
+  }
+
+  function openCreateDialog() {
+    setDialog({
+      mode: "create",
+      index: null,
+      model: {
+        provider_id: `custom_${Math.random().toString(36).slice(2, 8)}`,
+        id: "",
+        name: "",
+        protocol: DEFAULT_MODEL_PROTOCOL,
+        base_url: "https://",
+        enabled: true,
+        api_key: "",
+      },
+    });
+  }
+
+  function openEditDialog(index: number) {
+    if (!policy) return;
+    setDialog({
+      mode: "edit",
+      index,
+      model: { ...policy.models[index], api_key: "" },
+    });
+  }
+
+  function applyDialogModel(model: ModelEntry) {
+    if (!policy || !dialog) return;
+    if (dialog.mode === "create") {
+      setPolicy(addModelToPolicy(policy, model));
+    } else if (dialog.index !== null) {
+      setPolicy(updateModelInPolicy(policy, dialog.index, model));
+    }
+    setDialog(null);
+    setMessage("模型配置已更新，请点击保存策略使员工客户端生效");
   }
 
   async function savePolicy() {
@@ -1389,82 +1573,207 @@ function ModelPolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
   return (
     <section className="card">
       <div className="toolbar">
-        <button
-          className="button outline"
-          onClick={() => setPolicy(addModelToPolicy(policy, {
-            provider_id: `custom_${Math.random().toString(36).slice(2, 8)}`,
-            id: "",
-            name: "",
-            protocol: DEFAULT_MODEL_PROTOCOL,
-            base_url: "https://",
-            enabled: true,
-            api_key: "",
-          }))}
-        >
-          添加模型
-        </button>
+        <button className="button outline" onClick={openCreateDialog}>新增模型</button>
         <button className="button" onClick={() => void savePolicy()}>保存策略</button>
       </div>
-      <div className="model-list">
-        {policy.models.map((model, index) => {
-          const enabled = model.enabled !== false;
-          return (
-          <div className={`model-row ${enabled ? "" : "is-disabled"}`} key={`${index}-${model.provider_id}-${model.id}`}>
-            <label className="default-model-choice">
-              <input
-                type="radio"
-                name="default-model"
-                checked={model.provider_id === policy.default_provider_id && model.id === policy.default_model_id}
-                disabled={!enabled || !model.provider_id.trim() || !model.id.trim()}
-                onChange={() => setPolicy(setDefaultModelInPolicy(policy, index))}
-              />
-              <span>默认</span>
-            </label>
-            <button
-              className={`button ghost ${enabled ? "" : "button-state-muted"}`}
-              onClick={() => updateModel(index, { enabled: !enabled })}
-            >
-              {enabled ? "禁用" : "启用"}
-            </button>
-            <label className="model-field">
-              <span>协议</span>
-              <select className="input" value={model.protocol || DEFAULT_MODEL_PROTOCOL} onChange={(e) => updateModel(index, { protocol: e.target.value })}>
-                <option value="openai_compatible">OpenAI 兼容</option>
-                <option value="anthropic">Anthropic</option>
-              </select>
-            </label>
-            <label className="model-field">
-              <span>供应商 ID</span>
-              <input className="input" placeholder="custom_provider" value={model.provider_id} onChange={(e) => updateModel(index, { provider_id: e.target.value })} />
-            </label>
-            <label className="model-field model-field-wide">
-              <span>Base URL</span>
-              <input className="input" placeholder={model.protocol === "anthropic" ? "Anthropic 可留空" : "https://example.com/v1"} value={model.base_url} onChange={(e) => updateModel(index, { base_url: e.target.value })} />
-            </label>
-            <label className="model-field">
-              <span>Model</span>
-              <input className="input" placeholder="gpt-5.5" value={model.id} onChange={(e) => updateModel(index, { id: e.target.value })} />
-            </label>
-            <label className="model-field">
-              <span>显示名称</span>
-              <input className="input" placeholder="GPT-5.5" value={model.name} onChange={(e) => updateModel(index, { name: e.target.value })} />
-            </label>
-            <label className="model-field model-field-wide">
-              <span>API Key</span>
-              <input
-                className="input"
-                type="password"
-                placeholder={model.masked_key ? `已保存 ${model.masked_key}，留空不修改` : "sk-..."}
-                value={model.api_key || ""}
-                onChange={(e) => updateModel(index, { api_key: e.target.value })}
-              />
-            </label>
-          </div>
-          );
-        })}
+      <div className="table-scroll">
+        <table className="model-policy-table">
+          <thead>
+            <tr>
+              <th>默认</th>
+              <th>状态</th>
+              <th>协议</th>
+              <th>供应商 ID</th>
+              <th>模型 ID</th>
+              <th>显示名称</th>
+              <th>Base URL</th>
+              <th>Key</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {policy.models.map((model, index) => {
+              const enabled = model.enabled !== false;
+              const isDefault = model.provider_id === policy.default_provider_id && model.id === policy.default_model_id;
+              return (
+                <tr className={enabled ? "" : "is-disabled"} key={`${index}-${model.provider_id}-${model.id}`}>
+                  <td>
+                    <label className="default-model-choice compact">
+                      <input
+                        type="radio"
+                        name="default-model"
+                        checked={isDefault}
+                        disabled={!enabled || !model.provider_id.trim() || !model.id.trim()}
+                        onChange={() => setPolicy(setDefaultModelInPolicy(policy, index))}
+                      />
+                      <span>{isDefault ? "当前" : "设为默认"}</span>
+                    </label>
+                  </td>
+                  <td>
+                    <span className={`pill ${enabled ? "success" : "muted-pill"}`}>{enabled ? "启用" : "禁用"}</span>
+                  </td>
+                  <td>{model.protocol === "anthropic" ? "Anthropic" : "OpenAI 兼容"}</td>
+                  <td className="mono">{model.provider_id || "-"}</td>
+                  <td className="mono">{model.id || "-"}</td>
+                  <td>{model.name || "-"}</td>
+                  <td className="mono">{model.protocol === "anthropic" ? "-" : model.base_url || "-"}</td>
+                  <td>{model.masked_key || (model.api_key ? "待保存新 Key" : "-")}</td>
+                  <td>
+                    <div className="table-actions">
+                      <button className="button ghost" onClick={() => openEditDialog(index)}>编辑</button>
+                      <button
+                        className={`button ghost ${enabled ? "danger-text" : ""}`}
+                        onClick={() => updateModel(index, { enabled: !enabled })}
+                      >
+                        {enabled ? "禁用" : "启用"}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
       {message && <p className={message.startsWith("已保存") ? "success" : "error"}>{message}</p>}
+      {dialog && (
+        <ModelPolicyDialog
+          api={api}
+          mode={dialog.mode}
+          model={dialog.model}
+          onClose={() => setDialog(null)}
+          onSave={applyDialogModel}
+        />
+      )}
     </section>
+  );
+}
+
+interface ModelPolicyTestResponse {
+  ok: boolean;
+  message: string;
+  test_token: string;
+}
+
+function ModelPolicyDialog({
+  api,
+  mode,
+  model,
+  onClose,
+  onSave,
+}: {
+  api: ReturnType<typeof useApi>;
+  mode: "create" | "edit";
+  model: ModelEntry;
+  onClose: () => void;
+  onSave: (model: ModelEntry) => void;
+}) {
+  const [draft, setDraft] = useState<ModelEntry>(model);
+  const [testState, setTestState] = useState<{
+    status: "idle" | "testing" | "passed" | "failed";
+    message: string;
+  }>({ status: "idle", message: "保存前必须测试通过。" });
+
+  function patchDraft(patch: Partial<ModelEntry>) {
+    setDraft((prev) => ({ ...prev, ...patch, test_token: "" }));
+    setTestState({ status: "idle", message: "配置已变更，请重新测试。" });
+  }
+
+  async function testModel() {
+    setTestState({ status: "testing", message: "正在测试模型连通性..." });
+    try {
+      const result = await api<ModelPolicyTestResponse>("/api/admin/model-policy/test", {
+        method: "POST",
+        body: JSON.stringify(draft),
+      });
+      setDraft((prev) => ({ ...prev, test_token: result.test_token }));
+      setTestState({
+        status: result.ok ? "passed" : "failed",
+        message: result.message || (result.ok ? "测试通过" : "测试失败"),
+      });
+    } catch (error) {
+      setDraft((prev) => ({ ...prev, test_token: "" }));
+      setTestState({
+        status: "failed",
+        message: error instanceof Error ? error.message : "模型测试失败",
+      });
+    }
+  }
+
+  const canSave = testState.status === "passed" && !!draft.test_token;
+  const isAnthropic = draft.protocol === "anthropic";
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal-card" role="dialog" aria-modal="true" aria-label={mode === "create" ? "新增模型" : "编辑模型"}>
+        <div className="modal-header">
+          <div>
+            <h2>{mode === "create" ? "新增模型" : "编辑模型"}</h2>
+            <p>新增或更改模型必须测试通过后才能保存。</p>
+          </div>
+          <button className="button ghost" onClick={onClose}>关闭</button>
+        </div>
+
+        <div className="modal-grid">
+          <label className="model-field">
+            <span>协议</span>
+            <select className="input" value={draft.protocol || DEFAULT_MODEL_PROTOCOL} onChange={(event) => patchDraft({ protocol: event.target.value, base_url: event.target.value === "anthropic" ? "" : draft.base_url })}>
+              <option value="openai_compatible">OpenAI 兼容</option>
+              <option value="anthropic">Anthropic</option>
+            </select>
+          </label>
+          <label className="model-field">
+            <span>供应商 ID</span>
+            <input className="input" placeholder="custom_provider" value={draft.provider_id} onChange={(event) => patchDraft({ provider_id: event.target.value })} />
+          </label>
+          <label className="model-field">
+            <span>模型 ID</span>
+            <input className="input" placeholder="gpt-5.5" value={draft.id} onChange={(event) => patchDraft({ id: event.target.value })} />
+          </label>
+          <label className="model-field">
+            <span>显示名称</span>
+            <input className="input" placeholder="GPT-5.5" value={draft.name} onChange={(event) => patchDraft({ name: event.target.value })} />
+          </label>
+          <label className="model-field model-field-wide">
+            <span>Base URL</span>
+            <input
+              className="input"
+              disabled={isAnthropic}
+              placeholder={isAnthropic ? "Anthropic 不需要填写" : "https://example.com/v1"}
+              value={isAnthropic ? "" : draft.base_url}
+              onChange={(event) => patchDraft({ base_url: event.target.value })}
+            />
+          </label>
+          <label className="model-field model-field-wide">
+            <span>API Key</span>
+            <input
+              className="input"
+              type="password"
+              placeholder={draft.masked_key ? `已保存 ${draft.masked_key}，留空沿用旧 Key` : "sk-..."}
+              value={draft.api_key || ""}
+              onChange={(event) => patchDraft({ api_key: event.target.value })}
+            />
+          </label>
+        </div>
+
+        <p className={testState.status === "passed" ? "success" : testState.status === "failed" ? "error" : "muted"}>
+          {testState.message}
+        </p>
+
+        <div className="modal-actions">
+          <button className="button outline" disabled={testState.status === "testing"} onClick={() => void testModel()}>
+            {testState.status === "testing" ? "测试中..." : "测试连接"}
+          </button>
+          <button
+            className="button"
+            disabled={testState.status !== "passed" || !canSave}
+            onClick={() => onSave({ ...draft, enabled: draft.enabled !== false })}
+          >
+            保存模型
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 

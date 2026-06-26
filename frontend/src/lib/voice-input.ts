@@ -21,6 +21,39 @@ type WindowWithWebkitAudioContext = Window & typeof globalThis & {
   webkitAudioContext?: typeof AudioContext;
 };
 
+export interface VoiceRecorder {
+  readonly mimeType: string;
+  readonly state: "inactive" | "recording";
+  start: () => void | Promise<void>;
+  stop: () => void | Promise<void>;
+  close: () => void | Promise<void>;
+}
+
+interface VoiceRecorderHandlers {
+  onData: (blob: Blob) => void;
+  onStop: () => void;
+  onError: (error: unknown) => void;
+}
+
+const AUDIO_MIME_CANDIDATES = [
+  "audio/webm;codecs=opus",
+  "audio/webm",
+  "audio/ogg;codecs=opus",
+  "audio/ogg",
+  "audio/mp4",
+];
+
+export class VoiceRecordingUnsupportedError extends Error {
+  constructor(message = "Microphone recording is not supported in this environment") {
+    super(message);
+    this.name = "VoiceRecordingUnsupportedError";
+  }
+}
+
+export function canRequestMicrophone(): boolean {
+  return !!navigator.mediaDevices?.getUserMedia;
+}
+
 function audioContextCtor(): typeof AudioContext {
   const win = window as WindowWithWebkitAudioContext;
   const ctor = window.AudioContext || win.webkitAudioContext;
@@ -61,6 +94,17 @@ function resampleLinear(input: Float32Array, fromRate: number, toRate: number): 
   return output;
 }
 
+function concatFloat32(chunks: Float32Array[]): Float32Array {
+  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const output = new Float32Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return output;
+}
+
 function encodeWavPcm16(samples: Float32Array, sampleRate: number): Blob {
   const dataBytes = samples.length * 2;
   const buffer = new ArrayBuffer(44 + dataBytes);
@@ -96,7 +140,142 @@ function encodeWavPcm16(samples: Float32Array, sampleRate: number): Blob {
   return new Blob([buffer], { type: "audio/wav" });
 }
 
+function getSupportedRecordingMimeType(): string {
+  if (typeof MediaRecorder === "undefined") return "";
+  return AUDIO_MIME_CANDIDATES.find((type) => MediaRecorder.isTypeSupported(type)) ?? "";
+}
+
+function createMediaRecorderVoiceRecorder(
+  stream: MediaStream,
+  handlers: VoiceRecorderHandlers,
+): VoiceRecorder {
+  const mimeType = getSupportedRecordingMimeType();
+  const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+
+  recorder.ondataavailable = (event) => {
+    if (event.data.size > 0) {
+      handlers.onData(event.data);
+    }
+  };
+  recorder.onstop = () => handlers.onStop();
+  recorder.onerror = (event) => handlers.onError(event);
+
+  return {
+    mimeType: recorder.mimeType || mimeType || "audio/webm",
+    get state() {
+      return recorder.state === "inactive" ? "inactive" : "recording";
+    },
+    start: () => recorder.start(),
+    stop: () => {
+      if (recorder.state !== "inactive") recorder.stop();
+    },
+    close: () => {
+      recorder.ondataavailable = null;
+      recorder.onstop = null;
+      recorder.onerror = null;
+      if (recorder.state !== "inactive") recorder.stop();
+    },
+  };
+}
+
+function createPcmVoiceRecorder(
+  stream: MediaStream,
+  handlers: VoiceRecorderHandlers,
+): VoiceRecorder {
+  const Ctor = audioContextCtor();
+  const context = new Ctor();
+  const source = context.createMediaStreamSource(stream);
+  const processor = context.createScriptProcessor(4096, 1, 1);
+  const chunks: Float32Array[] = [];
+  let state: VoiceRecorder["state"] = "inactive";
+  let closed = false;
+
+  processor.onaudioprocess = (event) => {
+    for (let channel = 0; channel < event.outputBuffer.numberOfChannels; channel += 1) {
+      event.outputBuffer.getChannelData(channel).fill(0);
+    }
+    if (state !== "recording") return;
+    chunks.push(downmixToMono(event.inputBuffer));
+  };
+
+  source.connect(processor);
+  processor.connect(context.destination);
+
+  const cleanup = async () => {
+    if (closed) return;
+    closed = true;
+    processor.onaudioprocess = null;
+    try {
+      processor.disconnect();
+    } catch {
+      // Node may already be disconnected.
+    }
+    try {
+      source.disconnect();
+    } catch {
+      // Node may already be disconnected.
+    }
+    if (typeof context.close === "function") {
+      await context.close().catch(() => undefined);
+    }
+  };
+
+  return {
+    mimeType: "audio/wav",
+    get state() {
+      return state;
+    },
+    start: async () => {
+      if (closed) return;
+      if (context.state === "suspended") {
+        await context.resume();
+      }
+      state = "recording";
+    },
+    stop: async () => {
+      if (state === "inactive") return;
+      state = "inactive";
+      try {
+        const samples = concatFloat32(chunks);
+        if (samples.length > 0) {
+          const resampled = resampleLinear(samples, context.sampleRate, TARGET_SAMPLE_RATE);
+          handlers.onData(encodeWavPcm16(resampled, TARGET_SAMPLE_RATE));
+        }
+        await cleanup();
+        handlers.onStop();
+      } catch (error) {
+        await cleanup();
+        handlers.onError(error);
+      }
+    },
+    close: async () => {
+      state = "inactive";
+      chunks.length = 0;
+      await cleanup();
+    },
+  };
+}
+
+export async function createVoiceRecorder(
+  stream: MediaStream,
+  handlers: VoiceRecorderHandlers,
+): Promise<VoiceRecorder> {
+  if (typeof MediaRecorder !== "undefined") {
+    return createMediaRecorderVoiceRecorder(stream, handlers);
+  }
+  try {
+    return createPcmVoiceRecorder(stream, handlers);
+  } catch (error) {
+    throw new VoiceRecordingUnsupportedError(
+      error instanceof Error ? error.message : undefined,
+    );
+  }
+}
+
 export async function recordedAudioToWavBlob(blob: Blob): Promise<Blob> {
+  if (blob.type === "audio/wav" || blob.type === "audio/x-wav") {
+    return blob;
+  }
   const Ctor = audioContextCtor();
   const context = new Ctor();
   try {

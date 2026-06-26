@@ -22,6 +22,7 @@ from app.dependencies import (
     ToolRegistryDep,
 )
 from app.audit.client import AuditContext, reset_audit_context, set_audit_context
+from app.connector.access import tool_registry_for_request
 from app.company_auth.model_policy_sync import sync_company_model_policy
 from app.company_auth.remote_control import sync_remote_model_policy_for_request
 from app.models.todo import Todo
@@ -279,13 +280,14 @@ async def start_prompt(
     job.interactive = True
 
     # Launch the full agent loop in a background task with concurrency limiting
+    request_tool_registry = await tool_registry_for_request(request, tool_registry)
     coro = run_generation(
         job,
         body,
         session_factory=session_factory,
         provider_registry=provider_registry,
         agent_registry=agent_registry,
-        tool_registry=tool_registry,
+        tool_registry=request_tool_registry,
         index_manager=index_manager,
     )
     task = _create_task_with_audit_context(
@@ -330,13 +332,14 @@ async def start_task_batch(
     job = sm.create_job(stream_id=stream_id, session_id=session_id)
     job.interactive = True
 
+    request_tool_registry = await tool_registry_for_request(request, tool_registry)
     coro = run_task_batch(
         job,
         body,
         session_factory=session_factory,
         provider_registry=provider_registry,
         agent_registry=agent_registry,
-        tool_registry=tool_registry,
+        tool_registry=request_tool_registry,
         index_manager=index_manager,
     )
     task = _create_task_with_audit_context(
@@ -503,13 +506,14 @@ async def edit_and_resend(
         workspace=body.workspace,
     )
 
+    request_tool_registry = await tool_registry_for_request(request, tool_registry)
     coro = run_generation(
         job,
         edit_request,
         session_factory=session_factory,
         provider_registry=provider_registry,
         agent_registry=agent_registry,
-        tool_registry=tool_registry,
+        tool_registry=request_tool_registry,
         index_manager=index_manager,
         skip_user_message=True,
     )

@@ -134,6 +134,17 @@ class CompanyUpdatePolicy:
 
 
 @dataclass(frozen=True)
+class CompanyConnectorPolicyEntry:
+    connector_id: str
+    allowed_user_ids: list[str]
+
+
+@dataclass(frozen=True)
+class CompanyConnectorPolicy:
+    connectors: list[CompanyConnectorPolicyEntry]
+
+
+@dataclass(frozen=True)
 class CompanyUpdateAsset:
     id: str
     platform: str
@@ -220,6 +231,10 @@ def _default_model_policy() -> CompanyModelPolicy:
 
 def _default_update_policy() -> CompanyUpdatePolicy:
     return CompanyUpdatePolicy()
+
+
+def _default_connector_policy() -> CompanyConnectorPolicy:
+    return CompanyConnectorPolicy(connectors=[])
 
 
 class CompanyAuthStore:
@@ -951,6 +966,62 @@ class CompanyAuthStore:
                 )
         return policy
 
+    async def get_connector_policy(self) -> CompanyConnectorPolicy:
+        async with self.engine.connect() as conn:
+            result = await conn.execute(
+                select(self.settings.c.value).where(self.settings.c.key == "connector_policy").limit(1)
+            )
+            raw = result.scalar_one_or_none()
+        if not raw:
+            return _default_connector_policy()
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            return _default_connector_policy()
+        return self._connector_policy_from_payload(payload)
+
+    async def update_connector_policy(
+        self,
+        *,
+        connectors: list[dict],
+    ) -> CompanyConnectorPolicy:
+        policy = self._connector_policy_from_payload(
+            {"connectors": connectors},
+            strict=True,
+        )
+        payload = json.dumps(self._connector_policy_to_payload(policy), ensure_ascii=False)
+        now = shanghai_now()
+        async with self.engine.begin() as conn:
+            existing = await conn.execute(
+                select(self.settings.c.key).where(self.settings.c.key == "connector_policy").limit(1)
+            )
+            if existing.scalar_one_or_none() is None:
+                await conn.execute(
+                    insert(self.settings).values(
+                        key="connector_policy",
+                        value=payload,
+                        time_updated=now,
+                    )
+                )
+            else:
+                await conn.execute(
+                    update(self.settings)
+                    .where(self.settings.c.key == "connector_policy")
+                    .values(value=payload, time_updated=now)
+                )
+        return policy
+
+    async def is_connector_allowed(self, connector_id: str, user_id: str) -> bool:
+        clean_connector_id = str(connector_id or "").strip()
+        clean_user_id = str(user_id or "").strip()
+        if not clean_connector_id or not clean_user_id:
+            return False
+        policy = await self.get_connector_policy()
+        for entry in policy.connectors:
+            if entry.connector_id == clean_connector_id:
+                return clean_user_id in entry.allowed_user_ids
+        return False
+
     async def create_update_asset(
         self,
         *,
@@ -1385,4 +1456,71 @@ class CompanyAuthStore:
             "windows_download_url": policy.windows_download_url,
             "linux_download_url": policy.linux_download_url,
             "default_download_url": policy.default_download_url,
+        }
+
+    @staticmethod
+    def _connector_policy_from_payload(payload: dict, *, strict: bool = False) -> CompanyConnectorPolicy:
+        if not isinstance(payload, dict):
+            if strict:
+                raise ValueError("Connector policy must be an object")
+            return _default_connector_policy()
+
+        raw_connectors = payload.get("connectors")
+        if raw_connectors is None:
+            raw_connectors = []
+        if not isinstance(raw_connectors, list):
+            if strict:
+                raise ValueError("Connector policy connectors must be a list")
+            return _default_connector_policy()
+
+        entries: list[CompanyConnectorPolicyEntry] = []
+        seen_connectors: set[str] = set()
+        for raw in raw_connectors:
+            if not isinstance(raw, dict):
+                if strict:
+                    raise ValueError("Connector policy entry must be an object")
+                continue
+            connector_id = str(raw.get("connector_id") or raw.get("id") or "").strip()
+            if not connector_id:
+                if strict:
+                    raise ValueError("Connector ID is required")
+                continue
+            if connector_id in seen_connectors:
+                continue
+            seen_connectors.add(connector_id)
+
+            raw_user_ids = raw.get("allowed_user_ids", [])
+            if raw_user_ids is None:
+                raw_user_ids = []
+            if not isinstance(raw_user_ids, list):
+                if strict:
+                    raise ValueError("Connector allowed_user_ids must be a list")
+                raw_user_ids = []
+            allowed_user_ids: list[str] = []
+            seen_users: set[str] = set()
+            for value in raw_user_ids:
+                user_id = str(value or "").strip()
+                if not user_id or user_id in seen_users:
+                    continue
+                seen_users.add(user_id)
+                allowed_user_ids.append(user_id)
+            entries.append(
+                CompanyConnectorPolicyEntry(
+                    connector_id=connector_id,
+                    allowed_user_ids=allowed_user_ids,
+                )
+            )
+
+        return CompanyConnectorPolicy(connectors=entries)
+
+    @staticmethod
+    def _connector_policy_to_payload(policy: CompanyConnectorPolicy) -> dict:
+        return {
+            "connectors": [
+                {
+                    "connector_id": entry.connector_id,
+                    "allowed_user_ids": list(entry.allowed_user_ids),
+                }
+                for entry in policy.connectors
+            ],
         }

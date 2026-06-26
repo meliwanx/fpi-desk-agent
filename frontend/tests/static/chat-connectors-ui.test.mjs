@@ -34,6 +34,16 @@ assert.match(
 );
 assert.match(
   chatForm,
+  /if \(!isLoading && connectors\.length === 0\) return null/,
+  "connector selector should stay hidden when the user has no authorized connectors",
+);
+assert.match(
+  chatForm,
+  /if \(isLoading && !data\) return null/,
+  "connector selector should avoid flashing before authorization data loads",
+);
+assert.match(
+  chatForm,
   /function ConnectorMenuIcon\(\{ connector \}/,
   "connector selector should render connector-specific icons",
 );

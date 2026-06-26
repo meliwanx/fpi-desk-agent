@@ -6,8 +6,10 @@ import hashlib
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from unittest.mock import MagicMock
 from sqlalchemy import select
 
+import app.api.admin as admin_api
 from app.company_auth.store import CompanyAuthStore, CompanyModelEntry, CompanyModelPolicy, CompanyUser
 from app.models.audit import (
     AuditAdminAction,
@@ -54,6 +56,11 @@ class _FakeCompanyStore:
             "windows_download_url": "",
             "linux_download_url": "",
             "default_download_url": "",
+        }
+        self.connector_policy = {
+            "connectors": [
+                {"connector_id": "sim-data-agent", "allowed_user_ids": []},
+            ],
         }
 
     async def list_users(self) -> list[CompanyUser]:
@@ -104,6 +111,13 @@ class _FakeCompanyStore:
         self.update_policy = values
         return self.update_policy
 
+    async def get_connector_policy(self):
+        return self.connector_policy
+
+    async def update_connector_policy(self, *, connectors: list[dict]):
+        self.connector_policy = {"connectors": connectors}
+        return self.connector_policy
+
 
 async def test_admin_can_create_and_list_company_users(app_client):
     app_client.app.state.company_auth_store = _FakeCompanyStore()
@@ -146,7 +160,140 @@ async def test_admin_can_create_and_list_company_users(app_client):
     ]
 
 
-async def test_admin_can_update_company_model_policy(app_client):
+async def test_admin_can_control_connector_policy_by_user(app_client):
+    store = _FakeCompanyStore()
+    store.users = [
+        CompanyUser(
+            id="user-1",
+            email="employee@example.com",
+            display_name="Employee One",
+            role="user",
+            is_active=True,
+        ),
+        CompanyUser(
+            id="user-2",
+            email="employee2@example.com",
+            display_name="Employee Two",
+            role="user",
+            is_active=True,
+        ),
+    ]
+    app_client.app.state.company_auth_store = store
+    app_client.app.state.connector_registry = MagicMock(
+        status=MagicMock(return_value={
+            "sim-data-agent": {
+                "name": "SIM 数据中台",
+                "description": "SIM connector",
+                "category": "data",
+                "icon_url": "/connectors/sim-data-agent.png",
+                "enabled": False,
+                "status": "disabled",
+            },
+        })
+    )
+    app_client.app.middleware_stack = None
+
+    async def inject_admin(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="admin-1",
+            email="admin",
+            display_name="Admin",
+            role="admin",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_admin)
+
+    loaded = await app_client.get("/api/admin/connector-policy")
+    assert loaded.status_code == 200
+    assert loaded.json()["connectors"][0]["connector_id"] == "sim-data-agent"
+    assert loaded.json()["connectors"][0]["allowed_user_ids"] == []
+    assert [user["id"] for user in loaded.json()["users"]] == ["user-1", "user-2"]
+
+    updated = await app_client.put(
+        "/api/admin/connector-policy",
+        json={
+            "connectors": [
+                {
+                    "connector_id": "sim-data-agent",
+                    "allowed_user_ids": ["user-1"],
+                },
+            ],
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["connectors"][0]["allowed_user_ids"] == ["user-1"]
+
+
+async def test_admin_can_update_company_model_policy(app_client, monkeypatch):
+    app_client.app.state.company_auth_store = _FakeCompanyStore()
+    app_client.app.middleware_stack = None
+
+    async def inject_admin(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="admin-1",
+            email="admin",
+            display_name="Admin",
+            role="admin",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    async def fake_probe(entry):
+        return f"测试成功：{entry.provider_id}/{entry.id}"
+
+    app_client.app.middleware("http")(inject_admin)
+    monkeypatch.setattr(admin_api, "_probe_admin_model_entry", fake_probe)
+
+    models = [
+        {
+            "provider_id": "custom_onlyme",
+            "id": "gpt-5.5",
+            "name": "GPT-5.5",
+            "protocol": "openai_compatible",
+            "base_url": "https://sub2api.onlymeok.com/v1",
+            "api_key": "sk-onlyme",
+        },
+        {
+            "provider_id": "custom_backup",
+            "id": "gpt-5.4",
+            "name": "GPT-5.4",
+            "protocol": "openai_compatible",
+            "base_url": "https://backup.example.com/v1",
+            "api_key": "sk-backup",
+        },
+    ]
+    tested_models = []
+    for model in models:
+        tested = await app_client.post("/api/admin/model-policy/test", json=model)
+        assert tested.status_code == 200
+        tested_models.append({**model, "test_token": tested.json()["test_token"]})
+
+    updated = await app_client.put(
+        "/api/admin/model-policy",
+        json={
+            "default_provider_id": "custom_backup",
+            "default_model_id": "gpt-5.4",
+            "models": tested_models,
+        },
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["default_provider_id"] == "custom_backup"
+    assert [model["id"] for model in updated.json()["models"]] == ["gpt-5.5", "gpt-5.4"]
+    assert updated.json()["models"][1]["protocol"] == "openai_compatible"
+    assert updated.json()["models"][1]["base_url"] == "https://backup.example.com/v1"
+    assert updated.json()["models"][1]["masked_key"] == "sk-b...ckup"
+    assert "api_key" not in updated.json()["models"][1]
+
+    loaded = await app_client.get("/api/admin/model-policy")
+    assert loaded.status_code == 200
+    assert loaded.json()["default_model_id"] == "gpt-5.4"
+    assert loaded.json()["models"][0]["masked_key"] == "sk-o...lyme"
+
+
+async def test_admin_rejects_untested_new_company_model_policy(app_client):
     app_client.app.state.company_auth_store = _FakeCompanyStore()
     app_client.app.middleware_stack = None
 
@@ -169,14 +316,6 @@ async def test_admin_can_update_company_model_policy(app_client):
             "default_model_id": "gpt-5.4",
             "models": [
                 {
-                    "provider_id": "custom_onlyme",
-                    "id": "gpt-5.5",
-                    "name": "GPT-5.5",
-                    "protocol": "openai_compatible",
-                    "base_url": "https://sub2api.onlymeok.com/v1",
-                    "api_key": "sk-onlyme",
-                },
-                {
                     "provider_id": "custom_backup",
                     "id": "gpt-5.4",
                     "name": "GPT-5.4",
@@ -188,18 +327,58 @@ async def test_admin_can_update_company_model_policy(app_client):
         },
     )
 
+    assert updated.status_code == 400
+    assert "测试" in updated.json()["detail"]
+
+
+async def test_admin_can_test_and_save_company_model_policy(app_client, monkeypatch):
+    app_client.app.state.company_auth_store = _FakeCompanyStore()
+    app_client.app.middleware_stack = None
+
+    async def inject_admin(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="admin-1",
+            email="admin",
+            display_name="Admin",
+            role="admin",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    async def fake_probe(entry):
+        assert entry.provider_id == "custom_backup"
+        assert entry.id == "gpt-5.4"
+        return "测试成功"
+
+    app_client.app.middleware("http")(inject_admin)
+    monkeypatch.setattr(admin_api, "_probe_admin_model_entry", fake_probe, raising=False)
+
+    model = {
+        "provider_id": "custom_backup",
+        "id": "gpt-5.4",
+        "name": "GPT-5.4",
+        "protocol": "openai_compatible",
+        "base_url": "https://backup.example.com/v1",
+        "api_key": "sk-backup",
+    }
+    tested = await app_client.post("/api/admin/model-policy/test", json=model)
+
+    assert tested.status_code == 200
+    assert tested.json()["ok"] is True
+    assert tested.json()["test_token"]
+
+    updated = await app_client.put(
+        "/api/admin/model-policy",
+        json={
+            "default_provider_id": "custom_backup",
+            "default_model_id": "gpt-5.4",
+            "models": [{**model, "test_token": tested.json()["test_token"]}],
+        },
+    )
+
     assert updated.status_code == 200
     assert updated.json()["default_provider_id"] == "custom_backup"
-    assert [model["id"] for model in updated.json()["models"]] == ["gpt-5.5", "gpt-5.4"]
-    assert updated.json()["models"][1]["protocol"] == "openai_compatible"
-    assert updated.json()["models"][1]["base_url"] == "https://backup.example.com/v1"
-    assert updated.json()["models"][1]["masked_key"] == "sk-b...ckup"
-    assert "api_key" not in updated.json()["models"][1]
-
-    loaded = await app_client.get("/api/admin/model-policy")
-    assert loaded.status_code == 200
-    assert loaded.json()["default_model_id"] == "gpt-5.4"
-    assert loaded.json()["models"][0]["masked_key"] == "sk-o...lyme"
+    assert updated.json()["models"][0]["masked_key"] == "sk-b...ckup"
 
 
 async def test_admin_can_update_company_app_update_policy(app_client):

@@ -13,7 +13,13 @@ import { FileChip } from "./file-chip";
 import { FileMentionPopup } from "./file-mention-popup";
 import { useAutoResize } from "@/hooks/use-auto-resize";
 import { uploadFile, browseFiles, attachByPath, ingestFiles } from "@/lib/upload";
-import { transcribeVoiceInput } from "@/lib/voice-input";
+import {
+  canRequestMicrophone,
+  createVoiceRecorder,
+  transcribeVoiceInput,
+  VoiceRecordingUnsupportedError,
+  type VoiceRecorder,
+} from "@/lib/voice-input";
 import type { FileSearchResult } from "@/lib/upload";
 import { cn } from "@/lib/utils";
 import type { FileAttachment } from "@/types/chat";
@@ -123,18 +129,7 @@ type PathBackedFile = File & {
 
 type VoiceInputState = "idle" | "requesting" | "recording" | "transcribing";
 
-const AUDIO_MIME_CANDIDATES = [
-  "audio/webm;codecs=opus",
-  "audio/webm",
-  "audio/ogg;codecs=opus",
-  "audio/ogg",
-  "audio/mp4",
-];
-
-function getSupportedRecordingMimeType(): string {
-  if (typeof MediaRecorder === "undefined") return "";
-  return AUDIO_MIME_CANDIDATES.find((type) => MediaRecorder.isTypeSupported(type)) ?? "";
-}
+const VOICE_INPUT_VISIBLE = false;
 
 function pathsFromDataTransfer(dataTransfer: DataTransfer): string[] {
   const paths = new Set<string>();
@@ -239,7 +234,7 @@ export function ChatForm({ isGenerating, isCompacting = false, onSend, onStop, c
   const { ref, resize } = useAutoResize();
   const dropTargetRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const voiceRecorderRef = useRef<VoiceRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const mediaChunksRef = useRef<Blob[]>([]);
   const mountedRef = useRef(true);
@@ -370,16 +365,9 @@ export function ChatForm({ isGenerating, isCompacting = false, onSend, onStop, c
   useEffect(() => {
     return () => {
       mountedRef.current = false;
-      const recorder = mediaRecorderRef.current;
+      const recorder = voiceRecorderRef.current;
       if (recorder && recorder.state !== "inactive") {
-        recorder.ondataavailable = null;
-        recorder.onstop = null;
-        recorder.onerror = null;
-        try {
-          recorder.stop();
-        } catch {
-          // Recorder may already be stopping.
-        }
+        void recorder.close();
       }
       stopActiveVoiceStream();
     };
@@ -417,11 +405,11 @@ export function ChatForm({ isGenerating, isCompacting = false, onSend, onStop, c
   }, [ref, resize]);
 
   const handleRecordingStopped = useCallback(async () => {
-    const recorder = mediaRecorderRef.current;
+    const recorder = voiceRecorderRef.current;
     const mimeType = recorder?.mimeType || "audio/webm";
     const chunks = mediaChunksRef.current;
     mediaChunksRef.current = [];
-    mediaRecorderRef.current = null;
+    voiceRecorderRef.current = null;
     stopActiveVoiceStream();
 
     if (!mountedRef.current) return;
@@ -454,15 +442,22 @@ export function ChatForm({ isGenerating, isCompacting = false, onSend, onStop, c
 
   const handleVoiceButtonClick = useCallback(async () => {
     if (voiceState === "recording") {
-      const recorder = mediaRecorderRef.current;
+      const recorder = voiceRecorderRef.current;
       if (recorder && recorder.state !== "inactive") {
         setVoiceState("transcribing");
-        recorder.stop();
+        void Promise.resolve(recorder.stop()).catch((err) => {
+          console.error("Voice recording stop failed:", err);
+          mediaChunksRef.current = [];
+          voiceRecorderRef.current = null;
+          stopActiveVoiceStream();
+          if (mountedRef.current) setVoiceState("idle");
+          toast.error(t("voiceRecordFailed"));
+        });
       }
       return;
     }
     if (voiceState !== "idle" || isInputDisabled) return;
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+    if (!canRequestMicrophone()) {
       toast.error(t("voiceUnsupported"));
       return;
     }
@@ -476,35 +471,41 @@ export function ChatForm({ isGenerating, isCompacting = false, onSend, onStop, c
         return;
       }
 
-      const mimeType = getSupportedRecordingMimeType();
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       mediaStreamRef.current = stream;
-      mediaRecorderRef.current = recorder;
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          mediaChunksRef.current.push(event.data);
-        }
-      };
-      recorder.onstop = () => {
-        void handleRecordingStopped();
-      };
-      recorder.onerror = (event) => {
-        console.error("Voice recording failed:", event);
+      const recorder = await createVoiceRecorder(stream, {
+        onData: (blob) => {
+          if (blob.size > 0) {
+            mediaChunksRef.current.push(blob);
+          }
+        },
+        onStop: () => {
+          void handleRecordingStopped();
+        },
+        onError: (event) => {
+          console.error("Voice recording failed:", event);
+          mediaChunksRef.current = [];
+          voiceRecorderRef.current = null;
+          stopActiveVoiceStream();
+          if (mountedRef.current) setVoiceState("idle");
+          toast.error(t("voiceRecordFailed"));
+        },
+      });
+      voiceRecorderRef.current = recorder;
+      await recorder.start();
+      if (!mountedRef.current) {
+        void recorder.close();
         mediaChunksRef.current = [];
-        mediaRecorderRef.current = null;
         stopActiveVoiceStream();
-        if (mountedRef.current) setVoiceState("idle");
-        toast.error(t("voiceRecordFailed"));
-      };
-      recorder.start();
+        return;
+      }
       setVoiceState("recording");
     } catch (err) {
-      console.error("Voice recording permission failed:", err);
+      console.error("Voice recording start failed:", err);
       mediaChunksRef.current = [];
-      mediaRecorderRef.current = null;
+      voiceRecorderRef.current = null;
       stopActiveVoiceStream();
       if (mountedRef.current) setVoiceState("idle");
-      toast.error(t("voicePermissionDenied"));
+      toast.error(err instanceof VoiceRecordingUnsupportedError ? t("voiceUnsupported") : t("voicePermissionDenied"));
     }
   }, [handleRecordingStopped, isInputDisabled, stopActiveVoiceStream, t, voiceState]);
 
@@ -856,28 +857,30 @@ export function ChatForm({ isGenerating, isCompacting = false, onSend, onStop, c
               <Plus className="h-4 w-4" />
             </button>
 
-            <button
-              type="button"
-              disabled={voiceButtonDisabled}
-              className={cn(
-                "shrink-0 flex items-center justify-center h-8 w-8 rounded-full transition-colors",
-                voiceState === "recording"
-                  ? "bg-red-500/10 text-red-600 hover:bg-red-500/15"
-                  : "text-[var(--text-secondary)] hover:bg-[var(--surface-tertiary)]",
-                voiceButtonDisabled && "opacity-50",
-              )}
-              aria-label={voiceButtonLabel}
-              title={voiceButtonLabel}
-              onClick={handleVoiceButtonClick}
-            >
-              {voiceState === "requesting" || voiceState === "transcribing" ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : voiceState === "recording" ? (
-                <Square className="h-3.5 w-3.5 fill-current" />
-              ) : (
-                <Mic className="h-4 w-4" />
-              )}
-            </button>
+            {VOICE_INPUT_VISIBLE && (
+              <button
+                type="button"
+                disabled={voiceButtonDisabled}
+                className={cn(
+                  "shrink-0 flex items-center justify-center h-8 w-8 rounded-full transition-colors",
+                  voiceState === "recording"
+                    ? "bg-red-500/10 text-red-600 hover:bg-red-500/15"
+                    : "text-[var(--text-secondary)] hover:bg-[var(--surface-tertiary)]",
+                  voiceButtonDisabled && "opacity-50",
+                )}
+                aria-label={voiceButtonLabel}
+                title={voiceButtonLabel}
+                onClick={handleVoiceButtonClick}
+              >
+                {voiceState === "requesting" || voiceState === "transcribing" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : voiceState === "recording" ? (
+                  <Square className="h-3.5 w-3.5 fill-current" />
+                ) : (
+                  <Mic className="h-4 w-4" />
+                )}
+              </button>
+            )}
 
             <div className={cn(isInputDisabled && "pointer-events-none opacity-50")}>
               <AgentToggle />
@@ -990,6 +993,9 @@ function ConnectorToggle() {
       },
     );
   };
+
+  if (!isLoading && connectors.length === 0) return null;
+  if (isLoading && !data) return null;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

@@ -112,7 +112,7 @@ class ConnectorRegistry:
                 ),
                 category=catalog_entry.get("category", "other"),
                 icon_url=catalog_entry.get("icon_url", ""),
-                enabled=connector_id in self._persisted_state.get("enabled", []),
+                enabled=False,
                 source="builtin",
                 local_config=(
                     {

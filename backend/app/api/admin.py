@@ -8,6 +8,7 @@ import io
 import json
 import mimetypes
 import re
+import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,9 @@ from starlette.responses import FileResponse
 
 from app.company_auth.model_policy_sync import sync_company_model_policy
 from app.company_auth.store import (
+    CompanyConnectorPolicy,
     CompanyFeedback,
+    CompanyModelEntry,
     CompanyModelPolicy,
     CompanySessionRecord,
     CompanyUpdateAsset,
@@ -85,6 +88,7 @@ class AdminModelPolicyEntryRequest(BaseModel):
     base_url: str = ""
     api_key: str | None = None
     enabled: bool = True
+    test_token: str | None = None
 
 
 class AdminModelPolicyEntryResponse(BaseModel):
@@ -107,6 +111,12 @@ class AdminModelPolicyResponse(BaseModel):
     default_provider_id: str
     default_model_id: str
     models: list[AdminModelPolicyEntryResponse]
+
+
+class AdminModelPolicyTestResponse(BaseModel):
+    ok: bool
+    message: str
+    test_token: str
 
 
 class AdminUpdatePolicyRequest(BaseModel):
@@ -166,6 +176,31 @@ class AdminUpdatePolicyResponse(BaseModel):
     windows_download_url: str
     linux_download_url: str
     default_download_url: str
+
+
+class AdminConnectorPolicyEntryRequest(BaseModel):
+    connector_id: str = Field(..., min_length=1)
+    allowed_user_ids: list[str] = Field(default_factory=list)
+
+
+class AdminConnectorPolicyEntryResponse(BaseModel):
+    connector_id: str
+    name: str
+    description: str
+    category: str
+    icon_url: str
+    enabled: bool
+    status: str
+    allowed_user_ids: list[str]
+
+
+class AdminConnectorPolicyRequest(BaseModel):
+    connectors: list[AdminConnectorPolicyEntryRequest] = Field(default_factory=list)
+
+
+class AdminConnectorPolicyResponse(BaseModel):
+    connectors: list[AdminConnectorPolicyEntryResponse]
+    users: list[AdminUserResponse]
 
 
 class AdminUpdateAssetListResponse(BaseModel):
@@ -343,6 +378,205 @@ def _public_model_policy(policy: CompanyModelPolicy) -> AdminModelPolicyResponse
             for model in policy.models
         ],
     )
+
+
+def _connector_policy_entries(policy: Any) -> dict[str, list[str]]:
+    if isinstance(policy, CompanyConnectorPolicy):
+        return {
+            entry.connector_id: list(entry.allowed_user_ids)
+            for entry in policy.connectors
+        }
+    if isinstance(policy, dict):
+        entries: dict[str, list[str]] = {}
+        for raw in policy.get("connectors", []):
+            if not isinstance(raw, dict):
+                continue
+            connector_id = str(raw.get("connector_id") or raw.get("id") or "").strip()
+            if not connector_id:
+                continue
+            raw_user_ids = raw.get("allowed_user_ids") or []
+            if not isinstance(raw_user_ids, list):
+                raw_user_ids = []
+            entries[connector_id] = [
+                str(user_id).strip()
+                for user_id in raw_user_ids
+                if str(user_id).strip()
+            ]
+        return entries
+    return {}
+
+
+def _public_connector_policy(
+    *,
+    policy: Any,
+    users: list[CompanyUser],
+    connector_status: dict[str, dict[str, Any]],
+) -> AdminConnectorPolicyResponse:
+    allowed_by_connector = _connector_policy_entries(policy)
+    connector_ids = sorted(
+        set(connector_status) | set(allowed_by_connector),
+        key=lambda connector_id: str(connector_status.get(connector_id, {}).get("name") or connector_id),
+    )
+    return AdminConnectorPolicyResponse(
+        connectors=[
+            AdminConnectorPolicyEntryResponse(
+                connector_id=connector_id,
+                name=str(meta.get("name") or connector_id),
+                description=str(meta.get("description") or ""),
+                category=str(meta.get("category") or ""),
+                icon_url=str(meta.get("icon_url") or ""),
+                enabled=bool(meta.get("enabled", False)),
+                status=str(meta.get("status") or "disabled"),
+                allowed_user_ids=allowed_by_connector.get(connector_id, []),
+            )
+            for connector_id in connector_ids
+            for meta in [connector_status.get(connector_id, {})]
+        ],
+        users=[_public_user(user) for user in users],
+    )
+
+
+def _normalise_admin_model_protocol(value: str | None) -> str:
+    raw = (value or "openai_compatible").strip().lower().replace("-", "_")
+    aliases = {
+        "openai": "openai_compatible",
+        "openai_compat": "openai_compatible",
+        "openai_compatible": "openai_compatible",
+        "anthropic": "anthropic",
+        "anthropic_native": "anthropic",
+        "claude": "anthropic",
+    }
+    return aliases.get(raw, raw)
+
+
+def _resolve_admin_model_entry(
+    body: AdminModelPolicyEntryRequest,
+    existing_policy: CompanyModelPolicy,
+) -> CompanyModelEntry:
+    provider_id = body.provider_id.strip()
+    model_id = body.id.strip()
+    if not provider_id or not model_id:
+        raise ValueError("供应商 ID 和模型 ID 不能为空")
+
+    existing_by_model = {(model.provider_id, model.id): model for model in existing_policy.models}
+    existing_by_provider = {model.provider_id: model for model in existing_policy.models}
+    fallback = existing_by_model.get((provider_id, model_id)) or existing_by_provider.get(provider_id)
+    protocol = _normalise_admin_model_protocol(body.protocol or (fallback.protocol if fallback else "openai_compatible"))
+    if protocol not in {"openai_compatible", "anthropic"}:
+        raise ValueError(f"不支持的模型协议：{protocol}")
+
+    base_url = (body.base_url or (fallback.base_url if fallback else "")).strip()
+    if protocol == "anthropic":
+        base_url = ""
+    api_key = (body.api_key or "").strip()
+    if not api_key and fallback is not None:
+        api_key = fallback.api_key
+
+    if body.enabled:
+        if protocol == "openai_compatible" and not base_url:
+            raise ValueError("OpenAI 兼容模型必须填写 Base URL")
+        if not api_key:
+            raise ValueError("启用模型必须填写 API Key，或保留可复用的旧配置")
+
+    return CompanyModelEntry(
+        provider_id=provider_id,
+        id=model_id,
+        name=(body.name or model_id).strip() or model_id,
+        protocol=protocol,
+        base_url=base_url,
+        api_key=api_key,
+        enabled=body.enabled,
+    )
+
+
+def _admin_model_test_fingerprint(entry: CompanyModelEntry) -> str:
+    payload = {
+        "provider_id": entry.provider_id,
+        "id": entry.id,
+        "protocol": entry.protocol,
+        "base_url": entry.base_url,
+        "api_key": entry.api_key,
+        "enabled": entry.enabled,
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _admin_model_test_cache(request: Request) -> dict[str, tuple[str, datetime]]:
+    cache = getattr(request.app.state, "admin_model_test_tokens", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        request.app.state.admin_model_test_tokens = cache
+    now = shanghai_now()
+    expired = [token for token, (_fingerprint, expires_at) in cache.items() if expires_at <= now]
+    for token in expired:
+        cache.pop(token, None)
+    return cache
+
+
+def _existing_admin_model_fingerprints(policy: CompanyModelPolicy) -> set[str]:
+    return {_admin_model_test_fingerprint(model) for model in policy.models if model.enabled}
+
+
+def _validate_admin_model_test_tokens(
+    request: Request,
+    entries: list[CompanyModelEntry],
+    existing_policy: CompanyModelPolicy,
+    raw_models: list[AdminModelPolicyEntryRequest],
+) -> None:
+    existing_fingerprints = _existing_admin_model_fingerprints(existing_policy)
+    cache = _admin_model_test_cache(request)
+    for entry, raw in zip(entries, raw_models, strict=False):
+        if not entry.enabled:
+            continue
+        fingerprint = _admin_model_test_fingerprint(entry)
+        if fingerprint in existing_fingerprints:
+            continue
+        token = (raw.test_token or "").strip()
+        cached = cache.get(token)
+        if not token or cached is None or cached[0] != fingerprint:
+            raise ValueError(f"模型 {entry.provider_id}/{entry.id} 尚未测试通过，不能保存")
+
+
+async def _probe_admin_model_entry(entry: CompanyModelEntry) -> str:
+    models_override = [{"id": entry.id, "name": entry.name or entry.id}]
+    if entry.protocol == "anthropic":
+        from app.provider.anthropic_provider import AnthropicDesktopProvider
+
+        provider = AnthropicDesktopProvider(
+            api_key=entry.api_key,
+            provider_id=entry.provider_id,
+            models_override=models_override,
+        )
+    else:
+        from app.provider.factory import create_provider
+
+        provider = create_provider(
+            entry.provider_id,
+            entry.api_key,
+            base_url=entry.base_url,
+            models_override=models_override,
+        )
+
+    has_visible_content = False
+    async for chunk in provider.stream_chat(
+        entry.id,
+        [{"role": "user", "content": "请只回复：测试成功"}],
+        temperature=0,
+        max_tokens=32,
+    ):
+        if chunk.type == "error":
+            message = str(chunk.data.get("message") or "模型返回错误")
+            raise ValueError(message)
+        if chunk.type in {"text-delta", "reasoning-delta"}:
+            text = str(chunk.data.get("text") or "").strip()
+            if text:
+                has_visible_content = True
+                break
+
+    if not has_visible_content:
+        raise ValueError("模型服务没有返回可显示内容")
+    return "测试通过，模型可以正常返回内容"
 
 
 def _update_policy_value(policy: CompanyUpdatePolicy | dict[str, Any], key: str, default: Any = "") -> Any:
@@ -721,6 +955,28 @@ async def get_admin_model_policy(request: Request) -> AdminModelPolicyResponse:
     return _public_model_policy(policy)
 
 
+@router.post("/admin/model-policy/test", response_model=AdminModelPolicyTestResponse)
+async def test_admin_model_policy_entry(
+    request: Request,
+    body: AdminModelPolicyEntryRequest,
+) -> AdminModelPolicyTestResponse:
+    _require_admin(request)
+    try:
+        existing_policy = await _company_store(request).get_model_policy()
+        entry = _resolve_admin_model_entry(body, existing_policy)
+        if not entry.enabled:
+            raise ValueError("禁用模型不需要测试，请启用后再测试")
+        message = await _probe_admin_model_entry(entry)
+        fingerprint = _admin_model_test_fingerprint(entry)
+        token = secrets.token_urlsafe(32)
+        _admin_model_test_cache(request)[token] = (fingerprint, shanghai_now() + timedelta(minutes=30))
+        return AdminModelPolicyTestResponse(ok=True, message=message, test_token=token)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"模型测试失败：{exc}") from exc
+
+
 @router.put("/admin/model-policy", response_model=AdminModelPolicyResponse)
 async def update_admin_model_policy(
     request: Request,
@@ -728,6 +984,12 @@ async def update_admin_model_policy(
 ) -> AdminModelPolicyResponse:
     _require_admin(request)
     try:
+        existing_policy = await _company_store(request).get_model_policy()
+        resolved_entries = [
+            _resolve_admin_model_entry(model, existing_policy)
+            for model in body.models
+        ]
+        _validate_admin_model_test_tokens(request, resolved_entries, existing_policy, body.models)
         policy = await _company_store(request).update_model_policy(
             default_provider_id=body.default_provider_id,
             default_model_id=body.default_model_id,
@@ -739,6 +1001,69 @@ async def update_admin_model_policy(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _public_model_policy(policy)
+
+
+@router.get("/admin/connector-policy", response_model=AdminConnectorPolicyResponse)
+async def get_admin_connector_policy(request: Request) -> AdminConnectorPolicyResponse:
+    _require_admin(request)
+    store = _company_store(request)
+    policy = await store.get_connector_policy()
+    users = await store.list_users()
+    registry = getattr(request.app.state, "connector_registry", None)
+    connector_status = registry.status() if registry is not None else {}
+    return _public_connector_policy(
+        policy=policy,
+        users=users,
+        connector_status=connector_status,
+    )
+
+
+@router.put("/admin/connector-policy", response_model=AdminConnectorPolicyResponse)
+async def update_admin_connector_policy(
+    request: Request,
+    body: AdminConnectorPolicyRequest,
+) -> AdminConnectorPolicyResponse:
+    _require_admin(request)
+    store = _company_store(request)
+    users = await store.list_users()
+    known_user_ids = {user.id for user in users}
+    registry = getattr(request.app.state, "connector_registry", None)
+    connector_status = registry.status() if registry is not None else {}
+    known_connector_ids = set(connector_status)
+
+    connectors: list[dict[str, Any]] = []
+    for entry in body.connectors:
+        connector_id = entry.connector_id.strip()
+        if not connector_id:
+            raise HTTPException(status_code=400, detail="连接器 ID 不能为空")
+        if known_connector_ids and connector_id not in known_connector_ids:
+            raise HTTPException(status_code=400, detail=f"未知连接器：{connector_id}")
+        allowed_user_ids: list[str] = []
+        seen_user_ids: set[str] = set()
+        for raw_user_id in entry.allowed_user_ids:
+            user_id = str(raw_user_id or "").strip()
+            if not user_id or user_id in seen_user_ids:
+                continue
+            if user_id not in known_user_ids:
+                raise HTTPException(status_code=400, detail=f"未知员工：{user_id}")
+            seen_user_ids.add(user_id)
+            allowed_user_ids.append(user_id)
+        connectors.append(
+            {
+                "connector_id": connector_id,
+                "allowed_user_ids": allowed_user_ids,
+            }
+        )
+
+    try:
+        policy = await store.update_connector_policy(connectors=connectors)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _public_connector_policy(
+        policy=policy,
+        users=users,
+        connector_status=connector_status,
+    )
 
 
 @router.get("/admin/update-policy", response_model=AdminUpdatePolicyResponse)

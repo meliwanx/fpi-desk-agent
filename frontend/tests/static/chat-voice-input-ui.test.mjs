@@ -6,6 +6,7 @@ const root = resolve(import.meta.dirname, "../..");
 const chatForm = readFileSync(resolve(root, "src/components/chat/chat-form.tsx"), "utf8");
 const constants = readFileSync(resolve(root, "src/lib/constants.ts"), "utf8");
 const voiceInput = readFileSync(resolve(root, "src/lib/voice-input.ts"), "utf8");
+const macInfoPlist = readFileSync(resolve(root, "../desktop-tauri/src-tauri/Info.plist"), "utf8");
 const zhChat = readFileSync(resolve(root, "src/i18n/locales/zh/chat.json"), "utf8");
 const enChat = readFileSync(resolve(root, "src/i18n/locales/en/chat.json"), "utf8");
 const recordingStopBlock = chatForm.slice(
@@ -13,6 +14,16 @@ const recordingStopBlock = chatForm.slice(
   chatForm.indexOf("const handleVoiceButtonClick"),
 );
 
+assert.match(
+  chatForm,
+  /VOICE_INPUT_VISIBLE\s*=\s*false/,
+  "chat composer should hide the voice entry while desktop microphone support is unstable",
+);
+assert.match(
+  chatForm,
+  /\{VOICE_INPUT_VISIBLE\s*&&\s*\([\s\S]+aria-label=\{voiceButtonLabel\}[\s\S]+<\/button>[\s\S]+\)\}/,
+  "voice button should be gated behind the visibility flag",
+);
 assert.match(
   constants,
   /VOICE:\s*\{[\s\S]+TRANSCRIBE:\s*"\/api\/voice\/transcribe"/,
@@ -40,8 +51,28 @@ assert.match(
 );
 assert.match(
   chatForm,
+  /createVoiceRecorder\(/,
+  "chat composer should use the shared voice recorder factory",
+);
+assert.doesNotMatch(
+  chatForm,
+  /typeof MediaRecorder === "undefined"[\s\S]{0,160}voiceUnsupported/,
+  "chat composer should not reject desktop WebViews only because MediaRecorder is missing",
+);
+assert.match(
+  voiceInput,
+  /createPcmVoiceRecorder/,
+  "voice helper should provide a WebAudio PCM recorder fallback",
+);
+assert.match(
+  voiceInput,
   /new MediaRecorder/,
-  "chat composer should record microphone audio",
+  "voice helper should still prefer MediaRecorder when it is available",
+);
+assert.match(
+  macInfoPlist,
+  /NSMicrophoneUsageDescription/,
+  "macOS bundle plist should declare microphone usage for desktop voice input",
 );
 assert.match(
   chatForm,
