@@ -45,6 +45,7 @@ class ConnectorRegistry:
 
         # Load static catalog (enriched metadata for known connectors)
         self._catalog = self._load_catalog()
+        self._register_builtin_catalog_connectors()
 
     # ------------------------------------------------------------------
     # Registration (called during startup)
@@ -169,6 +170,37 @@ class ConnectorRegistry:
         self._persist_state()
 
         return connector
+
+    def _register_builtin_catalog_connectors(self) -> None:
+        """Register allowlisted bundled connectors from the static catalog."""
+        enabled_ids = set(self._persisted_state.get("enabled", []))
+        for connector_id in sorted(BUILTIN_CONNECTOR_ALLOWLIST):
+            if connector_id in self._connectors:
+                continue
+            catalog_entry = self._catalog.get(connector_id)
+            if not isinstance(catalog_entry, dict):
+                continue
+            url = str(catalog_entry.get("url") or "").strip()
+            if not url:
+                continue
+            connector = ConnectorInfo(
+                id=connector_id,
+                name=str(catalog_entry.get("name") or connector_id.replace("-", " ").title()),
+                url=url,
+                type=str(catalog_entry.get("type") or "remote"),
+                description=str(
+                    catalog_entry.get(
+                        "description",
+                        f"{connector_id.replace('-', ' ').title()} integration",
+                    )
+                ),
+                category=str(catalog_entry.get("category") or "other"),
+                icon_url=str(catalog_entry.get("icon_url") or ""),
+                enabled=connector_id in enabled_ids,
+                source="builtin",
+                referenced_by=["builtin"],
+            )
+            self._connectors[connector_id] = connector
 
     def remove_custom(self, id: str) -> bool:
         """Remove a custom connector. Returns False if not found or not custom."""

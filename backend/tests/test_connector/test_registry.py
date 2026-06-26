@@ -89,6 +89,36 @@ class TestRegisterFromPlugin:
         assert ids == []
 
 
+class TestBuiltinCatalog:
+    def test_registers_allowlisted_catalog_connectors_without_plugin(self, tmp_path: Path):
+        with patch.object(
+            ConnectorRegistry,
+            "_load_catalog",
+            return_value={
+                "sim-data-agent": {
+                    "name": "SIM 数据中台",
+                    "url": "https://sim.example/mcp",
+                    "description": "SIM connector",
+                    "category": "data",
+                    "icon_url": "/connectors/sim-data-agent.png",
+                },
+                "slack": {
+                    "name": "Slack",
+                    "url": "https://slack.example/mcp",
+                },
+            },
+        ):
+            reg = ConnectorRegistry(project_dir=str(tmp_path))
+
+        sim = reg.get("sim-data-agent")
+        assert sim is not None
+        assert sim.name == "SIM 数据中台"
+        assert sim.url == "https://sim.example/mcp"
+        assert sim.enabled is False
+        assert sim.source == "builtin"
+        assert reg.get("slack") is None
+
+
 class TestRegisterCustom:
     def _make_registry(self, tmp_path: Path) -> ConnectorRegistry:
         with patch.object(ConnectorRegistry, "_load_catalog", return_value={}):
