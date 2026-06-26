@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     qwen_api_key: str = ""          # OPENYAK_QWEN_API_KEY (Alibaba DashScope)
     kimi_api_key: str = ""          # OPENYAK_KIMI_API_KEY (Moonshot)
     minimax_api_key: str = ""       # OPENYAK_MINIMAX_API_KEY
+    minimax_base_url: str = "https://api.minimaxi.com/v1"
+    minimax_text_model: str = "MiniMax-M3"
     zhipu_api_key: str = ""         # OPENYAK_ZHIPU_API_KEY (智谱 GLM)
     siliconflow_api_key: str = ""   # OPENYAK_SILICONFLOW_API_KEY (硅基流动)
     xiaomi_api_key: str = ""        # OPENYAK_XIAOMI_API_KEY (MiMo)
@@ -130,6 +132,20 @@ class Settings(BaseSettings):
     daily_search_limit: int = 20  # Max free web_search calls per day (Free/BYOK)
     web_search_context_size: str = "low"  # "low" | "medium" | "high" — native search breadth (OpenAI subscription)
     max_native_searches_per_step: int = 5  # cap on native web searches per agent step
+
+    # --- Chat voice input ---
+    bailian_asr_api_key: str = ""
+    bailian_asr_model: str = "fun-asr-realtime"
+    bailian_asr_base_url: str = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
+    bailian_asr_language_hint: str = "zh"
+    bailian_asr_vocabulary_id: str = ""
+    bailian_asr_workspace: str = ""
+    bailian_asr_sample_rate: int = 16000
+    chat_voice_max_audio_bytes: int = 10 * 1024 * 1024
+    chat_voice_asr_timeout_seconds: int = 45
+    chat_voice_asr_chunk_bytes: int = 8192
+    chat_voice_asr_chunk_pause_ms: int = 2
+    chat_voice_minimax_timeout_seconds: int = 20
 
     # --- Sandbox execution ---
     # "required" refuses shell/code execution unless the configured sandbox can

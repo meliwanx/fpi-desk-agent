@@ -257,6 +257,9 @@ export const API = {
     SEARCH: "/api/files/search",
     INGEST: "/api/files/ingest",
   },
+  VOICE: {
+    TRANSCRIBE: "/api/voice/transcribe",
+  },
   ARTIFACTS: {
     EXPORT_PDF: "/api/artifacts/export-pdf",
   },

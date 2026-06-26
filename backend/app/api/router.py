@@ -31,6 +31,7 @@ from app.api import sessions as sessions_api
 from app.api import skills as skills_api
 from app.api import tools as tools_api
 from app.api import usage as usage_api
+from app.api import voice as voice_api
 
 api_router = APIRouter()
 
@@ -48,6 +49,7 @@ api_router.include_router(files_api.router, tags=["files"])
 api_router.include_router(feedback_api.router, tags=["feedback"])
 api_router.include_router(artifacts_api.router, tags=["artifacts"])
 api_router.include_router(usage_api.router, tags=["usage"])
+api_router.include_router(voice_api.router, tags=["voice"])
 api_router.include_router(config_api.router, tags=["config"])
 api_router.include_router(openai_auth_api.router, tags=["openai-auth"])
 api_router.include_router(fts_api.router, tags=["fts"])
