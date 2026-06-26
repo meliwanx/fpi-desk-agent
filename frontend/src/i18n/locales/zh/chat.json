@@ -198,6 +198,7 @@
   "connectorActiveCount": "{{count}} 个连接器",
   "connectorLoading": "正在加载连接器",
   "connectorEmpty": "暂无连接器",
+  "connectorRefresh": "刷新连接器",
   "connectorEnable": "启用",
   "connectorDisable": "关闭",
   "connectorToggleFailed": "连接器状态切换失败",

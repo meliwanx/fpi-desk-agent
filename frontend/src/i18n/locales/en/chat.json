@@ -198,6 +198,7 @@
   "connectorActiveCount": "{{count}} connectors",
   "connectorLoading": "Loading connectors",
   "connectorEmpty": "No connectors",
+  "connectorRefresh": "Refresh connectors",
   "connectorEnable": "Enable",
   "connectorDisable": "Disable",
   "connectorToggleFailed": "Failed to change connector state",

@@ -32,15 +32,25 @@ assert.match(
   /<ConnectorToggle \/>/,
   "connector selector should be mounted in the chat action bar",
 );
-assert.match(
+assert.doesNotMatch(
   chatForm,
   /if \(!isLoading && connectors\.length === 0\) return null/,
-  "connector selector should stay hidden when the user has no authorized connectors",
+  "connector selector should remain visible so users can actively refresh after admin grants access",
+);
+assert.doesNotMatch(
+  chatForm,
+  /if \(isLoading && !data\) return null/,
+  "connector selector should expose loading and refresh UI instead of disappearing",
 );
 assert.match(
   chatForm,
-  /if \(isLoading && !data\) return null/,
-  "connector selector should avoid flashing before authorization data loads",
+  /refetch[^=]/,
+  "connector selector should expose the query refetch function",
+);
+assert.match(
+  chatForm,
+  /connectorRefresh/,
+  "connector selector should render a manual refresh action",
 );
 assert.match(
   chatForm,
@@ -53,4 +63,6 @@ assert.match(
   "connector selector should use connector icon_url when available",
 );
 assert.match(zhChat, /"connectors": "连接器"/, "Chinese chat copy should include connector label");
+assert.match(zhChat, /"connectorRefresh": "刷新连接器"/, "Chinese chat copy should include connector refresh label");
 assert.match(enChat, /"connectors": "Connectors"/, "English chat copy should include connector label");
+assert.match(enChat, /"connectorRefresh": "Refresh connectors"/, "English chat copy should include connector refresh label");

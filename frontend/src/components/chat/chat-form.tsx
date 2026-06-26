@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Check, ChevronDown, Loader2, Mic, Plug, Plus, Square } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Loader2, Mic, Plug, Plus, RefreshCw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
@@ -952,7 +952,7 @@ function ConnectorMenuIcon({ connector }: { connector: ConnectorInfo }) {
 function ConnectorToggle() {
   const { t } = useTranslation('chat');
   const [open, setOpen] = useState(false);
-  const { data, isLoading } = useConnectors();
+  const { data, isLoading, isFetching, refetch } = useConnectors();
   const toggle = useConnectorToggle();
 
   const connectors = useMemo(
@@ -994,11 +994,17 @@ function ConnectorToggle() {
     );
   };
 
-  if (!isLoading && connectors.length === 0) return null;
-  if (isLoading && !data) return null;
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (nextOpen) void refetch();
+  };
+
+  const handleRefresh = () => {
+    void refetch();
+  };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -1016,6 +1022,22 @@ function ConnectorToggle() {
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" sideOffset={6} className="w-80 p-1.5">
+        <div className="flex items-center justify-between gap-2 border-b border-[var(--border-default)] px-2 py-1.5">
+          <span className="text-[12px] font-medium text-[var(--text-secondary)]">{t("connectors")}</span>
+          <button
+            type="button"
+            onClick={handleRefresh}
+            disabled={isFetching}
+            className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[12px] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)] disabled:opacity-50"
+          >
+            {isFetching ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3 w-3" />
+            )}
+            {t("connectorRefresh")}
+          </button>
+        </div>
         <div className="max-h-[320px] overflow-y-auto">
           {isLoading ? (
             <div className="flex items-center gap-2 px-3 py-3 text-[13px] text-[var(--text-tertiary)]">
