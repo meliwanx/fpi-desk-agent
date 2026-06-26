@@ -32,5 +32,15 @@ assert.match(
   /<ConnectorToggle \/>/,
   "connector selector should be mounted in the chat action bar",
 );
+assert.match(
+  chatForm,
+  /function ConnectorMenuIcon\(\{ connector \}/,
+  "connector selector should render connector-specific icons",
+);
+assert.match(
+  chatForm,
+  /connector\.icon_url[\s\S]+<img/,
+  "connector selector should use connector icon_url when available",
+);
 assert.match(zhChat, /"connectors": "连接器"/, "Chinese chat copy should include connector label");
 assert.match(enChat, /"connectors": "Connectors"/, "English chat copy should include connector label");

@@ -927,6 +927,24 @@ const CONNECTOR_STATUS_COLORS: Record<ConnectorInfo["status"] | "off", string> =
   off: "bg-[var(--text-tertiary)]",
 };
 
+function ConnectorMenuIcon({ connector }: { connector: ConnectorInfo }) {
+  return (
+    <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--surface-secondary)] text-[var(--text-secondary)]">
+      {connector.icon_url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={connector.icon_url}
+          alt=""
+          className="h-full w-full object-cover"
+          draggable={false}
+        />
+      ) : (
+        <Plug className="h-4 w-4" />
+      )}
+    </div>
+  );
+}
+
 /** WorkBuddy-style connector selector in the composer toolbar. */
 function ConnectorToggle() {
   const { t } = useTranslation('chat');
@@ -1010,9 +1028,7 @@ function ConnectorToggle() {
                   key={id}
                   className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-[var(--surface-secondary)]"
                 >
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-secondary)] text-[var(--text-secondary)]">
-                    <Plug className="h-4 w-4" />
-                  </div>
+                  <ConnectorMenuIcon connector={connector} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[13px] font-medium text-[var(--text-primary)]">
                       {connector.name}

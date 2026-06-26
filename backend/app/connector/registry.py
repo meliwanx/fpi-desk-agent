@@ -23,6 +23,8 @@ from app.tool.base import ToolDefinition
 
 logger = logging.getLogger(__name__)
 
+BUILTIN_CONNECTOR_ALLOWLIST = frozenset({"sim-data-agent"})
+
 
 class ConnectorRegistry:
     """Single source of truth for all MCP connector state."""
@@ -70,6 +72,14 @@ class ConnectorRegistry:
             else:
                 connector_id = raw_key
 
+            if connector_id not in BUILTIN_CONNECTOR_ALLOWLIST:
+                logger.debug(
+                    "Skipping bundled connector outside allowlist: %s from plugin %s",
+                    connector_id,
+                    plugin_name,
+                )
+                continue
+
             url = config.get("url", "")
             server_type = config.get("type", "remote")
 
@@ -101,6 +111,7 @@ class ConnectorRegistry:
                     f"{connector_id.replace('-', ' ').title()} integration",
                 ),
                 category=catalog_entry.get("category", "other"),
+                icon_url=catalog_entry.get("icon_url", ""),
                 enabled=connector_id in self._persisted_state.get("enabled", []),
                 source="builtin",
                 local_config=(
@@ -197,6 +208,7 @@ class ConnectorRegistry:
                     type="remote",
                     description=custom.get("description", ""),
                     category=custom.get("category", "custom"),
+                    icon_url=custom.get("icon_url", ""),
                     enabled=cid in self._persisted_state.get("enabled", []),
                     source="custom",
                 )

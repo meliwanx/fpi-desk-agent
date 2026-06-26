@@ -127,6 +127,24 @@ const STATUS_COLORS: Record<string, string> = {
   disabled: "bg-[var(--text-tertiary)]",
 };
 
+function ConnectorLogo({ connector }: { connector: ConnectorInfo }) {
+  return (
+    <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--surface-secondary)]">
+      {connector.icon_url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={connector.icon_url}
+          alt=""
+          className="h-full w-full object-cover"
+          draggable={false}
+        />
+      ) : (
+        <Workflow className="h-4 w-4 text-[var(--text-secondary)]" />
+      )}
+    </div>
+  );
+}
+
 function ConnectorsTab({ search }: { search: string }) {
   const { t } = useTranslation("plugins");
   const { data, isLoading } = useConnectors();
@@ -296,6 +314,8 @@ function ConnectorRow({
           STATUS_COLORS[connector.status] ?? STATUS_COLORS.disconnected
         }`}
       />
+
+      <ConnectorLogo connector={connector} />
 
       {/* Info */}
       <div className="flex-1 min-w-0">

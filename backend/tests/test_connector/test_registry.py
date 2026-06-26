@@ -45,33 +45,41 @@ class TestRegisterFromPlugin:
     def test_creates_connector(self, tmp_path: Path):
         reg = self._make_registry(tmp_path)
         ids = reg.register_from_plugin("myplugin", {
+            "sim-data-agent": {"url": "https://sim.example/mcp", "type": "remote"},
+        })
+        assert "sim-data-agent" in ids
+        c = reg.get("sim-data-agent")
+        assert c is not None
+        assert c.url == "https://sim.example/mcp"
+
+    def test_skips_bundled_connector_not_in_allowlist(self, tmp_path: Path):
+        reg = self._make_registry(tmp_path)
+        ids = reg.register_from_plugin("myplugin", {
             "slack": {"url": "https://slack.mcp.io/sse", "type": "remote"},
         })
-        assert "slack" in ids
-        c = reg.get("slack")
-        assert c is not None
-        assert c.url == "https://slack.mcp.io/sse"
+        assert ids == []
+        assert reg.get("slack") is None
 
     def test_dedup_by_url(self, tmp_path: Path):
         reg = self._make_registry(tmp_path)
         reg.register_from_plugin("plugin-a", {
-            "slack": {"url": "https://slack.mcp.io/sse", "type": "remote"},
+            "sim-data-agent": {"url": "https://sim.example/mcp", "type": "remote"},
         })
         reg.register_from_plugin("plugin-b", {
-            "slack": {"url": "https://slack.mcp.io/sse", "type": "remote"},
+            "sim-data-agent": {"url": "https://sim.example/mcp", "type": "remote"},
         })
         connectors = reg.list_connectors()
-        slack_connectors = [c for c in connectors if c.id == "slack"]
-        assert len(slack_connectors) == 1
-        assert "plugin-a" in slack_connectors[0].referenced_by
-        assert "plugin-b" in slack_connectors[0].referenced_by
+        sim_connectors = [c for c in connectors if c.id == "sim-data-agent"]
+        assert len(sim_connectors) == 1
+        assert "plugin-a" in sim_connectors[0].referenced_by
+        assert "plugin-b" in sim_connectors[0].referenced_by
 
     def test_strips_namespace(self, tmp_path: Path):
         reg = self._make_registry(tmp_path)
         ids = reg.register_from_plugin("eng", {
-            "engineering:slack": {"url": "https://slack.mcp.io/sse", "type": "remote"},
+            "engineering:sim-data-agent": {"url": "https://sim.example/mcp", "type": "remote"},
         })
-        assert "slack" in ids
+        assert "sim-data-agent" in ids
 
     def test_skips_remote_without_url(self, tmp_path: Path):
         reg = self._make_registry(tmp_path)
@@ -138,8 +146,8 @@ class TestRemoveCustom:
 
     def test_returns_false_for_builtin(self, tmp_path: Path):
         reg = self._make_registry(tmp_path)
-        reg.register_from_plugin("p", {"slack": {"url": "https://s.io", "type": "remote"}})
-        assert reg.remove_custom("slack") is False
+        reg.register_from_plugin("p", {"sim-data-agent": {"url": "https://sim.example/mcp", "type": "remote"}})
+        assert reg.remove_custom("sim-data-agent") is False
 
     def test_returns_false_for_nonexistent(self, tmp_path: Path):
         reg = self._make_registry(tmp_path)

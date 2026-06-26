@@ -38,3 +38,4 @@ def test_project_sim_data_agent_connector_uses_data_catalog_metadata(tmp_path):
     assert connector is not None
     assert connector.name == "SIM 数据中台"
     assert connector.category == "data"
+    assert connector.icon_url == "/connectors/sim-data-agent.png"

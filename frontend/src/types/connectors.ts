@@ -7,6 +7,7 @@ export interface ConnectorInfo {
   type: "remote" | "local";
   description: string;
   category: string;
+  icon_url?: string;
   enabled: boolean;
   connected: boolean;
   status: "connected" | "disconnected" | "needs_auth" | "failed" | "disabled";

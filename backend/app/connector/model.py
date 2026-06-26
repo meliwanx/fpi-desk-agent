@@ -21,6 +21,7 @@ class ConnectorInfo:
     type: str  # "remote" | "local"
     description: str
     category: str  # "communication", "productivity", etc.
+    icon_url: str = ""
     enabled: bool = False
     source: str = "builtin"  # "builtin" | "custom"
     local_config: dict[str, Any] = field(default_factory=dict)
@@ -35,6 +36,7 @@ class ConnectorInfo:
             "type": self.type,
             "description": self.description,
             "category": self.category,
+            "icon_url": self.icon_url,
             "enabled": self.enabled,
             "source": self.source,
             "referenced_by": self.referenced_by,
