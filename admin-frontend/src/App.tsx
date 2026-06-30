@@ -613,7 +613,7 @@ export function App() {
         {tab === "risks" && <Risks api={api} />}
         {tab === "tools" && <ToolCalls api={api} />}
         {tab === "feedback" && <FeedbackPanel api={api} token={token} />}
-        {tab === "users" && <Users api={api} />}
+        {tab === "users" && <Users api={api} currentUserId={session.user.id} />}
         {tab === "actions" && <AdminActions api={api} />}
         {tab === "models" && <ModelPolicyPanel api={api} />}
         {tab === "connectors" && <ConnectorPolicyPanel api={api} />}
@@ -1250,7 +1250,7 @@ function FeedbackImagePreview({ url, token, alt }: { url: string; token: string;
   );
 }
 
-function Users({ api }: { api: ReturnType<typeof useApi> }) {
+function Users({ api, currentUserId }: { api: ReturnType<typeof useApi>; currentUserId: string }) {
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [sessions, setSessions] = useState<CompanySession[]>([]);
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
@@ -1322,6 +1322,28 @@ function Users({ api }: { api: ReturnType<typeof useApi> }) {
     setSelectedSessionIds([]);
     setMessage("已踢下线该员工的全部设备");
     await loadSessions();
+  }
+
+  async function deleteUser(user: UserInfo) {
+    if (user.id === currentUserId) {
+      setError("不能删除当前登录账号");
+      return;
+    }
+    const name = user.display_name || user.email;
+    if (!confirm(`确认删除员工「${name}」？删除后该账号无法登录，并会踢下线所有设备。`)) return;
+
+    setError("");
+    setMessage("");
+    try {
+      await api(`/api/admin/users/${encodeURIComponent(user.id)}`, {
+        method: "DELETE",
+      });
+      setSelectedSessionIds([]);
+      setMessage(`已删除员工：${name}`);
+      await loadAll();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "删除员工失败");
+    }
   }
 
   async function revokeSelectedSessions() {
@@ -1414,7 +1436,16 @@ function Users({ api }: { api: ReturnType<typeof useApi> }) {
                 <td>{user.is_active ? "启用" : "停用"}</td>
                 <td>{sessionsForUser(user.id).filter((session) => session.is_online).length}</td>
                 <td>
-                  <button className="button ghost danger-text" onClick={() => void revokeUserSessions(user.id)}>踢全部设备</button>
+                  <div className="table-actions">
+                    <button className="button ghost danger-text" onClick={() => void revokeUserSessions(user.id)}>踢全部设备</button>
+                    <button
+                      className="button ghost danger-text"
+                      disabled={user.id === currentUserId}
+                      onClick={() => void deleteUser(user)}
+                    >
+                      删除员工
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

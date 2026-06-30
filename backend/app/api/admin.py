@@ -866,6 +866,43 @@ async def update_admin_user(
     return _public_user(user)
 
 
+@router.delete("/admin/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_admin_user(
+    user_id: str,
+    request: Request,
+    db: DbDep,
+) -> Response:
+    admin = _require_admin(request)
+    if user_id == admin.id:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+
+    store = _company_store(request)
+    user = await store.delete_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    revoked_count = await store.revoke_sessions(
+        user_ids=[user_id],
+        revoked_by_user_id=admin.id,
+        revoked_by_email=admin.email,
+        reason="管理员删除员工",
+    )
+    await _record_admin_action(
+        db,
+        user=admin,
+        action="delete_company_user",
+        target_type="company_user",
+        target_id=user_id,
+        metadata={
+            "email": user.email,
+            "display_name": user.display_name,
+            "role": user.role,
+            "revoked_count": revoked_count,
+        },
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/admin/sessions", response_model=AdminCompanySessionListResponse)
 async def list_admin_company_sessions(
     request: Request,

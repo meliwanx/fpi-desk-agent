@@ -289,6 +289,7 @@ class CompanyAuthStore:
             Column("password_hash", String(512), nullable=False),
             Column("role", String(50), nullable=False, default="user"),
             Column("is_active", Boolean, nullable=False, default=True),
+            Column("deleted_at", DateTime(timezone=True), nullable=True),
             Column("time_created", DateTime(timezone=True), nullable=False),
             Column("time_updated", DateTime(timezone=True), nullable=False),
         )
@@ -442,6 +443,7 @@ class CompanyAuthStore:
                     self.users.c.is_active,
                 )
                 .where(self.users.c.email == normalized)
+                .where(self.users.c.deleted_at.is_(None))
                 .limit(1)
             )
             row = result.mappings().first()
@@ -461,7 +463,9 @@ class CompanyAuthStore:
                     self.users.c.display_name,
                     self.users.c.role,
                     self.users.c.is_active,
-                ).order_by(self.users.c.time_created.asc())
+                )
+                .where(self.users.c.deleted_at.is_(None))
+                .order_by(self.users.c.time_created.asc())
             )
             rows = result.mappings().all()
         return [self._user_from_mapping(row) for row in rows]
@@ -536,6 +540,7 @@ class CompanyAuthStore:
             result = await conn.execute(
                 update(self.users)
                 .where(self.users.c.id == user_id)
+                .where(self.users.c.deleted_at.is_(None))
                 .values(**values)
             )
             if (result.rowcount or 0) == 0:
@@ -551,6 +556,39 @@ class CompanyAuthStore:
                     ).where(self.users.c.id == user_id)
                 )
             ).mappings().one()
+        return self._user_from_mapping(row)
+
+    async def delete_user(self, user_id: str) -> CompanyUser | None:
+        now = shanghai_now()
+        async with self.engine.begin() as conn:
+            row = (
+                await conn.execute(
+                    select(
+                        self.users.c.id,
+                        self.users.c.email,
+                        self.users.c.display_name,
+                        self.users.c.role,
+                        self.users.c.is_active,
+                    )
+                    .where(self.users.c.id == user_id)
+                    .where(self.users.c.deleted_at.is_(None))
+                )
+            ).mappings().first()
+            if row is None:
+                return None
+
+            deleted_email = f"deleted:{user_id}:{row['email']}"[:255]
+            await conn.execute(
+                update(self.users)
+                .where(self.users.c.id == user_id)
+                .where(self.users.c.deleted_at.is_(None))
+                .values(
+                    email=deleted_email,
+                    is_active=False,
+                    deleted_at=now,
+                    time_updated=now,
+                )
+            )
         return self._user_from_mapping(row)
 
     def _add_missing_columns(self, sync_conn) -> None:
@@ -583,6 +621,12 @@ class CompanyAuthStore:
             if name not in update_asset_existing:
                 sync_conn.exec_driver_sql(f"ALTER TABLE {update_asset_table} ADD COLUMN {name} {ddl_type}")
 
+        user_existing = {column["name"] for column in inspector.get_columns(self.users.name)}
+        user_table = sync_conn.dialect.identifier_preparer.quote(self.users.name)
+        if "deleted_at" not in user_existing:
+            timestamp_type = "DATETIME NULL" if sync_conn.dialect.name in {"sqlite", "mysql"} else "TIMESTAMP NULL"
+            sync_conn.exec_driver_sql(f"ALTER TABLE {user_table} ADD COLUMN deleted_at {timestamp_type}")
+
     def _migrate_sqlite_timestamps_to_shanghai(self, sync_conn) -> None:
         if sync_conn.dialect.name != "sqlite":
             return
@@ -596,7 +640,7 @@ class CompanyAuthStore:
             return
 
         timestamp_columns = {
-            self.users: ("time_created", "time_updated"),
+            self.users: ("time_created", "time_updated", "deleted_at"),
             self.sessions: ("expires_at", "revoked_at", "time_created", "last_seen_at"),
             self.settings: ("time_updated",),
             self.update_assets: ("time_created", "time_updated"),
@@ -704,6 +748,7 @@ class CompanyAuthStore:
                         self.sessions.c.revoked_at.is_(None),
                         self.sessions.c.expires_at > now,
                         self.users.c.is_active.is_(True),
+                        self.users.c.deleted_at.is_(None),
                     )
                 )
                 .limit(1)

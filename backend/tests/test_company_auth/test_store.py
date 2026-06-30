@@ -226,6 +226,28 @@ async def test_admin_can_create_list_and_deactivate_users(tmp_path):
         assert updated is not None
         assert updated.is_active is False
         assert await store.authenticate("employee@example.com", "NewPassword123!") is None
+
+        reactivated = await store.update_user(created.id, is_active=True)
+        assert reactivated is not None
+        assert reactivated.is_active is True
+        assert await store.authenticate("employee@example.com", "NewPassword123!") is not None
+        session = await store.create_session(created.id)
+
+        deleted = await store.delete_user(created.id)
+        assert deleted is not None
+        assert deleted.email == "employee@example.com"
+        assert await store.list_users() == []
+        assert await store.authenticate("employee@example.com", "EmployeePassword123!") is None
+        assert await store.get_session_user(session.token) is None
+
+        recreated = await store.create_user(
+            email="employee@example.com",
+            display_name="Employee Recreated",
+            password="EmployeePassword123!",
+            role="user",
+        )
+        assert recreated.id != created.id
+        assert await store.authenticate("employee@example.com", "EmployeePassword123!") is not None
     finally:
         await store.dispose()
 
