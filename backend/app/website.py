@@ -776,16 +776,20 @@ def _website_html() -> str:
     }
     .hero {
       position: relative;
-      display: block;
+      display: grid;
+      grid-template-columns: minmax(0, 520px) minmax(0, 1fr);
+      gap: 56px;
+      align-items: center;
       max-width: 1240px;
       min-height: 720px;
       padding: 82px 24px 70px;
-      overflow: hidden;
+      overflow: visible;
     }
     .hero-content {
       position: relative;
       z-index: 2;
-      width: min(650px, 100%);
+      width: 100%;
+      min-width: 0;
     }
     .eyebrow {
       border-color: #abefc6;
@@ -796,12 +800,12 @@ def _website_html() -> str:
       max-width: 680px;
       margin: 20px 0 18px;
       color: var(--ink);
-      font-size: clamp(44px, 6vw, 76px);
+      font-size: clamp(42px, 4.5vw, 64px);
       line-height: .98;
       font-weight: 850;
     }
     .hero-copy {
-      max-width: 620px;
+      max-width: 520px;
       color: #475467;
       font-size: 18px;
       line-height: 1.8;
@@ -835,15 +839,16 @@ def _website_html() -> str:
       background: var(--blue);
     }
     .product-visual {
-      position: absolute;
+      position: relative;
       z-index: 1;
-      right: 24px;
-      top: 102px;
-      width: min(650px, 53vw);
+      justify-self: end;
+      align-self: center;
+      width: 100%;
+      max-width: 650px;
       border-color: var(--line);
       border-radius: 8px;
       box-shadow: 0 28px 80px rgba(15, 23, 42, .18);
-      transform: translateX(38px);
+      transform: none;
     }
     .window-bar,
     .analysis-toolbar {
@@ -926,16 +931,15 @@ def _website_html() -> str:
     }
     @media (max-width: 1080px) {
       .hero {
+        grid-template-columns: 1fr;
+        gap: 34px;
         min-height: auto;
         padding-top: 52px;
       }
       .product-visual {
-        position: relative;
-        right: auto;
-        top: auto;
+        max-width: none;
         width: 100%;
-        margin-top: 34px;
-        transform: none;
+        margin-top: 0;
       }
     }
     @media (max-width: 560px) {
