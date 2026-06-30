@@ -294,7 +294,7 @@ def _website_html() -> str:
     .segmented {
       margin-top: 16px;
       display: inline-grid;
-      grid-template-columns: repeat(3, minmax(86px, 1fr));
+      grid-template-columns: repeat(2, minmax(112px, 1fr));
       border: 1px solid var(--line);
       border-radius: 8px;
       overflow: hidden;
@@ -314,13 +314,13 @@ def _website_html() -> str:
       cursor: pointer;
     }
     .segmented button:last-child { border-right: 0; }
-    .segmented button.active {
-      color: var(--blue-dark);
-      background: #eaf2ff;
-    }
     .segmented button.unavailable {
       color: #9aa6b6;
       background: #f1f4f8;
+    }
+    .segmented button.active {
+      color: #fff;
+      background: var(--blue);
     }
     .release-note {
       margin: 14px 0 0;
@@ -773,7 +773,6 @@ def _website_html() -> str:
             <div class="segmented" role="tablist" aria-label="选择下载版本">
               <button type="button" data-platform="macos">Mac</button>
               <button type="button" data-platform="windows">Windows</button>
-              <button type="button" data-platform="linux">Linux</button>
             </div>
             <p id="releaseNote" class="release-note"></p>
           </div>
@@ -867,8 +866,7 @@ def _website_html() -> str:
   </div>
 
   <script>
-    const labels = { macos: "Mac 版本", windows: "Windows 版本", linux: "Linux 版本" };
-    const shortLabels = { macos: "Mac", windows: "Windows", linux: "Linux" };
+    const labels = { macos: "Mac 版本", windows: "Windows 版本" };
     let downloadOptions = { platforms: {} };
     let selectedPlatform = "macos";
 
@@ -880,7 +878,6 @@ def _website_html() -> str:
       ].filter(Boolean).join(" ").toLowerCase();
       if (source.includes("win")) return "windows";
       if (source.includes("mac") || source.includes("darwin")) return "macos";
-      if (source.includes("linux")) return "linux";
       return "macos";
     }
 
@@ -898,7 +895,7 @@ def _website_html() -> str:
 
     function firstAvailablePlatform(preferred) {
       if (downloadOptions.platforms[preferred]?.available) return preferred;
-      return ["macos", "windows", "linux"].find((key) => downloadOptions.platforms[key]?.available) || preferred;
+      return ["macos", "windows"].find((key) => downloadOptions.platforms[key]?.available) || preferred;
     }
 
     function selectPlatform(platform) {
