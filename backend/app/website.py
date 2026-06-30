@@ -195,13 +195,6 @@ def _website_html() -> str:
       background: #f8fbff;
       font-weight: 700;
     }
-    .nav-cta {
-      color: #fff;
-      background: var(--blue);
-      padding: 10px 14px;
-      border-radius: 8px;
-      font-weight: 700;
-    }
     .hero {
       max-width: 1160px;
       margin: 0 auto;
@@ -752,7 +745,6 @@ def _website_html() -> str:
           <a href="#features">能力</a>
           <a href="#analysis">数据分析</a>
           <span class="support-link">可视化发展部提供技术支持</span>
-          <a class="nav-cta" href="#download">立即下载</a>
         </div>
       </nav>
     </header>
