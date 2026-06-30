@@ -286,6 +286,7 @@ export const API = {
   },
   APP: {
     UPDATE_POLICY: "/api/app/update-policy",
+    ANNOUNCEMENT: "/api/app/announcement",
   },
   FTS: {
     INDEX: (workspace: string, sessionId?: string) =>
@@ -418,6 +419,7 @@ export const queryKeys = {
   localProvider: ["localProvider"] as const,
   ollamaStatus: ["ollamaStatus"] as const,
   connectors: ["connectors"] as const,
+  announcement: ["announcement"] as const,
   channels: ["channels"] as const,
   channelStatus: ["channelStatus"] as const,
   plugins: {

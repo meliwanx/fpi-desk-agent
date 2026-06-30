@@ -16,6 +16,7 @@ import { usePlanReviewStore } from "@/stores/plan-review-store";
 import { SplashScreen } from "@/components/layout/splash-screen";
 import { TitleBar } from "@/components/desktop/title-bar";
 import { WindowTopIcons } from "@/components/layout/window-top-icons";
+import { AnnouncementBanner } from "@/components/desktop/announcement-banner";
 import { UpdateBanner } from "@/components/desktop/update-banner";
 import { Button } from "@/components/ui/button";
 import { FpiAgentLogo } from "@/components/ui/openyak-logo";
@@ -265,6 +266,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         transition={{ type: "spring", damping: 30, stiffness: 300 }}
       >
         <UpdateBanner />
+        <AnnouncementBanner />
         {children}
       </motion.main>
 

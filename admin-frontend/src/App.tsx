@@ -22,6 +22,7 @@ type Tab =
   | "actions"
   | "models"
   | "connectors"
+  | "announcements"
   | "updates";
 
 interface UserInfo {
@@ -50,6 +51,19 @@ interface ConnectorPolicyEntry {
 
 interface ConnectorPolicy {
   connectors: ConnectorPolicyEntry[];
+  users: UserInfo[];
+}
+
+interface AnnouncementPolicy {
+  id: string;
+  enabled: boolean;
+  content: string;
+  target_user_ids: string[];
+  published_by_user_id: string;
+  published_by_email: string;
+  published_by_display_name: string;
+  time_created: string;
+  time_updated: string;
   users: UserInfo[];
 }
 
@@ -529,6 +543,7 @@ export function App() {
             ["actions", "管控日志"],
             ["models", "模型管控"],
             ["connectors", "连接器管控"],
+            ["announcements", "通知公告"],
             ["updates", "版本更新"],
           ].map(([key, label]) => (
             <button
@@ -566,6 +581,7 @@ export function App() {
         {tab === "actions" && <AdminActions api={api} />}
         {tab === "models" && <ModelPolicyPanel api={api} />}
         {tab === "connectors" && <ConnectorPolicyPanel api={api} />}
+        {tab === "announcements" && <AnnouncementPanel api={api} />}
         {tab === "updates" && <UpdatePolicyPanel api={api} />}
       </main>
     </div>
@@ -585,6 +601,7 @@ function tabTitle(tab: Tab): string {
     actions: "管控日志",
     models: "模型管控",
     connectors: "连接器管控",
+    announcements: "通知公告",
     updates: "版本更新",
   }[tab];
 }
@@ -602,6 +619,7 @@ function tabSubtitle(tab: Tab): string {
     actions: "追踪管理员的下载、踢号、批量管控等关键动作。",
     models: "统一控制客户端可见模型和默认模型。",
     connectors: "按员工开放连接器能力，未授权员工客户端不可见也不可启用。",
+    announcements: "发布客户端顶部公告，可选择全员或指定员工展示。",
     updates: "发布客户端版本策略，控制是否强制员工升级。",
   }[tab];
 }
@@ -1490,6 +1508,172 @@ function ConnectorPolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
       </div>
       {message && <p className={message.startsWith("已保存") ? "success" : "error"}>{message}</p>}
     </section>
+  );
+}
+
+function AnnouncementPanel({ api }: { api: ReturnType<typeof useApi> }) {
+  const [policy, setPolicy] = useState<AnnouncementPolicy | null>(null);
+  const [scope, setScope] = useState<"all" | "selected">("all");
+  const [message, setMessage] = useState("");
+
+  async function loadPolicy() {
+    const data = await api<AnnouncementPolicy>("/api/admin/announcement");
+    setPolicy(data);
+    setScope(data.target_user_ids.length > 0 ? "selected" : "all");
+  }
+
+  useEffect(() => {
+    void loadPolicy();
+  }, []);
+
+  function updateContent(content: string) {
+    if (!policy) return;
+    setPolicy({ ...policy, content });
+  }
+
+  function toggleTargetUser(userId: string, checked: boolean) {
+    if (!policy) return;
+    const current = new Set(policy.target_user_ids);
+    if (checked) {
+      current.add(userId);
+    } else {
+      current.delete(userId);
+    }
+    setPolicy({ ...policy, target_user_ids: Array.from(current) });
+  }
+
+  async function saveAnnouncement(enabled: boolean) {
+    if (!policy) return;
+    const target_user_ids = scope === "all" ? [] : policy.target_user_ids;
+    if (enabled && !policy.content.trim()) {
+      setMessage("请先填写公告内容");
+      return;
+    }
+    if (enabled && scope === "selected" && target_user_ids.length === 0) {
+      setMessage("请选择至少一名员工，或切换为全员公告");
+      return;
+    }
+
+    setMessage("");
+    try {
+      const saved = await api<AnnouncementPolicy>("/api/admin/announcement", {
+        method: "PUT",
+        body: JSON.stringify({
+          enabled,
+          content: policy.content,
+          target_user_ids,
+        }),
+      });
+      setPolicy(saved);
+      setScope(saved.target_user_ids.length > 0 ? "selected" : "all");
+      setMessage(enabled ? "公告已发布，员工客户端将在下一次轮询时显示" : "公告已停用");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "保存失败");
+    }
+  }
+
+  if (!policy) return <section className="card muted">加载中...</section>;
+
+  return (
+    <div className="stack">
+      <section className="card">
+        <div className="toolbar">
+          <div>
+            <h2>发布公告</h2>
+            <p className="muted">员工端每 30 秒检查一次新公告。每次发布都会生成新的公告版本。</p>
+          </div>
+          <button className="button outline" onClick={() => void loadPolicy()}>刷新</button>
+          <button className="button outline" onClick={() => void saveAnnouncement(false)} disabled={!policy.enabled}>
+            停用公告
+          </button>
+          <button className="button" onClick={() => void saveAnnouncement(true)}>发布公告</button>
+        </div>
+
+        <div className="form-grid announcement-form">
+          <label className="model-field model-field-wide">
+            <span>公告内容</span>
+            <textarea
+              className="input textarea announcement-textarea"
+              placeholder="请输入需要展示给员工的通知公告..."
+              value={policy.content}
+              onChange={(event) => updateContent(event.target.value)}
+            />
+          </label>
+
+          <div className="model-field model-field-wide">
+            <span>展示范围</span>
+            <div className="announcement-scope-row">
+              <label className="connector-user-choice">
+                <input
+                  type="radio"
+                  checked={scope === "all"}
+                  onChange={() => setScope("all")}
+                />
+                <span>全员</span>
+              </label>
+              <label className="connector-user-choice">
+                <input
+                  type="radio"
+                  checked={scope === "selected"}
+                  onChange={() => setScope("selected")}
+                />
+                <span>指定员工</span>
+              </label>
+            </div>
+          </div>
+
+          {scope === "selected" && (
+            <div className="model-field model-field-wide">
+              <span>选择员工</span>
+              <div className="connector-user-grid announcement-user-grid">
+                {policy.users.map((user) => (
+                  <label className="connector-user-choice" key={`announcement-${user.id}`}>
+                    <input
+                      type="checkbox"
+                      checked={policy.target_user_ids.includes(user.id)}
+                      disabled={user.is_active === false}
+                      onChange={(event) => toggleTargetUser(user.id, event.target.checked)}
+                    />
+                    <span>{user.display_name || user.email}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {message && <p className={message.startsWith("公告已") ? "success" : "error"}>{message}</p>}
+      </section>
+
+      <section className="card">
+        <div className="toolbar">
+          <div>
+            <h2>当前公告</h2>
+            <p className="muted">
+              {policy.enabled ? "启用中" : "未启用"}
+              {policy.id ? ` · ${compactDate(policy.time_updated)}` : ""}
+            </p>
+          </div>
+          <span className={`pill ${policy.enabled ? "success" : "muted-pill"}`}>
+            {policy.enabled ? "展示中" : "已关闭"}
+          </span>
+        </div>
+        {policy.content ? (
+          <div className="announcement-preview">
+            <p>{policy.content}</p>
+            <span>
+              范围：
+              {policy.target_user_ids.length === 0
+                ? "全员"
+                : `指定员工 ${policy.target_user_ids.length} 人`}
+            </span>
+            <span>发布人：{policy.published_by_display_name || policy.published_by_email || "-"}</span>
+          </div>
+        ) : (
+          <p className="muted">暂无公告内容</p>
+        )}
+      </section>
+    </div>
   );
 }
 

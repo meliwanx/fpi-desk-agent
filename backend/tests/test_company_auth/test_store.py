@@ -231,6 +231,70 @@ async def test_admin_can_create_list_and_deactivate_users(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_announcement_targets_and_read_receipts(tmp_path):
+    store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
+    await store.startup()
+    try:
+        admin = await store.create_user(
+            email="admin@example.com",
+            display_name="Admin",
+            password="AdminPassword123!",
+            role="admin",
+        )
+        alice = await store.create_user(
+            email="alice@example.com",
+            display_name="Alice",
+            password="EmployeePassword123!",
+            role="user",
+        )
+        bob = await store.create_user(
+            email="bob@example.com",
+            display_name="Bob",
+            password="EmployeePassword123!",
+            role="user",
+        )
+
+        empty = await store.get_announcement()
+        assert empty.enabled is False
+        assert await store.get_unread_announcement_for_user(alice.id) is None
+
+        announcement = await store.publish_announcement(
+            enabled=True,
+            content="今天 18:00 前请完成日报。",
+            target_user_ids=[],
+            published_by_user_id=admin.id,
+            published_by_email=admin.email,
+            published_by_display_name=admin.display_name,
+        )
+
+        assert announcement.enabled is True
+        assert announcement.content == "今天 18:00 前请完成日报。"
+        assert announcement.target_user_ids == []
+        assert (await store.get_unread_announcement_for_user(alice.id)).id == announcement.id
+        assert (await store.get_unread_announcement_for_user(bob.id)).id == announcement.id
+
+        await store.mark_announcement_read(announcement.id, alice.id)
+        assert await store.get_unread_announcement_for_user(alice.id) is None
+        assert (await store.get_unread_announcement_for_user(bob.id)).id == announcement.id
+
+        targeted = await store.publish_announcement(
+            enabled=True,
+            content="陈列设备请明早巡检。",
+            target_user_ids=[bob.id],
+            published_by_user_id=admin.id,
+            published_by_email=admin.email,
+            published_by_display_name=admin.display_name,
+        )
+
+        assert targeted.id != announcement.id
+        assert targeted.target_user_ids == [bob.id]
+        assert await store.get_unread_announcement_for_user(alice.id) is None
+        assert (await store.get_unread_announcement_for_user(bob.id)).id == targeted.id
+    finally:
+        await store.dispose()
+
+
+@pytest.mark.asyncio
 async def test_model_policy_defaults_and_updates(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENYAK_INTERNAL_DEFAULT_API_KEY", "sk-test-internal")
     store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")

@@ -23,6 +23,7 @@ from starlette.responses import FileResponse
 
 from app.company_auth.model_policy_sync import sync_company_model_policy
 from app.company_auth.store import (
+    CompanyAnnouncement,
     CompanyConnectorPolicy,
     CompanyFeedback,
     CompanyModelEntry,
@@ -201,6 +202,29 @@ class AdminConnectorPolicyRequest(BaseModel):
 class AdminConnectorPolicyResponse(BaseModel):
     connectors: list[AdminConnectorPolicyEntryResponse]
     users: list[AdminUserResponse]
+
+
+class AdminAnnouncementRequest(BaseModel):
+    enabled: bool = True
+    content: str = ""
+    target_user_ids: list[str] = Field(default_factory=list)
+
+
+class AdminAnnouncementResponse(BaseModel):
+    id: str
+    enabled: bool
+    content: str
+    target_user_ids: list[str]
+    published_by_user_id: str
+    published_by_email: str
+    published_by_display_name: str
+    time_created: datetime
+    time_updated: datetime
+    users: list[AdminUserResponse]
+
+    @field_serializer("time_created", "time_updated")
+    def _serialize_datetime_shanghai(self, value: datetime) -> str:
+        return as_shanghai(value).isoformat()
 
 
 class AdminUpdateAssetListResponse(BaseModel):
@@ -432,6 +456,24 @@ def _public_connector_policy(
             for connector_id in connector_ids
             for meta in [connector_status.get(connector_id, {})]
         ],
+        users=[_public_user(user) for user in users],
+    )
+
+
+def _public_announcement(
+    announcement: CompanyAnnouncement,
+    users: list[CompanyUser],
+) -> AdminAnnouncementResponse:
+    return AdminAnnouncementResponse(
+        id=announcement.id,
+        enabled=announcement.enabled,
+        content=announcement.content,
+        target_user_ids=list(announcement.target_user_ids),
+        published_by_user_id=announcement.published_by_user_id,
+        published_by_email=announcement.published_by_email,
+        published_by_display_name=announcement.published_by_display_name,
+        time_created=announcement.time_created,
+        time_updated=announcement.time_updated,
         users=[_public_user(user) for user in users],
     )
 
@@ -1064,6 +1106,50 @@ async def update_admin_connector_policy(
         users=users,
         connector_status=connector_status,
     )
+
+
+@router.get("/admin/announcement", response_model=AdminAnnouncementResponse)
+async def get_admin_announcement(request: Request) -> AdminAnnouncementResponse:
+    _require_admin(request)
+    store = _company_store(request)
+    announcement = await store.get_announcement()
+    users = await store.list_users()
+    return _public_announcement(announcement, users)
+
+
+@router.put("/admin/announcement", response_model=AdminAnnouncementResponse)
+async def update_admin_announcement(
+    request: Request,
+    body: AdminAnnouncementRequest,
+) -> AdminAnnouncementResponse:
+    admin_user = _require_admin(request)
+    store = _company_store(request)
+    users = await store.list_users()
+    known_user_ids = {user.id for user in users}
+
+    target_user_ids: list[str] = []
+    seen_user_ids: set[str] = set()
+    for raw_user_id in body.target_user_ids:
+        user_id = str(raw_user_id or "").strip()
+        if not user_id or user_id in seen_user_ids:
+            continue
+        if user_id not in known_user_ids:
+            raise HTTPException(status_code=400, detail=f"未知员工：{user_id}")
+        seen_user_ids.add(user_id)
+        target_user_ids.append(user_id)
+
+    try:
+        announcement = await store.publish_announcement(
+            enabled=body.enabled,
+            content=body.content,
+            target_user_ids=target_user_ids,
+            published_by_user_id=admin_user.id,
+            published_by_email=admin_user.email,
+            published_by_display_name=admin_user.display_name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _public_announcement(announcement, users)
 
 
 @router.get("/admin/update-policy", response_model=AdminUpdatePolicyResponse)

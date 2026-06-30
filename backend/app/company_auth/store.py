@@ -145,6 +145,19 @@ class CompanyConnectorPolicy:
 
 
 @dataclass(frozen=True)
+class CompanyAnnouncement:
+    id: str
+    enabled: bool
+    content: str
+    target_user_ids: list[str]
+    published_by_user_id: str
+    published_by_email: str
+    published_by_display_name: str
+    time_created: datetime
+    time_updated: datetime
+
+
+@dataclass(frozen=True)
 class CompanyUpdateAsset:
     id: str
     platform: str
@@ -237,6 +250,21 @@ def _default_connector_policy() -> CompanyConnectorPolicy:
     return CompanyConnectorPolicy(connectors=[])
 
 
+def _default_announcement() -> CompanyAnnouncement:
+    now = shanghai_now()
+    return CompanyAnnouncement(
+        id="",
+        enabled=False,
+        content="",
+        target_user_ids=[],
+        published_by_user_id="",
+        published_by_email="",
+        published_by_display_name="",
+        time_created=now,
+        time_updated=now,
+    )
+
+
 class CompanyAuthStore:
     """Company-auth table manager backed by a separate SQLAlchemy engine."""
 
@@ -327,6 +355,13 @@ class CompanyAuthStore:
             Column("image_sha256", String(64), nullable=False, default=""),
             Column("time_created", DateTime(timezone=True), nullable=False, index=True),
             Column("time_updated", DateTime(timezone=True), nullable=False),
+        )
+        self.announcement_reads = Table(
+            f"{table_prefix}_announcement_reads",
+            self.metadata,
+            Column("announcement_id", String(32), primary_key=True),
+            Column("user_id", String(32), primary_key=True),
+            Column("time_read", DateTime(timezone=True), nullable=False, index=True),
         )
         connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
         if database_url.startswith("sqlite"):
@@ -566,6 +601,7 @@ class CompanyAuthStore:
             self.settings: ("time_updated",),
             self.update_assets: ("time_created", "time_updated"),
             self.feedback: ("time_created", "time_updated"),
+            self.announcement_reads: ("time_read",),
         }
         for table, column_names in timestamp_columns.items():
             primary_key = next(iter(table.primary_key.columns))
@@ -1021,6 +1057,131 @@ class CompanyAuthStore:
             if entry.connector_id == clean_connector_id:
                 return clean_user_id in entry.allowed_user_ids
         return False
+
+    async def get_announcement(self) -> CompanyAnnouncement:
+        async with self.engine.connect() as conn:
+            result = await conn.execute(
+                select(self.settings.c.value).where(self.settings.c.key == "announcement_policy").limit(1)
+            )
+            raw = result.scalar_one_or_none()
+        if not raw:
+            return _default_announcement()
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            return _default_announcement()
+        return self._announcement_from_payload(payload)
+
+    async def publish_announcement(
+        self,
+        *,
+        enabled: bool,
+        content: str,
+        target_user_ids: list[str],
+        published_by_user_id: str,
+        published_by_email: str,
+        published_by_display_name: str,
+    ) -> CompanyAnnouncement:
+        clean_content = str(content or "").strip()
+        clean_target_user_ids: list[str] = []
+        seen_user_ids: set[str] = set()
+        for raw_user_id in target_user_ids or []:
+            user_id = str(raw_user_id or "").strip()
+            if not user_id or user_id in seen_user_ids:
+                continue
+            seen_user_ids.add(user_id)
+            clean_target_user_ids.append(user_id)
+
+        if enabled and not clean_content:
+            raise ValueError("Announcement content is required when enabled")
+
+        existing = await self.get_announcement()
+        now = shanghai_now()
+        announcement = CompanyAnnouncement(
+            id=generate_ulid() if enabled else existing.id,
+            enabled=bool(enabled),
+            content=clean_content,
+            target_user_ids=clean_target_user_ids,
+            published_by_user_id=str(published_by_user_id or "").strip(),
+            published_by_email=str(published_by_email or "").strip(),
+            published_by_display_name=str(published_by_display_name or "").strip(),
+            time_created=now if enabled or not existing.id else existing.time_created,
+            time_updated=now,
+        )
+        payload = json.dumps(self._announcement_to_payload(announcement), ensure_ascii=False)
+        async with self.engine.begin() as conn:
+            existing_row = await conn.execute(
+                select(self.settings.c.key).where(self.settings.c.key == "announcement_policy").limit(1)
+            )
+            if existing_row.scalar_one_or_none() is None:
+                await conn.execute(
+                    insert(self.settings).values(
+                        key="announcement_policy",
+                        value=payload,
+                        time_updated=now,
+                    )
+                )
+            else:
+                await conn.execute(
+                    update(self.settings)
+                    .where(self.settings.c.key == "announcement_policy")
+                    .values(value=payload, time_updated=now)
+                )
+        return announcement
+
+    async def get_unread_announcement_for_user(self, user_id: str) -> CompanyAnnouncement | None:
+        clean_user_id = str(user_id or "").strip()
+        if not clean_user_id:
+            return None
+        announcement = await self.get_announcement()
+        if not self._announcement_visible_to_user(announcement, clean_user_id):
+            return None
+        async with self.engine.connect() as conn:
+            existing = await conn.execute(
+                select(self.announcement_reads.c.announcement_id)
+                .where(
+                    self.announcement_reads.c.announcement_id == announcement.id,
+                    self.announcement_reads.c.user_id == clean_user_id,
+                )
+                .limit(1)
+            )
+            if existing.scalar_one_or_none() is not None:
+                return None
+        return announcement
+
+    async def mark_announcement_read(self, announcement_id: str, user_id: str) -> bool:
+        clean_announcement_id = str(announcement_id or "").strip()
+        clean_user_id = str(user_id or "").strip()
+        if not clean_announcement_id or not clean_user_id:
+            return False
+        now = shanghai_now()
+        async with self.engine.begin() as conn:
+            existing = await conn.execute(
+                select(self.announcement_reads.c.announcement_id)
+                .where(
+                    self.announcement_reads.c.announcement_id == clean_announcement_id,
+                    self.announcement_reads.c.user_id == clean_user_id,
+                )
+                .limit(1)
+            )
+            if existing.scalar_one_or_none() is None:
+                await conn.execute(
+                    insert(self.announcement_reads).values(
+                        announcement_id=clean_announcement_id,
+                        user_id=clean_user_id,
+                        time_read=now,
+                    )
+                )
+            else:
+                await conn.execute(
+                    update(self.announcement_reads)
+                    .where(
+                        self.announcement_reads.c.announcement_id == clean_announcement_id,
+                        self.announcement_reads.c.user_id == clean_user_id,
+                    )
+                    .values(time_read=now)
+                )
+        return True
 
     async def create_update_asset(
         self,
@@ -1524,3 +1685,66 @@ class CompanyAuthStore:
                 for entry in policy.connectors
             ],
         }
+
+    @staticmethod
+    def _announcement_time_from_payload(value: object, fallback: datetime) -> datetime:
+        if isinstance(value, datetime):
+            return as_shanghai(value)
+        if isinstance(value, str) and value.strip():
+            try:
+                return as_shanghai(datetime.fromisoformat(value.strip()))
+            except ValueError:
+                return fallback
+        return fallback
+
+    @classmethod
+    def _announcement_from_payload(cls, payload: dict) -> CompanyAnnouncement:
+        if not isinstance(payload, dict):
+            return _default_announcement()
+
+        now = shanghai_now()
+        raw_target_user_ids = payload.get("target_user_ids", [])
+        if not isinstance(raw_target_user_ids, list):
+            raw_target_user_ids = []
+        target_user_ids: list[str] = []
+        seen_user_ids: set[str] = set()
+        for raw_user_id in raw_target_user_ids:
+            user_id = str(raw_user_id or "").strip()
+            if not user_id or user_id in seen_user_ids:
+                continue
+            seen_user_ids.add(user_id)
+            target_user_ids.append(user_id)
+
+        return CompanyAnnouncement(
+            id=str(payload.get("id") or "").strip(),
+            enabled=bool(payload.get("enabled", False)),
+            content=str(payload.get("content") or "").strip(),
+            target_user_ids=target_user_ids,
+            published_by_user_id=str(payload.get("published_by_user_id") or "").strip(),
+            published_by_email=str(payload.get("published_by_email") or "").strip(),
+            published_by_display_name=str(payload.get("published_by_display_name") or "").strip(),
+            time_created=cls._announcement_time_from_payload(payload.get("time_created"), now),
+            time_updated=cls._announcement_time_from_payload(payload.get("time_updated"), now),
+        )
+
+    @staticmethod
+    def _announcement_to_payload(announcement: CompanyAnnouncement) -> dict:
+        return {
+            "id": announcement.id,
+            "enabled": announcement.enabled,
+            "content": announcement.content,
+            "target_user_ids": list(announcement.target_user_ids),
+            "published_by_user_id": announcement.published_by_user_id,
+            "published_by_email": announcement.published_by_email,
+            "published_by_display_name": announcement.published_by_display_name,
+            "time_created": as_shanghai(announcement.time_created).isoformat(),
+            "time_updated": as_shanghai(announcement.time_updated).isoformat(),
+        }
+
+    @staticmethod
+    def _announcement_visible_to_user(announcement: CompanyAnnouncement, user_id: str) -> bool:
+        if not announcement.enabled or not announcement.id or not announcement.content:
+            return False
+        if not announcement.target_user_ids:
+            return True
+        return user_id in announcement.target_user_ids

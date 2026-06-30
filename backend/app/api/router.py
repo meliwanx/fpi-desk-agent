@@ -6,6 +6,7 @@ from fastapi import APIRouter
 
 from app.api import admin as admin_api
 from app.api import agents as agents_api
+from app.api import announcements as announcements_api
 from app.api import app_update as app_update_api
 from app.api import artifacts as artifacts_api
 from app.api import automations as automations_api
@@ -36,6 +37,7 @@ from app.api import voice as voice_api
 api_router = APIRouter()
 
 api_router.include_router(admin_api.router, tags=["admin"])
+api_router.include_router(announcements_api.router, tags=["announcements"])
 api_router.include_router(app_update_api.router, tags=["app-update"])
 api_router.include_router(models_api.router, tags=["models"])
 api_router.include_router(company_auth_api.router, tags=["company-auth"])
