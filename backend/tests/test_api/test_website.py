@@ -29,6 +29,8 @@ async def test_website_landing_page_is_public_and_admin_stays_on_admin_route(app
         assert 'data-platform="macos"' in landing.text
         assert 'data-platform="windows"' in landing.text
         assert 'data-platform="linux"' not in landing.text
+        assert 'class="hero-content"' in landing.text
+        assert "shadcn-inspired website refresh: public web only" in landing.text
         assert ".segmented button.active" in landing.text
         assert "background: var(--blue);" in landing.text
         assert "color: #fff;" in landing.text

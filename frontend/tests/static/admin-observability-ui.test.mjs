@@ -19,9 +19,9 @@ assert.match(adminApp, /\/api\/admin\/audit\/admin-actions/, "admin console shou
 assert.match(adminApp, /selectedSessionIds/, "admin users page should track selected sessions for batch operations");
 assert.match(adminApp, /踢下线/, "admin users page should expose kick-offline actions in Chinese UI");
 assert.match(adminApp, /管控日志/, "admin console should show administrator control logs in Chinese UI");
-assert.match(adminApp, /\["analytics", "数据分析"\]/, "admin console should expose the analytics tab in navigation");
+assert.match(adminApp, /key:\s*"analytics",\s*label:\s*"数据分析"/, "admin console should expose the analytics tab in navigation");
 assert.match(adminApp, /\/api\/admin\/audit\/analytics\/users/, "admin analytics tab should load user analytics data");
-assert.match(adminApp, /\["allInfo", "全部信息"\]/, "admin console should expose an all audit information page");
+assert.match(adminApp, /key:\s*"allInfo",\s*label:\s*"全部信息"/, "admin console should expose an all audit information page");
 assert.match(adminApp, /\/api\/admin\/audit\/entries/, "admin all information page should load flattened audit entries");
 assert.match(adminApp, /className="session-table/, "admin session audit should render sessions as a table");
 assert.match(adminApp, /\/api\/admin\/feedback\/\$\{encodeURIComponent\(feedbackId\)\}/, "admin feedback page should delete feedback items");

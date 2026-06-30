@@ -505,6 +505,40 @@ function useApi(token: string) {
   };
 }
 
+const NAV_GROUPS: Array<{
+  title: string;
+  items: Array<{ key: Tab; label: string; marker: string }>;
+}> = [
+  {
+    title: "运营概览",
+    items: [
+      { key: "overview", label: "总览", marker: "总" },
+      { key: "analytics", label: "数据分析", marker: "析" },
+    ],
+  },
+  {
+    title: "审计追踪",
+    items: [
+      { key: "sessions", label: "会话审计", marker: "会" },
+      { key: "allInfo", label: "全部信息", marker: "全" },
+      { key: "risks", label: "风险发现", marker: "险" },
+      { key: "tools", label: "工具调用", marker: "工" },
+      { key: "feedback", label: "问题反馈", marker: "馈" },
+    ],
+  },
+  {
+    title: "企业管控",
+    items: [
+      { key: "users", label: "员工管理", marker: "员" },
+      { key: "actions", label: "管控日志", marker: "志" },
+      { key: "models", label: "模型管控", marker: "模" },
+      { key: "connectors", label: "连接器管控", marker: "连" },
+      { key: "announcements", label: "通知公告", marker: "告" },
+      { key: "updates", label: "版本更新", marker: "版" },
+    ],
+  },
+];
+
 export function App() {
   const [session, setSession] = useState<LoginResponse | null>(() => storedSession());
   const [tab, setTab] = useState<Tab>("overview");
@@ -531,43 +565,45 @@ export function App() {
           </div>
         </div>
         <nav className="nav">
-          {[
-            ["overview", "总览"],
-            ["sessions", "会话审计"],
-            ["allInfo", "全部信息"],
-            ["analytics", "数据分析"],
-            ["risks", "风险发现"],
-            ["tools", "工具调用"],
-            ["feedback", "问题反馈"],
-            ["users", "员工管理"],
-            ["actions", "管控日志"],
-            ["models", "模型管控"],
-            ["connectors", "连接器管控"],
-            ["announcements", "通知公告"],
-            ["updates", "版本更新"],
-          ].map(([key, label]) => (
-            <button
-              key={key}
-              className={`nav-item ${tab === key ? "active" : ""}`}
-              onClick={() => setTab(key as Tab)}
-            >
-              {label}
-            </button>
+          {NAV_GROUPS.map((group) => (
+            <div className="nav-group" key={group.title}>
+              <div className="nav-group-title">{group.title}</div>
+              {group.items.map((item) => (
+                <button
+                  key={item.key}
+                  className={`nav-item ${tab === item.key ? "active" : ""}`}
+                  onClick={() => setTab(item.key)}
+                >
+                  <span className="nav-marker">{item.marker}</span>
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
         <div className="sidebar-footer">
-          <div className="muted">{session.user.display_name || session.user.email}</div>
+          <div className="sidebar-user">
+            <span>{(session.user.display_name || session.user.email || "A").slice(0, 1).toUpperCase()}</span>
+            <div>
+              <strong>{session.user.display_name || session.user.email}</strong>
+              <small>{session.user.role || "admin"}</small>
+            </div>
+          </div>
           <button className="button ghost full" onClick={logout}>退出登录</button>
         </div>
       </aside>
 
       <main className="content">
         <header className="page-header">
-          <div>
+          <div className="page-title-block">
+            <span className="page-kicker">FPI Agent Console</span>
             <h1>{tabTitle(tab)}</h1>
             <p>{tabSubtitle(tab)}</p>
           </div>
-          <button className="button outline" onClick={() => window.location.reload()}>刷新</button>
+          <div className="header-actions">
+            <span className="user-chip">{session.user.display_name || session.user.email}</span>
+            <button className="button outline" onClick={() => window.location.reload()}>刷新</button>
+          </div>
         </header>
 
         {tab === "overview" && <Overview api={api} />}

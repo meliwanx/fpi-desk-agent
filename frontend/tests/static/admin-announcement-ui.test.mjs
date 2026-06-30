@@ -12,7 +12,7 @@ assert.match(
 );
 assert.match(
   app,
-  /"announcements",\s*"通知公告"/,
+  /key:\s*"announcements",\s*label:\s*"通知公告"/,
   "admin sidebar should expose notification announcements",
 );
 assert.match(

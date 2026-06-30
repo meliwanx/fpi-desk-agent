@@ -12,7 +12,7 @@ assert.match(
 );
 assert.match(
   app,
-  /"connectors",\s*"连接器管控"/,
+  /key:\s*"connectors",\s*label:\s*"连接器管控"/,
   "admin sidebar should expose connector access control",
 );
 assert.match(
