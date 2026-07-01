@@ -66,7 +66,8 @@ def _audit_context_from_request(request: Request) -> AuditContext | None:
     token = request.headers.get("X-FPI-Session", "").strip()
     if not token:
         return None
-    return AuditContext(company_session_token=token)
+    source_client_id = str(request.scope.get("state", {}).get("company_session_id", "") or "")
+    return AuditContext(company_session_token=token, source_client_id=source_client_id)
 
 
 async def _sync_model_policy_for_request(request: Request, provider_registry) -> None:

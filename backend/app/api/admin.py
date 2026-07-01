@@ -1235,6 +1235,40 @@ async def list_admin_update_assets(request: Request) -> AdminUpdateAssetListResp
     return AdminUpdateAssetListResponse(items=[_public_update_asset(asset) for asset in assets])
 
 
+@router.delete("/admin/update-assets/{asset_id}")
+async def delete_admin_update_asset(
+    asset_id: str,
+    request: Request,
+    settings: SettingsDep,
+) -> dict[str, bool]:
+    _require_admin(request)
+    store = _company_store(request)
+    if not hasattr(store, "delete_update_asset"):
+        raise HTTPException(status_code=404, detail="Update asset not found")
+
+    policy = await store.get_update_policy()
+    referenced_asset_ids = {
+        str(_update_policy_value(policy, "macos_asset_id", "") or ""),
+        str(_update_policy_value(policy, "windows_asset_id", "") or ""),
+        str(_update_policy_value(policy, "linux_asset_id", "") or ""),
+        str(_update_policy_value(policy, "default_asset_id", "") or ""),
+    }
+    if asset_id in referenced_asset_ids:
+        raise HTTPException(status_code=400, detail="当前最新包正在使用，不能删除")
+
+    asset = await store.delete_update_asset(asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Update asset not found")
+
+    if asset.stored_filename:
+        file_path = _update_asset_storage_dir(settings) / Path(asset.stored_filename).name
+        try:
+            file_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return {"success": True}
+
+
 @router.post("/admin/update-assets/upload", response_model=AdminUpdateAssetResponse)
 async def upload_admin_update_asset(
     request: Request,
@@ -1567,6 +1601,19 @@ async def _upsert_audit_usage(db: AsyncSession, *, item: AuditIngestPart) -> Non
         cost = float(data.get("cost") or 0)
     except (TypeError, ValueError):
         cost = 0.0
+    model_id = str(data.get("model_id") or "").strip() or None
+    provider_id = str(data.get("provider_id") or "").strip() or None
+    if not model_id or not provider_id:
+        message = (
+            await db.execute(select(AuditMessage).where(AuditMessage.local_message_id == item.message_id))
+        ).scalar_one_or_none()
+        session = (
+            await db.execute(select(AuditSession).where(AuditSession.local_session_id == item.session_id))
+        ).scalar_one_or_none()
+        if not model_id and message is not None:
+            model_id = _message_model_id(message, session)
+        if not provider_id and message is not None:
+            provider_id = _message_provider_id(message, session)
 
     existing = (
         await db.execute(select(AuditUsage).where(AuditUsage.local_part_id == item.id))
@@ -1582,6 +1629,8 @@ async def _upsert_audit_usage(db: AsyncSession, *, item: AuditIngestPart) -> Non
         "cache_write_tokens": cache_write_tokens,
         "total_tokens": total_tokens,
         "cost": cost,
+        "model_id": model_id,
+        "provider_id": provider_id,
     }
     if existing is None:
         db.add(AuditUsage(local_part_id=item.id, **values))
@@ -2442,44 +2491,25 @@ async def get_model_analytics(
     days = min(max(days, 1), 90)
     cutoff = shanghai_now() - timedelta(days=days)
 
-    # 按模型统计
-    message_counts = (
-        select(
-            AuditMessage.local_session_id.label("local_session_id"),
-            func.count(AuditMessage.local_message_id).label("message_count"),
-        )
-        .group_by(AuditMessage.local_session_id)
-        .subquery()
-    )
-    usage_totals = (
-        select(
-            AuditUsage.local_session_id.label("local_session_id"),
-            func.coalesce(func.sum(AuditUsage.total_tokens), 0).label("total_tokens"),
-            func.coalesce(func.sum(AuditUsage.input_tokens), 0).label("input_tokens"),
-            func.coalesce(func.sum(AuditUsage.output_tokens), 0).label("output_tokens"),
-            func.coalesce(func.sum(AuditUsage.cost), 0).label("total_cost"),
-        )
-        .group_by(AuditUsage.local_session_id)
-        .subquery()
-    )
     model_stats = (
         await db.execute(
             select(
-                AuditSession.model_id,
-                AuditSession.provider_id,
-                func.count(func.distinct(AuditSession.local_session_id)).label("session_count"),
-                func.coalesce(func.sum(message_counts.c.message_count), 0).label("message_count"),
-                func.coalesce(func.sum(usage_totals.c.total_tokens), 0).label("total_tokens"),
-                func.coalesce(func.sum(usage_totals.c.input_tokens), 0).label("input_tokens"),
-                func.coalesce(func.sum(usage_totals.c.output_tokens), 0).label("output_tokens"),
-                func.coalesce(func.sum(usage_totals.c.total_cost), 0).label("total_cost"),
+                AuditUsage.model_id,
+                AuditUsage.provider_id,
+                func.count(func.distinct(AuditUsage.local_session_id)).label("session_count"),
+                func.count(func.distinct(AuditUsage.local_message_id)).label("message_count"),
+                func.coalesce(func.sum(AuditUsage.total_tokens), 0).label("total_tokens"),
+                func.coalesce(func.sum(AuditUsage.input_tokens), 0).label("input_tokens"),
+                func.coalesce(func.sum(AuditUsage.output_tokens), 0).label("output_tokens"),
+                func.coalesce(func.sum(AuditUsage.reasoning_tokens), 0).label("reasoning_tokens"),
+                func.coalesce(func.sum(AuditUsage.cache_read_tokens), 0).label("cache_read_tokens"),
+                func.coalesce(func.sum(AuditUsage.cache_write_tokens), 0).label("cache_write_tokens"),
+                func.coalesce(func.sum(AuditUsage.cost), 0).label("total_cost"),
             )
-            .select_from(AuditSession)
-            .outerjoin(message_counts, message_counts.c.local_session_id == AuditSession.local_session_id)
-            .outerjoin(usage_totals, usage_totals.c.local_session_id == AuditSession.local_session_id)
-            .where(AuditSession.time_created >= cutoff)
-            .group_by(AuditSession.model_id, AuditSession.provider_id)
-            .order_by(func.count(func.distinct(AuditSession.local_session_id)).desc())
+            .select_from(AuditUsage)
+            .where(AuditUsage.time_created >= cutoff)
+            .group_by(AuditUsage.model_id, AuditUsage.provider_id)
+            .order_by(func.coalesce(func.sum(AuditUsage.total_tokens), 0).desc())
         )
     ).mappings().all()
 
@@ -2494,6 +2524,9 @@ async def get_model_analytics(
                 "total_tokens": int(row["total_tokens"]),
                 "input_tokens": int(row["input_tokens"]),
                 "output_tokens": int(row["output_tokens"]),
+                "reasoning_tokens": int(row["reasoning_tokens"]),
+                "cache_read_tokens": int(row["cache_read_tokens"]),
+                "cache_write_tokens": int(row["cache_write_tokens"]),
                 "total_cost": float(row["total_cost"]),
                 "avg_cost_per_session": (
                     float(row["total_cost"]) / int(row["session_count"])
@@ -2504,6 +2537,112 @@ async def get_model_analytics(
             for row in model_stats
         ],
     }
+
+
+@router.get("/admin/audit/analytics/user-daily-tokens")
+async def get_user_daily_token_analytics(
+    request: Request,
+    db: DbDep,
+    days: int = 30,
+    user_id: str | None = None,
+) -> dict[str, Any]:
+    """Return per-user per-day token totals with conversation drilldown metadata."""
+    _require_admin(request)
+    days = min(max(days, 1), 90)
+    cutoff = shanghai_now() - timedelta(days=days)
+
+    stmt = (
+        select(AuditUsage, AuditSession)
+        .outerjoin(AuditSession, AuditSession.local_session_id == AuditUsage.local_session_id)
+        .where(AuditUsage.time_created >= cutoff)
+        .order_by(AuditUsage.time_created.desc())
+    )
+    if user_id:
+        stmt = stmt.where(AuditSession.user_id == user_id)
+    rows = list((await db.execute(stmt)).all())
+
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for usage, session in rows:
+        day = as_shanghai(usage.time_created).date().isoformat()
+        employee_id = session.user_id if session is not None else ""
+        key = (employee_id, day)
+        item = grouped.setdefault(
+            key,
+            {
+                "date": day,
+                "user_id": employee_id,
+                "user_email": session.user_email if session is not None else "",
+                "user_display_name": session.user_display_name if session is not None else "",
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "reasoning_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "total_tokens": 0,
+                "total_cost": 0.0,
+                "_conversations": {},
+                "_models": {},
+            },
+        )
+        item["input_tokens"] += usage.input_tokens
+        item["output_tokens"] += usage.output_tokens
+        item["reasoning_tokens"] += usage.reasoning_tokens
+        item["cache_read_tokens"] += usage.cache_read_tokens
+        item["cache_write_tokens"] += usage.cache_write_tokens
+        item["total_tokens"] += usage.total_tokens
+        item["total_cost"] += usage.cost
+
+        conversation = item["_conversations"].setdefault(
+            usage.local_session_id,
+            {
+                "session_id": usage.local_session_id,
+                "title": session.title if session is not None else "",
+                "workspace": session.workspace if session is not None else "",
+                "total_tokens": 0,
+                "total_cost": 0.0,
+            },
+        )
+        conversation["total_tokens"] += usage.total_tokens
+        conversation["total_cost"] += usage.cost
+
+        model_key = (usage.provider_id or "", usage.model_id or "")
+        model = item["_models"].setdefault(
+            model_key,
+            {
+                "provider_id": usage.provider_id,
+                "model_id": usage.model_id,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "reasoning_tokens": 0,
+                "total_tokens": 0,
+                "total_cost": 0.0,
+            },
+        )
+        model["input_tokens"] += usage.input_tokens
+        model["output_tokens"] += usage.output_tokens
+        model["reasoning_tokens"] += usage.reasoning_tokens
+        model["total_tokens"] += usage.total_tokens
+        model["total_cost"] += usage.cost
+
+    items = []
+    for item in grouped.values():
+        conversations = sorted(
+            item.pop("_conversations").values(),
+            key=lambda conversation: int(conversation["total_tokens"]),
+            reverse=True,
+        )
+        models = sorted(
+            item.pop("_models").values(),
+            key=lambda model: int(model["total_tokens"]),
+            reverse=True,
+        )
+        item["conversation_count"] = len(conversations)
+        item["conversations"] = conversations
+        item["models"] = models
+        items.append(item)
+
+    items.sort(key=lambda item: (item["date"], int(item["total_tokens"])), reverse=True)
+    return {"period_days": days, "items": items}
 
 
 @router.get("/admin/audit/analytics/tools")

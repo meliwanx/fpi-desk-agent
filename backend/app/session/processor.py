@@ -165,6 +165,7 @@ async def _track_session_file(
     session_id: str,
     file_path: str,
     tool_id: str,
+    message_id: str | None = None,
 ) -> None:
     """Persist a file record for the workspace panel (deduplicated by path)."""
     import os
@@ -193,6 +194,15 @@ async def _track_session_file(
                     tool_id=tool_id,
                     file_type="generated",
                 ))
+        if message_id:
+            from app.audit.client import schedule_generated_file_audit
+
+            schedule_generated_file_audit(
+                session_id=session_id,
+                message_id=message_id,
+                file_path=file_path,
+                tool_id=tool_id,
+            )
     except Exception:
         logger.debug("Failed to track session file: %s", file_path, exc_info=True)
 
@@ -289,6 +299,7 @@ async def _save_artifact_as_file(
     session_id: str,
     workspace: str | None,
     metadata: dict[str, Any],
+    message_id: str | None = None,
 ) -> None:
     """Save artifact content to fpiagent_written/ and track as a session file."""
     import re
@@ -330,6 +341,7 @@ async def _save_artifact_as_file(
             session_id=session_id,
             file_path=str(file_path),
             tool_id="artifact",
+            message_id=message_id,
         )
     except Exception:
         logger.debug("Failed to save artifact as file: %s", filename, exc_info=True)
@@ -748,6 +760,8 @@ class SessionProcessor:
                         "reason": "error",
                         "tokens": {},
                         "cost": 0.0,
+                        "model_id": sp.model_id,
+                        "provider_id": sp.provider.id if sp.provider else None,
                     },
                 )
         self.finish_reason = "error"
@@ -1079,6 +1093,8 @@ class SessionProcessor:
                             "reason": self.finish_reason,
                             "tokens": self.usage_data,
                             "cost": self.step_cost,
+                            "model_id": sp.model_id,
+                            "provider_id": sp.provider.id if sp.provider else None,
                         },
                     )
             job.publish(SSEEvent(
@@ -1326,6 +1342,7 @@ class SessionProcessor:
                 session_id=job.session_id,
                 file_path=result.metadata["file_path"],
                 tool_id=tool.id,
+                message_id=self._assistant_msg_id,
             )
 
         # Track files created or modified inside code_execute runs.
@@ -1341,6 +1358,7 @@ class SessionProcessor:
                     session_id=job.session_id,
                     file_path=file_path,
                     tool_id=tool.id,
+                    message_id=self._assistant_msg_id,
                 )
 
         # Track artifacts as workspace files (save to disk)
@@ -1355,6 +1373,7 @@ class SessionProcessor:
                 session_id=job.session_id,
                 workspace=sp.workspace,
                 metadata=result.metadata,
+                message_id=self._assistant_msg_id,
             )
 
         # Track todos from todo tool results
@@ -1482,6 +1501,8 @@ class SessionProcessor:
                         "reason": self.finish_reason,
                         "tokens": self.usage_data,
                         "cost": self.step_cost,
+                        "model_id": sp.model_id,
+                        "provider_id": sp.provider.id if sp.provider else None,
                     },
                 )
 

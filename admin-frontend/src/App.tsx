@@ -212,6 +212,7 @@ interface TranscriptMessage {
   data: Record<string, unknown>;
   model_id: string | null;
   provider_id: string | null;
+  time_created?: string;
   parts: TranscriptPart[];
 }
 
@@ -422,6 +423,7 @@ function RawDataDetails({ data }: { data: unknown }) {
 function AuditPartView({ part, token }: { part: TranscriptPart; token: string }) {
   const text = textFromPart(part);
   const hasStructured = Boolean(part.tool_call || part.file || part.usage || (part.risks && part.risks.length > 0));
+  const fileSource = part.data?.source === "generated" ? "AI 生成文件" : "用户上传文件";
   return (
     <div className="audit-part">
       <div className="audit-part-header">
@@ -437,7 +439,7 @@ function AuditPartView({ part, token }: { part: TranscriptPart; token: string })
         <div className="audit-box">
           <div>
             <strong>{part.file.name}</strong>
-            <div className="muted">{part.file.mime_type || "文件"} · {formatNumber(part.file.size)} bytes</div>
+            <div className="muted">{fileSource} · {part.file.mime_type || "文件"} · {formatNumber(part.file.size)} bytes</div>
           </div>
           {part.file.content_uploaded && part.file.download_url ? (
             <button className="button outline" onClick={() => void downloadFile(part.file!.download_url!, token)}>下载</button>
@@ -491,6 +493,71 @@ async function downloadFile(url: string, token: string): Promise<void> {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(objectUrl);
+}
+
+interface TranscriptTurn {
+  id: string;
+  user: TranscriptMessage | null;
+  assistants: TranscriptMessage[];
+}
+
+function buildTranscriptTurns(messages: TranscriptMessage[]): TranscriptTurn[] {
+  const turns: TranscriptTurn[] = [];
+  let current: TranscriptTurn | null = null;
+  for (const message of messages) {
+    if (message.role === "user") {
+      current = { id: message.id, user: message, assistants: [] };
+      turns.push(current);
+      continue;
+    }
+    if (!current) {
+      current = { id: `orphan-${message.id}`, user: null, assistants: [] };
+      turns.push(current);
+    }
+    current.assistants.push(message);
+  }
+  return turns;
+}
+
+function AuditChatMessage({ message, token }: { message: TranscriptMessage; token: string }) {
+  const isUser = message.role === "user";
+  return (
+    <article className={`admin-chat-message ${isUser ? "user" : "assistant"}`}>
+      <div className="admin-chat-avatar">{isUser ? "用" : "AI"}</div>
+      <div className="admin-chat-bubble">
+        <div className="admin-chat-head">
+          <span className={`role-badge ${message.role}`}>{roleLabel(message.role)}</span>
+          {modelLabel(message.model_id, message.provider_id) && (
+            <span className="model-badge">模型：{modelLabel(message.model_id, message.provider_id)}</span>
+          )}
+          {message.time_created && <span className="muted">{compactDate(message.time_created)}</span>}
+        </div>
+        <div className="admin-chat-parts">
+          {message.parts.map((part) => (
+            <AuditPartView key={part.id} part={part} token={token} />
+          ))}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function AuditChatTranscript({ messages, token }: { messages: TranscriptMessage[]; token: string }) {
+  const turns = buildTranscriptTurns(messages).slice().reverse();
+  return (
+    <div className="admin-chat-scroll">
+      <div className="admin-chat-thread">
+        {turns.map((turn) => (
+          <section className="admin-chat-turn" key={turn.id}>
+            {turn.user && <AuditChatMessage message={turn.user} token={token} />}
+            {turn.assistants.map((message) => (
+              <AuditChatMessage key={message.id} message={message} token={token} />
+            ))}
+          </section>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function useApi(token: string) {
@@ -880,20 +947,7 @@ function Sessions({ api, token }: { api: ReturnType<typeof useApi>; token: strin
         {messages.length === 0 ? (
           <p className="muted">选择上方会话查看详情</p>
         ) : (
-          messages.map((message) => (
-            <article className="message" key={message.id}>
-              <div className="message-head">
-                <span className={`role-badge ${message.role}`}>{roleLabel(message.role)}</span>
-                {modelLabel(message.model_id, message.provider_id) && (
-                  <span className="model-badge">模型：{modelLabel(message.model_id, message.provider_id)}</span>
-                )}
-                <span className="muted">{message.parts.length} 条内容</span>
-              </div>
-              {message.parts.map((part) => (
-                <AuditPartView key={part.id} part={part} token={token} />
-              ))}
-            </article>
-          ))
+          <AuditChatTranscript messages={messages} token={token} />
         )}
       </section>
     </div>
@@ -1658,13 +1712,14 @@ function AnnouncementPanel({ api }: { api: ReturnType<typeof useApi> }) {
 
         <div className="form-grid announcement-form">
           <label className="model-field model-field-wide">
-            <span>公告内容</span>
+            <span>公告内容（支持 Markdown）</span>
             <textarea
               className="input textarea announcement-textarea"
-              placeholder="请输入需要展示给员工的通知公告..."
+              placeholder="请输入需要展示给员工的通知公告，例如：[下载地址](https://example.com)"
               value={policy.content}
               onChange={(event) => updateContent(event.target.value)}
             />
+            <small className="muted">支持加粗、列表和链接；链接会在员工客户端中直接点击打开。</small>
           </label>
 
           <div className="model-field model-field-wide">
@@ -2099,6 +2154,24 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
     setMessage(`${slot.label} 已选择 ${asset.name || asset.original_filename}，保存策略后生效`);
   }
 
+  async function deleteAsset(asset: UpdateAsset, isLatest: boolean) {
+    if (isLatest) return;
+    const displayName = asset.name || asset.original_filename;
+    if (!window.confirm(`确认删除历史包「${displayName}」吗？删除后服务器文件也会移除。`)) {
+      return;
+    }
+    setMessage("");
+    try {
+      await api<{ success: boolean }>(`/api/admin/update-assets/${asset.id}`, {
+        method: "DELETE",
+      });
+      setAssets((items) => items.filter((item) => item.id !== asset.id));
+      setMessage(`历史包「${displayName}」已删除`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "删除失败");
+    }
+  }
+
   async function uploadAsset(slot: (typeof UPDATE_ASSET_SLOTS)[number], file: File | null) {
     if (!policy || !file) return;
     const version = (assetVersions[slot.platform] || policy.latest_version || "").trim();
@@ -2256,7 +2329,11 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
             </div>
           </div>
         </div>
-        {message && <p className={message.startsWith("已保存") ? "success" : "error"}>{message}</p>}
+        {message && (
+          <p className={/(已保存|已选择|已上传|已删除)/.test(message) ? "success" : "error"}>
+            {message}
+          </p>
+        )}
       </section>
       <section className="card">
         <div className="section-title">
@@ -2310,13 +2387,22 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
                       </td>
                       <td>{formatNumber(asset.download_count)}</td>
                       <td>
-                        <button
-                          className="button outline"
-                          disabled={isLatest}
-                          onClick={() => setLatestAsset(slot, asset)}
-                        >
-                          {isLatest ? "已是最新" : "设为最新"}
-                        </button>
+                        <div className="table-actions">
+                          <button
+                            className="button outline"
+                            disabled={isLatest}
+                            onClick={() => setLatestAsset(slot, asset)}
+                          >
+                            {isLatest ? "已是最新" : "设为最新"}
+                          </button>
+                          <button
+                            className="button ghost danger-text"
+                            disabled={isLatest}
+                            onClick={() => void deleteAsset(asset, isLatest)}
+                          >
+                            删除
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -2360,6 +2446,9 @@ interface ModelAnalytics {
     total_tokens: number;
     input_tokens: number;
     output_tokens: number;
+    reasoning_tokens: number;
+    cache_read_tokens: number;
+    cache_write_tokens: number;
     total_cost: number;
     avg_cost_per_session: number;
   }>;
@@ -2399,6 +2488,81 @@ interface TimelineAnalytics {
   }>;
 }
 
+interface UserDailyTokenAnalytics {
+  period_days: number;
+  items: Array<{
+    date: string;
+    user_id: string;
+    user_email: string;
+    user_display_name: string;
+    input_tokens: number;
+    output_tokens: number;
+    reasoning_tokens: number;
+    cache_read_tokens: number;
+    cache_write_tokens: number;
+    total_tokens: number;
+    total_cost: number;
+    conversation_count: number;
+    conversations: Array<{
+      session_id: string;
+      title: string;
+      workspace: string;
+      total_tokens: number;
+      total_cost: number;
+    }>;
+    models: Array<{
+      provider_id: string | null;
+      model_id: string | null;
+      input_tokens: number;
+      output_tokens: number;
+      reasoning_tokens: number;
+      total_tokens: number;
+      total_cost: number;
+    }>;
+  }>;
+}
+
+function ActiveUsersLineChart({ timeline }: { timeline: TimelineAnalytics | null }) {
+  const points = timeline?.timeline || [];
+  if (points.length === 0) {
+    return <div className="active-users-chart empty">暂无趋势数据</div>;
+  }
+  const width = 720;
+  const height = 180;
+  const padX = 34;
+  const padY = 22;
+  const maxActive = Math.max(1, ...points.map((item) => item.active_users));
+  const maxTokens = Math.max(1, ...points.map((item) => item.total_tokens));
+  const xFor = (index: number) => padX + (index * (width - padX * 2)) / Math.max(points.length - 1, 1);
+  const yForActive = (value: number) => height - padY - (value / maxActive) * (height - padY * 2);
+  const yForTokens = (value: number) => height - padY - (value / maxTokens) * (height - padY * 2);
+  const activeLine = points.map((item, index) => `${xFor(index)},${yForActive(item.active_users)}`).join(" ");
+  const tokenLine = points.map((item, index) => `${xFor(index)},${yForTokens(item.total_tokens)}`).join(" ");
+
+  return (
+    <div className="active-users-chart">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="活跃人数和 Token 趋势折线图">
+        <line x1={padX} y1={height - padY} x2={width - padX} y2={height - padY} className="chart-axis" />
+        <line x1={padX} y1={padY} x2={padX} y2={height - padY} className="chart-axis" />
+        <polyline points={activeLine} className="chart-line active" />
+        <polyline points={tokenLine} className="chart-line tokens" />
+        {points.map((item, index) => (
+          <g key={item.date}>
+            <circle cx={xFor(index)} cy={yForActive(item.active_users)} r="3" className="chart-dot active" />
+            <text x={xFor(index)} y={height - 4} textAnchor="middle" className="chart-label">
+              {item.date.slice(5)}
+            </text>
+          </g>
+        ))}
+      </svg>
+      <div className="chart-legend">
+        <span><i className="legend-active" />活跃人数</span>
+        <span><i className="legend-tokens" />Token 趋势</span>
+      </div>
+    </div>
+  );
+}
+
 function Analytics({ api, token }: { api: ReturnType<typeof useApi>; token: string }) {
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(true);
@@ -2408,6 +2572,7 @@ function Analytics({ api, token }: { api: ReturnType<typeof useApi>; token: stri
   const [toolStats, setToolStats] = useState<ToolAnalytics | null>(null);
   const [contentStats, setContentStats] = useState<ContentAnalytics | null>(null);
   const [timeline, setTimeline] = useState<TimelineAnalytics | null>(null);
+  const [userDailyTokens, setUserDailyTokens] = useState<UserDailyTokenAnalytics | null>(null);
 
   useEffect(() => {
     void loadAnalytics();
@@ -2426,19 +2591,21 @@ function Analytics({ api, token }: { api: ReturnType<typeof useApi>; token: stri
         }
       }
 
-      const [users, models, tools, content, time] = await Promise.all([
+      const [users, models, tools, content, time, userDaily] = await Promise.all([
         loadOne<UserAnalytics>(`/api/admin/audit/analytics/users?days=${days}`),
         loadOne<ModelAnalytics>(`/api/admin/audit/analytics/models?days=${days}`),
         loadOne<ToolAnalytics>(`/api/admin/audit/analytics/tools?days=${days}`),
         loadOne<ContentAnalytics>(`/api/admin/audit/analytics/content?days=${days}`),
         loadOne<TimelineAnalytics>(`/api/admin/audit/analytics/timeline?days=${days}`),
+        loadOne<UserDailyTokenAnalytics>(`/api/admin/audit/analytics/user-daily-tokens?days=${days}`),
       ]);
       setUserStats(users);
       setModelStats(models);
       setToolStats(tools);
       setContentStats(content);
       setTimeline(time);
-      if ([users, models, tools, content, time].some((item) => item === null)) {
+      setUserDailyTokens(userDaily);
+      if ([users, models, tools, content, time, userDaily].some((item) => item === null)) {
         setError("部分分析数据加载失败，已展示可用数据。");
       }
     } catch (error) {
@@ -2541,31 +2708,30 @@ function Analytics({ api, token }: { api: ReturnType<typeof useApi>; token: stri
       {/* 时间趋势图 */}
       <div className="card">
         <h2>趋势分析</h2>
+        <ActiveUsersLineChart timeline={timeline} />
         {timeline && timeline.timeline.length > 0 && (
-          <div className="timeline-chart">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>日期</th>
-                  <th>会话数</th>
-                  <th>活跃用户</th>
-                  <th>Token 消耗</th>
-                  <th>成本</th>
+          <table className="table compact-table">
+            <thead>
+              <tr>
+                <th>日期</th>
+                <th>会话数</th>
+                <th>活跃用户</th>
+                <th>Token 消耗</th>
+                <th>成本</th>
+              </tr>
+            </thead>
+            <tbody>
+              {timeline.timeline.slice(-7).map((item) => (
+                <tr key={item.date}>
+                  <td>{item.date}</td>
+                  <td>{item.session_count}</td>
+                  <td>{item.active_users}</td>
+                  <td>{formatNumber(item.total_tokens)}</td>
+                  <td>${item.total_cost.toFixed(2)}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {timeline.timeline.slice(-14).map((item) => (
-                  <tr key={item.date}>
-                    <td>{item.date}</td>
-                    <td>{item.session_count}</td>
-                    <td>{item.active_users}</td>
-                    <td>{formatNumber(item.total_tokens)}</td>
-                    <td>${item.total_cost.toFixed(2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
 
@@ -2603,6 +2769,66 @@ function Analytics({ api, token }: { api: ReturnType<typeof useApi>; token: stri
         </table>
       </div>
 
+      <div className="card">
+        <h2>用户每日 Token</h2>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>日期</th>
+              <th>用户</th>
+              <th>总 Token</th>
+              <th>输入 / 输出 / 推理</th>
+              <th>成本</th>
+              <th>模型</th>
+              <th>对话内容</th>
+            </tr>
+          </thead>
+          <tbody>
+            {userDailyTokens?.items.slice(0, 30).map((item) => (
+              <tr key={`${item.user_id}-${item.date}`}>
+                <td>{item.date}</td>
+                <td>
+                  <strong>{item.user_display_name || item.user_email}</strong>
+                  <div className="muted">{item.user_email}</div>
+                </td>
+                <td>{formatNumber(item.total_tokens)}</td>
+                <td>
+                  {formatNumber(item.input_tokens)} / {formatNumber(item.output_tokens)} / {formatNumber(item.reasoning_tokens)}
+                </td>
+                <td>${item.total_cost.toFixed(2)}</td>
+                <td>
+                  {item.models.slice(0, 2).map((model) => (
+                    <div className="muted" key={`${model.provider_id}-${model.model_id}`}>
+                      {modelLabel(model.model_id, model.provider_id)} · {formatNumber(model.total_tokens)}
+                    </div>
+                  ))}
+                </td>
+                <td>
+                  <div className="conversation-links">
+                    {item.conversations.slice(0, 3).map((conversation) => (
+                      <button
+                        className="link-button"
+                        key={conversation.session_id}
+                        onClick={() => {
+                          window.location.hash = `audit-session=${encodeURIComponent(conversation.session_id)}`;
+                        }}
+                      >
+                        {conversation.title || conversation.session_id}
+                      </button>
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {(!userDailyTokens || userDailyTokens.items.length === 0) && (
+              <tr>
+                <td colSpan={7} className="muted">暂无用户每日 Token 数据</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
       {/* 模型分析 */}
       <div className="card">
         <h2>模型使用分析</h2>
@@ -2616,6 +2842,8 @@ function Analytics({ api, token }: { api: ReturnType<typeof useApi>; token: stri
               <th>总 Token</th>
               <th>输入 Token</th>
               <th>输出 Token</th>
+              <th>推理 Token</th>
+              <th>缓存读/写</th>
               <th>总成本</th>
               <th>平均成本</th>
             </tr>
@@ -2630,6 +2858,8 @@ function Analytics({ api, token }: { api: ReturnType<typeof useApi>; token: stri
                 <td>{formatNumber(model.total_tokens)}</td>
                 <td>{formatNumber(model.input_tokens)}</td>
                 <td>{formatNumber(model.output_tokens)}</td>
+                <td>{formatNumber(model.reasoning_tokens)}</td>
+                <td>{formatNumber(model.cache_read_tokens)} / {formatNumber(model.cache_write_tokens)}</td>
                 <td>${model.total_cost.toFixed(2)}</td>
                 <td>${model.avg_cost_per_session.toFixed(3)}</td>
               </tr>

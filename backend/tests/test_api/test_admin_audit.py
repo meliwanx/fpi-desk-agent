@@ -504,6 +504,38 @@ async def test_admin_can_upload_update_asset_and_bind_policy(app_client, tmp_pat
         assert policy["macos_asset"]["md5"] == hashlib.md5(b"installer-bytes").hexdigest()
         assert policy["macos_asset"]["uploaded_by_display_name"] == "Admin"
         assert policy["macos_asset"]["signature"] == "signed-updater-package-signature"
+
+        denied_delete = await app_client.delete(f"/api/admin/update-assets/{asset['id']}")
+        assert denied_delete.status_code == 400
+        assert stored_file.exists()
+
+        history_upload = await app_client.post(
+            "/api/admin/update-assets/upload",
+            data={
+                "platform": "macos",
+                "name": "macOS 1.3.9 历史安装包",
+                "version": "1.3.9",
+            },
+            files={
+                "file": (
+                    "FPI Agent 1.3.9.dmg",
+                    b"old-installer-bytes",
+                    "application/x-apple-diskimage",
+                )
+            },
+        )
+        assert history_upload.status_code == 200
+        history_asset = history_upload.json()
+        saved_history_asset = await store.get_update_asset(history_asset["id"])
+        assert saved_history_asset is not None
+        history_file = tmp_path / "update_assets" / saved_history_asset.stored_filename
+        assert history_file.exists()
+
+        deleted = await app_client.delete(f"/api/admin/update-assets/{history_asset['id']}")
+        assert deleted.status_code == 200
+        assert deleted.json() == {"success": True}
+        assert await store.get_update_asset(history_asset["id"]) is None
+        assert not history_file.exists()
     finally:
         await store.dispose()
 
@@ -1440,6 +1472,8 @@ async def test_enterprise_audit_tracks_usage_tools_risks_and_admin_actions(
     assert usage_rows[0]["input_tokens"] == 1000
     assert usage_rows[0]["total_tokens"] == 1275
     assert usage_rows[0]["cost"] == 0.0123
+    assert usage_rows[0]["model_id"] == "claude-sonnet-4"
+    assert usage_rows[0]["provider_id"] == "anthropic"
     assert tool_rows[0]["tool_name"] == "read"
     assert tool_rows[0]["status"] == "completed"
     assert "profiles.yaml" in tool_rows[0]["output_preview"]
@@ -1500,8 +1534,21 @@ async def test_enterprise_audit_tracks_usage_tools_risks_and_admin_actions(
         headers={"X-Test-Company-Role": "admin"},
     )
     assert model_analytics.status_code == 200
-    assert model_analytics.json()["model_list"][0]["message_count"] == 2
+    assert model_analytics.json()["model_list"][0]["model_id"] == "claude-sonnet-4"
+    assert model_analytics.json()["model_list"][0]["provider_id"] == "anthropic"
+    assert model_analytics.json()["model_list"][0]["message_count"] == 1
     assert model_analytics.json()["model_list"][0]["total_tokens"] == 1275
+
+    user_daily = await app_client.get(
+        "/api/admin/audit/analytics/user-daily-tokens?days=7",
+        headers={"X-Test-Company-Role": "admin"},
+    )
+    assert user_daily.status_code == 200
+    daily_item = user_daily.json()["items"][0]
+    assert daily_item["user_email"] == "employee@example.com"
+    assert daily_item["total_tokens"] == 1275
+    assert daily_item["conversations"][0]["session_id"] == "local-session-observe"
+    assert daily_item["models"][0]["model_id"] == "claude-sonnet-4"
 
     entries = await app_client.get(
         "/api/admin/audit/entries?limit=20",

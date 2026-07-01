@@ -31,6 +31,14 @@ assert.match(adminApp, /model_id:\s*string\s*\|\s*null/, "admin transcript messa
 assert.match(adminApp, /provider_id:\s*string\s*\|\s*null/, "admin transcript messages should carry the reply provider id");
 assert.match(adminApp, /message\.model_id/, "admin transcript should render per-message model information");
 assert.match(adminApp, /模型：/, "admin transcript should label reply model information in Chinese");
+assert.match(adminApp, /buildTranscriptTurns/, "admin transcript should group messages into user-question and assistant-answer turns");
+assert.match(adminApp, /admin-chat-scroll/, "admin transcript should use a chat-style scroll container");
+assert.match(adminApp, /admin-chat-message/, "admin transcript should render chat-style message bubbles");
+assert.match(adminApp, /AI 生成文件/, "admin transcript should label generated AI files distinctly");
+assert.match(adminApp, /ActiveUsersLineChart/, "admin analytics should render an active-user line chart");
+assert.match(adminApp, /\/api\/admin\/audit\/analytics\/user-daily-tokens/, "admin analytics should load user daily token drilldown data");
+assert.match(adminApp, /用户每日 Token/, "admin analytics should expose per-user daily token reporting");
+assert.match(adminApp, /reasoning_tokens/, "admin model analytics should expose reasoning token columns");
 assert.match(adminStyles, /\.app-shell\s*{[^}]*height:\s*100vh/s, "admin shell should fit the viewport height");
 assert.match(adminStyles, /\.app-shell\s*{[^}]*overflow:\s*hidden/s, "admin shell should prevent document-level scrolling");
 assert.match(adminStyles, /\.sidebar\s*{[^}]*height:\s*100vh/s, "admin sidebar should be constrained to the viewport");
@@ -44,3 +52,5 @@ assert.match(adminStyles, /\.content\s*{[^}]*overflow-y:\s*auto/s, "admin conten
 assert.match(adminStyles, /\.audit-workspace\s*{[^}]*overflow:\s*hidden/s, "admin audit pages should keep scrolling inside their panels");
 assert.match(adminStyles, /\.table-scroll\s*{[^}]*overflow:\s*auto/s, "admin audit tables should scroll internally");
 assert.match(adminStyles, /\.audit-detail\s*{[^}]*overflow:\s*auto/s, "admin audit details should scroll internally");
+assert.match(adminStyles, /\.admin-chat-scroll\s*{[^}]*flex-direction:\s*column-reverse/s, "admin transcript should keep latest chat content at the visual bottom");
+assert.match(adminStyles, /\.active-users-chart\s*{[^}]*height:/s, "admin analytics line chart should have a stable chart area");

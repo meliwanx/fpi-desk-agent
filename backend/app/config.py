@@ -108,6 +108,7 @@ class Settings(BaseSettings):
     audit_sync_enabled: bool = False
     audit_server_url: str = ""
     audit_sync_timeout: float = 10.0
+    audit_outbox_flush_interval: float = 30.0
     audit_file_upload_enabled: bool = True
     audit_file_upload_max_bytes: int = 200 * 1024 * 1024
     audit_file_storage_dir: str = "data/audit_uploads"
