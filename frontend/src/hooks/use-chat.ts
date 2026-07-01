@@ -337,6 +337,7 @@ export function useChat(currentSessionId?: string) {
         ws.todos.map((t) =>
           t.status === "in_progress" ? { ...t, status: "pending" as const, activeForm: undefined } : t,
         ),
+        targetSessionId,
       );
     }
     if (targetSessionId) {
@@ -441,8 +442,8 @@ export function useChat(currentSessionId?: string) {
         chatState.startGeneration(res.session_id, res.stream_id);
         void startStream(res.session_id, res.stream_id);
 
-        useWorkspaceStore.getState().setTodos([]);
-        useWorkspaceStore.getState().setWorkspaceFiles([]);
+        useWorkspaceStore.getState().setTodos([], currentSessionId);
+        useWorkspaceStore.getState().setWorkspaceFiles([], currentSessionId);
 
         const trimmed = newText.trim();
         queryClient.setQueryData<InfiniteData<PaginatedMessages>>(

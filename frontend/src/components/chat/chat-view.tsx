@@ -70,11 +70,11 @@ export function ChatView({ sessionId }: ChatViewProps) {
     useChatStore.getState().setFocusedSession(sessionId);
     useArtifactStore.getState().clearAll();
     useActivityStore.getState().close();
-    useWorkspaceStore.getState().resetForSession();
+    useWorkspaceStore.getState().resetForSession(sessionId);
 
     api.get<SessionResponse>(API.SESSIONS.DETAIL(sessionId)).then((s) => {
       if (s.directory) {
-        useWorkspaceStore.getState().setActiveWorkspacePath(s.directory);
+        useWorkspaceStore.getState().setActiveWorkspacePath(s.directory, sessionId);
       }
     }).catch(() => {});
 
@@ -82,8 +82,11 @@ export function ChatView({ sessionId }: ChatViewProps) {
       API.SESSIONS.TODOS(sessionId),
     ).then((res) => {
       if (res.todos && res.todos.length > 0) {
-        useWorkspaceStore.getState().setTodos(res.todos as WorkspaceTodo[]);
-        useWorkspaceStore.getState().open();
+        const workspace = useWorkspaceStore.getState();
+        workspace.setTodos(res.todos as WorkspaceTodo[], sessionId);
+        if (useWorkspaceStore.getState().activeSessionId === sessionId) {
+          useWorkspaceStore.getState().open();
+        }
       }
     }).catch(() => {});
 
@@ -93,6 +96,7 @@ export function ChatView({ sessionId }: ChatViewProps) {
       if (res.files && res.files.length > 0) {
         useWorkspaceStore.getState().setWorkspaceFiles(
           res.files.map((f) => ({ name: f.name, path: f.path, type: f.type as WorkspaceFile["type"] })),
+          sessionId,
         );
       }
     }).catch(() => {});

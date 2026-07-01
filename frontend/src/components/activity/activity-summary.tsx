@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, ChevronRight, Wrench } from "lucide-react";
+import { CheckCircle2, ChevronRight, Loader2, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { FpiAgentLogo } from "@/components/ui/openyak-logo";
 import { useActivityStore, type ActivityData } from "@/stores/activity-store";
@@ -33,12 +33,16 @@ export function ActivitySummary({ data }: ActivitySummaryProps) {
   const parts: string[] = [];
   if (isCompleted) {
     parts.push(t("done"));
+  } else if (hasRunningTools) {
+    parts.push(t("stageWorkingWithTools"));
   } else if (hasReasoning) {
     parts.push(
       data.thinkingDuration != null
         ? t("thoughtFor", { duration: `${data.thinkingDuration}s` })
-        : t("reasoning"),
+        : t("stageThinking"),
     );
+  } else {
+    parts.push(t("stageFinalizing"));
   }
   if (hasTools) {
     const count = data.toolParts.length;
@@ -53,6 +57,8 @@ export function ActivitySummary({ data }: ActivitySummaryProps) {
     >
       {isCompleted ? (
         <CheckCircle2 className="h-3.5 w-3.5 text-[var(--tool-completed)]" />
+      ) : hasRunningTools ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--text-accent)]" />
       ) : hasReasoning ? (
         <FpiAgentLogo size={14} />
       ) : (
