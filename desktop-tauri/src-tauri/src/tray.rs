@@ -9,7 +9,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager,
+    AppHandle, Emitter, Manager, WebviewWindow,
 };
 
 const TRAY_ID: &str = "main-tray";
@@ -48,8 +48,7 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             } = event
             {
                 if let Some(window) = tray.app_handle().get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
+                    show_window(&window);
                 }
             }
         })
@@ -149,9 +148,7 @@ fn handle_menu_event(app: &AppHandle, event_id: &str) {
     };
 
     let show_and_focus = || {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
+        show_window(&window);
     };
 
     if let Some(session_id) = event_id.strip_prefix(RECENT_PREFIX) {
@@ -185,4 +182,14 @@ fn handle_menu_event(app: &AppHandle, event_id: &str) {
         }
         _ => {}
     }
+}
+
+fn show_window(window: &WebviewWindow) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = window.set_skip_taskbar(false);
+    }
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
 }
