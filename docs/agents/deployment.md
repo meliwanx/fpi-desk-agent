@@ -49,15 +49,35 @@ Build the admin frontend locally:
 npm run build:admin
 ```
 
-Back up the production backend directory:
+Do not create full backend backups before deploys. The production backend
+contains user uploads and server-side package assets under `data/`, which can
+grow very large and must not be copied into release backups.
+
+If a rollback snapshot is needed, back up code only and exclude runtime data,
+virtualenvs, secrets, tokens, and caches:
 
 ```bash
-ssh fpi-agent-prod 'mkdir -p /opt/fpi-agent/backups && tar -czf /opt/fpi-agent/backups/backend-$(date +%Y%m%d_%H%M%S).tar.gz -C /opt/fpi-agent backend'
+ssh fpi-agent-prod '
+  mkdir -p /opt/fpi-agent/backups
+  tar -czf /opt/fpi-agent/backups/backend-code-$(date +%Y%m%d_%H%M%S).tar.gz \
+    -C /opt/fpi-agent/backend \
+    --exclude=./data \
+    --exclude=./venv \
+    --exclude=./.server.env \
+    --exclude=./session_token.json \
+    --exclude="*/__pycache__" \
+    --exclude="*.pyc" \
+    .
+'
 ```
 
 The production server currently does not have `rsync`; use targeted `scp` and
 preserve production-only files such as `.server.env`, `venv/`, `data/`, and
 `session_token.json`.
+
+Never back up user-uploaded or server-generated file directories for deploys:
+`data/uploads`, `data/audit_uploads`, `data/update_assets`, and
+`data/feedback_uploads`. Treat the whole `data/` tree as runtime state.
 
 For admin/API changes:
 
