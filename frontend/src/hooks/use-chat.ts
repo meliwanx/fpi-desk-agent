@@ -163,7 +163,7 @@ export function useChat(currentSessionId?: string) {
             parent_id: null,
             slug: null,
             directory: settingsState.workspaceDirectory || null,
-            title: text.trim().slice(0, 60),
+            title: null,
             version: 0,
             summary_additions: 0,
             summary_deletions: 0,

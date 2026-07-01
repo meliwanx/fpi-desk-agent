@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Archive, EllipsisVertical, Loader2, MessageCircle, Pin, PinOff } from "lucide-react";
+import { Archive, EllipsisVertical, Loader2, MessageCircle, Pencil, Pin, PinOff } from "lucide-react";
 import { cn, parseApiDate } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { API, queryKeys } from "@/lib/constants";
@@ -135,6 +135,11 @@ export const SessionItem = memo(function SessionItem({
     onEditEnd?.();
   }, [title, onEditEnd]);
 
+  const startRename = useCallback((event?: React.SyntheticEvent) => {
+    event?.stopPropagation();
+    onEditStart?.(session.id);
+  }, [onEditStart, session.id]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === "Enter") {
@@ -206,7 +211,7 @@ export const SessionItem = memo(function SessionItem({
             ? t('unpin', { defaultValue: 'Unpin' })
             : t('pin', { defaultValue: 'Pin' })}
         </Item>
-        <Item onSelect={() => onEditStart?.(session.id)}>
+        <Item onSelect={() => startRename()}>
           {t('rename')}
         </Item>
         <Item onSelect={() => onArchive?.(session.id)}>
@@ -252,9 +257,9 @@ export const SessionItem = memo(function SessionItem({
       hasDirectory,
       onArchive,
       onDelete,
-      onEditStart,
       onExportMarkdown,
       onExportPdf,
+      startRename,
       onTogglePin,
       session.directory,
       session.id,
@@ -273,6 +278,7 @@ export const SessionItem = memo(function SessionItem({
           aria-selected={isActive}
           tabIndex={isFocused ? 0 : -1}
           onClick={navigateToSession}
+          onDoubleClick={startRename}
           onKeyDown={(e) => {
             if (!isEditing && (e.key === "Enter" || e.key === " ")) {
               e.preventDefault();
@@ -326,7 +332,7 @@ export const SessionItem = memo(function SessionItem({
           <div
             className={cn(
               "min-w-0 flex-1",
-              !isEditing && "pr-16",
+              !isEditing && "pr-24",
             )}
           >
             {isEditing ? (
@@ -384,6 +390,20 @@ export const SessionItem = memo(function SessionItem({
             >
               {relativeTime}
             </span>
+          )}
+
+          {!isEditing && (
+            <button
+              type="button"
+              onClick={startRename}
+              className={cn(
+                "absolute right-[4.125rem] top-1/2 z-10 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-[var(--text-tertiary)] opacity-0 transition-opacity hover:bg-[var(--surface-tertiary)] hover:text-[var(--text-primary)] focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--brand-primary)] focus-visible:opacity-100 group-hover/session:opacity-100",
+              )}
+              aria-label={t('rename')}
+              title={t('rename')}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
           )}
 
           {!isEditing && (

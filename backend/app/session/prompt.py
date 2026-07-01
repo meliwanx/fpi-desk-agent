@@ -62,8 +62,28 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+MAX_SESSION_TITLE_CHARS = 15
+_TITLE_STRIP_CHARS = " \t\r\n\"'“”‘’《》<>（）()[]【】{}，。,.、:：;；!?！？-—_"
+
+
 def _cfg():
     return get_settings()
+
+
+def _clean_session_title(raw: str) -> str:
+    title = " ".join(raw.replace("\n", " ").replace("\r", " ").split())
+    for prefix in ("标题：", "标题:", "会话标题：", "会话标题:"):
+        if title.startswith(prefix):
+            title = title[len(prefix):].strip()
+            break
+    title = title.strip(_TITLE_STRIP_CHARS)
+    if len(title) > MAX_SESSION_TITLE_CHARS:
+        title = title[:MAX_SESSION_TITLE_CHARS].rstrip(_TITLE_STRIP_CHARS)
+    return title
+
+
+def _fallback_session_title(text: str) -> str:
+    return _clean_session_title(text.strip())
 
 
 class SessionPrompt:
@@ -826,10 +846,10 @@ class SessionPrompt:
                     "Failed to persist cost/tokens on message %s", self.assistant_msg_id
                 )
 
-        # Set title on first turn — use first user message directly.
+        # Set title on first turn through the hidden title agent.
         # Must happen BEFORE DONE so the SSE client receives TITLE_UPDATE.
         if self.is_first_turn:
-            title = self.first_user_text.strip()[:60]
+            title = await self._generate_first_turn_title()
             if title:
                 try:
                     async with self.session_factory() as db:
@@ -883,6 +903,37 @@ class SessionPrompt:
     # ------------------------------------------------------------------
     # Shared helpers (called by SessionProcessor on agent switch)
     # ------------------------------------------------------------------
+
+    async def _generate_first_turn_title(self) -> str:
+        first_text = self.first_user_text.strip()
+        if not first_text:
+            return ""
+
+        fallback = _fallback_session_title(first_text)
+        title_agent = self.agent_registry.get("title")
+        provider = self.provider
+        model_id = self.model_id
+        if title_agent is None or provider is None or not model_id:
+            return fallback
+
+        try:
+            chunks: list[str] = []
+            async for chunk in provider.stream_chat(
+                model_id,
+                [{"role": "user", "content": first_text}],
+                system=title_agent.system_prompt,
+                temperature=title_agent.temperature,
+                max_tokens=48,
+            ):
+                if chunk.type == "text-delta":
+                    chunks.append(str(chunk.data.get("text") or ""))
+                elif chunk.type == "error":
+                    message = str(chunk.data.get("message") or "unknown title generation error")
+                    raise RuntimeError(message)
+            return _clean_session_title("".join(chunks)) or fallback
+        except Exception:
+            logger.warning("AI title generation failed for %s", self.job.session_id, exc_info=True)
+            return fallback
 
     def rebuild_permissions_and_prompt(self) -> None:
         """Rebuild merged permissions and system prompt after an agent switch.

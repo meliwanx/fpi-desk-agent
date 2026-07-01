@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useChat } from "@/hooks/use-chat";
 import { useMessages } from "@/hooks/use-messages";
@@ -60,27 +60,6 @@ export function ChatView({ sessionId }: ChatViewProps) {
     queryFn: () => api.get<SessionResponse>(API.SESSIONS.DETAIL(sessionId)),
     staleTime: 30_000,
   });
-
-  // Auto-fix sessions with default title — set to first user message
-  const qc = useQueryClient();
-  useEffect(() => {
-    if (!session || !messages || messages.length === 0) return;
-    if (session.title && session.title !== "New Session") return;
-    const firstUser = messages.find((m) => m.data?.role === "user");
-    if (!firstUser) return;
-    const textPart = firstUser.parts.find((p) => p.data?.type === "text");
-    const text = textPart?.data?.type === "text" ? (textPart.data as { type: "text"; text: string }).text : undefined;
-    if (!text) return;
-    const title = text.trim().slice(0, 60);
-    if (!title) return;
-    api.patch(API.SESSIONS.DETAIL(sessionId), { title }).then(() => {
-      qc.invalidateQueries({ queryKey: queryKeys.sessions.all });
-      qc.setQueryData<SessionResponse>(
-        queryKeys.sessions.detail(sessionId),
-        (old) => (old ? { ...old, title } : old),
-      );
-    }).catch((e) => console.warn("[chat-view] Failed to auto-set title:", e));
-  }, [session, messages, sessionId, qc]);
 
   // On session entry: hydrate this session's panels (artifact, activity,
   // workspace todos/files). We intentionally do NOT abort the in-flight

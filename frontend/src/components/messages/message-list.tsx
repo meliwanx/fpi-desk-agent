@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useRef, useEffect, useState } from "react";
+import { useCallback, useMemo, useRef, useEffect, useState } from "react";
 import { ArrowDown, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useScrollAnchor } from "@/hooks/use-scroll-anchor";
 import { MessageItem } from "./message-item";
 import { AssistantMessageGroup } from "./assistant-message-group";
 import { StreamingMessage } from "./assistant-message";
+import { ConversationNavigator, type ConversationNavItem } from "./conversation-navigator";
 import { FileChip } from "@/components/chat/file-chip";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { FileAttachment } from "@/types/chat";
@@ -67,6 +68,39 @@ function groupMessages(messages: MessageResponse[]): MessageGroup[] {
   return groups;
 }
 
+function previewText(text: string, fallback: string, maxLength = 96): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return fallback;
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized;
+}
+
+function buildConversationNavItems(groups: MessageGroup[]): ConversationNavItem[] {
+  const items: ConversationNavItem[] = [];
+
+  for (let i = 0; i < groups.length; i += 1) {
+    const group = groups[i];
+    if (group.kind !== "user") continue;
+
+    const replyText: string[] = [];
+    for (let j = i + 1; j < groups.length; j += 1) {
+      const next = groups[j];
+      if (next.kind === "user") break;
+      replyText.push(
+        ...next.messages.map((message) => extractTextFromPartResponses(message.parts)),
+      );
+    }
+
+    items.push({
+      id: group.message.id,
+      index: items.length + 1,
+      promptPreview: previewText(extractTextFromPartResponses(group.message.parts), "文件消息"),
+      replyPreview: previewText(replyText.join("\n"), ""),
+    });
+  }
+
+  return items;
+}
+
 interface MessageListProps {
   messages: MessageResponse[];
   isLoading: boolean;
@@ -116,8 +150,10 @@ export function MessageList({
 }: MessageListProps) {
   const { scrollRef, scrollElementRef, bottomRef, isAtBottom, scrollToBottom } = useScrollAnchor();
   const topSentinelRef = useRef<HTMLDivElement>(null);
+  const userNodeRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [unreadCount, setUnreadCount] = useState(0);
   const [canFetchOlderMessages, setCanFetchOlderMessages] = useState(false);
+  const [activeConversationNodeId, setActiveConversationNodeId] = useState<string | null>(null);
   const anchoredSessionRef = useRef<string | undefined>(undefined);
 
   // Keep StreamingMessage visible briefly after generation finishes so the
@@ -251,6 +287,76 @@ export function MessageList({
     () => groupMessages(messages),
     [messages]
   );
+  const conversationNavItems = useMemo(
+    () => buildConversationNavItems(groups),
+    [groups],
+  );
+
+  const setUserNodeRef = useCallback((messageId: string) => (node: HTMLDivElement | null) => {
+    if (node) {
+      userNodeRefs.current.set(messageId, node);
+    } else {
+      userNodeRefs.current.delete(messageId);
+    }
+  }, []);
+
+  const handleSelectConversationNode = useCallback((messageId: string) => {
+    setActiveConversationNodeId(messageId);
+    userNodeRefs.current.get(messageId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
+  useEffect(() => {
+    const latestNodeId = conversationNavItems[conversationNavItems.length - 1]?.id ?? null;
+    setActiveConversationNodeId((current) => {
+      if (current && conversationNavItems.some((item) => item.id === current)) return current;
+      return latestNodeId;
+    });
+  }, [conversationNavItems]);
+
+  useEffect(() => {
+    const container = scrollElementRef.current;
+    if (!container || conversationNavItems.length === 0) return;
+
+    let frameId = 0;
+    const updateActiveConversationNode = () => {
+      if (frameId) return;
+      frameId = requestAnimationFrame(() => {
+        frameId = 0;
+        const latestNodeId = conversationNavItems[conversationNavItems.length - 1]?.id ?? null;
+        if (!latestNodeId) return;
+
+        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+        if (isNearBottom) {
+          setActiveConversationNodeId(latestNodeId);
+          return;
+        }
+
+        const containerTop = container.getBoundingClientRect().top;
+        const threshold = containerTop + Math.min(container.clientHeight * 0.35, 180);
+        let activeNodeId = conversationNavItems[0]?.id ?? latestNodeId;
+
+        for (const item of conversationNavItems) {
+          const node = userNodeRefs.current.get(item.id);
+          if (!node) continue;
+          if (node.getBoundingClientRect().top <= threshold) {
+            activeNodeId = item.id;
+          } else {
+            break;
+          }
+        }
+
+        setActiveConversationNodeId(activeNodeId);
+      });
+    };
+
+    updateActiveConversationNode();
+    container.addEventListener("scroll", updateActiveConversationNode, { passive: true });
+
+    return () => {
+      container.removeEventListener("scroll", updateActiveConversationNode);
+      if (frameId) cancelAnimationFrame(frameId);
+    };
+  }, [conversationNavItems, scrollElementRef]);
 
   // The shell message only exists after the backend created it (streamId is set).
   // During beginSending (streamId is null), we must NOT hide the previous response.
@@ -403,6 +509,12 @@ export function MessageList({
 
   return (
     <div className="relative flex-1 overflow-hidden">
+      <ConversationNavigator
+        items={conversationNavItems}
+        activeItemId={activeConversationNodeId}
+        onSelect={handleSelectConversationNode}
+      />
+
       <div
         ref={scrollRef}
         data-testid="message-list-scroller"
@@ -425,15 +537,21 @@ export function MessageList({
             {groups.map((group) => {
               if (group.kind === "user") {
                 return (
-                  <MessageItem
+                  <div
                     key={group.message.id}
-                    message={group.message}
-                    isNew={newMessageIds.has(group.message.id) && group.message.id !== lastUserMessageId}
-                    onEditAndResend={onEditAndResend}
-                    isGenerating={isGenerating}
-                    directory={directory}
-                    sessionId={sessionId}
-                  />
+                    ref={setUserNodeRef(group.message.id)}
+                    data-conversation-node-id={group.message.id}
+                    className="scroll-mt-20"
+                  >
+                    <MessageItem
+                      message={group.message}
+                      isNew={newMessageIds.has(group.message.id) && group.message.id !== lastUserMessageId}
+                      onEditAndResend={onEditAndResend}
+                      isGenerating={isGenerating}
+                      directory={directory}
+                      sessionId={sessionId}
+                    />
+                  </div>
                 );
               }
 
