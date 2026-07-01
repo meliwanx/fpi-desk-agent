@@ -12,6 +12,8 @@ from app.audit.client import AuditContext, reset_audit_context, set_audit_contex
 from app.config import Settings
 from app.dependencies import set_session_factory
 from app.models.audit import AuditOutboxItem
+from app.models.session_file import SessionFile
+from app.session.processor import _track_session_file
 from app.session.manager import create_message, create_part, create_session
 
 pytestmark = pytest.mark.asyncio
@@ -253,3 +255,64 @@ async def test_schedule_generated_file_audit_enqueues_generated_file_part(tmp_pa
     assert part["data"]["source"] == "generated"
     assert part["data"]["name"] == "report.pdf"
     assert part["data"]["tool"] == "artifact"
+
+
+async def test_track_session_file_still_enqueues_generated_audit_when_file_already_tracked(
+    tmp_path,
+    session_factory,
+    monkeypatch,
+):
+    generated = tmp_path / "already-tracked.xlsx"
+    generated.write_bytes(b"generated workbook")
+
+    async with session_factory() as db:
+        async with db.begin():
+            await create_session(db, id="session-1", directory=str(tmp_path), title="Audit")
+            db.add(
+                SessionFile(
+                    session_id="session-1",
+                    file_path=str(generated),
+                    file_name=generated.name,
+                    tool_id="write",
+                    file_type="generated",
+                )
+            )
+
+    set_session_factory(session_factory)
+    monkeypatch.setattr(
+        audit_client,
+        "get_settings",
+        lambda: Settings(
+            audit_sync_enabled=True,
+            audit_server_url="http://audit.example.test",
+            audit_sync_timeout=1,
+        ),
+    )
+
+    async def fake_flush(*args, **kwargs):
+        return {"attempted": 0, "succeeded": 0, "failed": 0}
+
+    monkeypatch.setattr(audit_client, "flush_audit_outbox_once", fake_flush)
+
+    token = set_audit_context(AuditContext(company_session_token="company-session-token"))
+    try:
+        await _track_session_file(
+            session_factory,
+            session_id="session-1",
+            file_path=str(generated),
+            tool_id="write",
+            message_id="assistant-message",
+        )
+        await asyncio.sleep(0)
+    finally:
+        reset_audit_context(token)
+
+    async with session_factory() as db:
+        row = (await db.execute(select(AuditOutboxItem))).scalar_one()
+
+    part = row.payload["parts"][0]
+    assert part["message_id"] == "assistant-message"
+    assert part["session_id"] == "session-1"
+    assert part["data"]["type"] == "file"
+    assert part["data"]["source"] == "generated"
+    assert part["data"]["name"] == "already-tracked.xlsx"

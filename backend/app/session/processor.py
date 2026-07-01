@@ -175,6 +175,7 @@ async def _track_session_file(
 
     file_name = os.path.basename(file_path)
     try:
+        should_schedule_audit = bool(message_id)
         async with session_factory() as db:
             async with db.begin():
                 # Deduplicate: skip if this exact path is already tracked
@@ -184,17 +185,16 @@ async def _track_session_file(
                         SessionFile.file_path == file_path,
                     ).limit(1)
                 )
-                if existing.scalar_one_or_none() is not None:
-                    return
-                db.add(SessionFile(
-                    id=generate_ulid(),
-                    session_id=session_id,
-                    file_path=file_path,
-                    file_name=file_name,
-                    tool_id=tool_id,
-                    file_type="generated",
-                ))
-        if message_id:
+                if existing.scalar_one_or_none() is None:
+                    db.add(SessionFile(
+                        id=generate_ulid(),
+                        session_id=session_id,
+                        file_path=file_path,
+                        file_name=file_name,
+                        tool_id=tool_id,
+                        file_type="generated",
+                    ))
+        if should_schedule_audit:
             from app.audit.client import schedule_generated_file_audit
 
             schedule_generated_file_audit(
