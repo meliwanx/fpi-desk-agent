@@ -21,10 +21,9 @@ export function GeneralTab() {
   const [mounted, setMounted] = useState(false);
   const [appVersion, setAppVersion] = useState("0.0.1");
   const [updateStatus, setUpdateStatus] = useState<
-    "idle" | "checking" | "available" | "up-to-date" | "downloading" | "ready" | "installing" | "error"
+    "idle" | "checking" | "available" | "up-to-date" | "error"
   >("idle");
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
-  const [downloadProgress, setDownloadProgress] = useState(0);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [accountName, setAccountName] = useState("员工");
   const [accountEmail, setAccountEmail] = useState("");
@@ -73,38 +72,6 @@ export function GeneralTab() {
       .catch(() => setPlatformName("unknown"));
   }, [developerMode]);
 
-  useEffect(() => {
-    if (updateStatus === "downloading") {
-      setDownloadProgress(enterpriseUpdate.progress);
-      if (enterpriseUpdate.readyToInstall) {
-        setUpdateStatus("ready");
-      }
-    }
-  }, [enterpriseUpdate.progress, enterpriseUpdate.readyToInstall, updateStatus]);
-
-  useEffect(() => {
-    if (!["downloading", "ready", "installing"].includes(updateStatus)) return;
-    if (enterpriseUpdate.error) {
-      setUpdateError(enterpriseUpdate.error);
-      setUpdateStatus("error");
-      return;
-    }
-    if (
-      updateStatus === "installing" &&
-      !enterpriseUpdate.installing &&
-      !enterpriseUpdate.readyToInstall &&
-      !enterpriseUpdate.available
-    ) {
-      setUpdateStatus("idle");
-    }
-  }, [
-    enterpriseUpdate.available,
-    enterpriseUpdate.error,
-    enterpriseUpdate.installing,
-    enterpriseUpdate.readyToInstall,
-    updateStatus,
-  ]);
-
   const checkForUpdate = useCallback(async () => {
     if (!IS_DESKTOP) return;
     setUpdateStatus("checking");
@@ -131,43 +98,12 @@ export function GeneralTab() {
     }
   }, [enterpriseUpdate]);
 
-  const doUpdate = useCallback(async () => {
+  const doUpdate = useCallback(() => {
     if (!IS_DESKTOP) return;
-      setUpdateStatus("downloading");
-      setUpdateError(null);
-      try {
-        setDownloadProgress(0);
-        await enterpriseUpdate.downloadUpdate();
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      console.error("Update install failed:", message);
-      setUpdateError(message);
-      setUpdateStatus("error");
-    }
-  }, [enterpriseUpdate]);
-
-  const installUpdateNow = useCallback(async () => {
-    setUpdateStatus("installing");
     setUpdateError(null);
-    try {
-      await enterpriseUpdate.installNow();
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      setUpdateError(message);
-      setUpdateStatus("error");
-    }
-  }, [enterpriseUpdate]);
-
-  const installUpdateLater = useCallback(async () => {
-    setUpdateStatus("installing");
-    setUpdateError(null);
-    try {
-      await enterpriseUpdate.installLater();
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      setUpdateError(message);
-      setUpdateStatus("error");
-    }
+    // The in-app update dialog takes over: download progress, then
+    // "install now" vs "install on next restart".
+    void enterpriseUpdate.beginUpdate();
   }, [enterpriseUpdate]);
 
   const handleLogout = useCallback(async () => {
@@ -468,36 +404,23 @@ export function GeneralTab() {
               </Button>
             )}
             {updateStatus === "available" && (
-              <Button size="sm" className="text-ui-caption h-7" onClick={doUpdate}>
-                {t('updateDownload')} — v{updateVersion}
-              </Button>
-            )}
-            {updateStatus === "downloading" && (
-              <div className="flex items-center gap-2">
-                <div className="h-1.5 w-32 rounded-full bg-[var(--surface-secondary)] overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-[var(--brand-primary)] transition-all duration-300"
-                    style={{ width: `${downloadProgress}%` }}
-                  />
+              enterpriseUpdate.downloading || enterpriseUpdate.installing ? (
+                <div className="flex items-center gap-2">
+                  <div className="h-1.5 w-32 rounded-full bg-[var(--surface-secondary)] overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-[var(--brand-primary)] transition-all duration-300"
+                      style={{ width: `${enterpriseUpdate.progress}%` }}
+                    />
+                  </div>
+                  <span className="text-ui-caption text-[var(--text-secondary)]">{enterpriseUpdate.progress}%</span>
                 </div>
-                <span className="text-ui-caption text-[var(--text-secondary)]">{downloadProgress}%</span>
-              </div>
-            )}
-            {updateStatus === "ready" && (
-              <div className="flex flex-wrap items-center gap-2">
-                <Button size="sm" className="text-ui-caption h-7" onClick={installUpdateNow}>
-                  {t("updateInstallNow")}
+              ) : enterpriseUpdate.phase === "restart-pending" ? (
+                <p className="text-ui-caption text-[var(--text-secondary)]">{t('updateScheduledDesc')}</p>
+              ) : (
+                <Button size="sm" className="text-ui-caption h-7" onClick={doUpdate}>
+                  {t('updateDownload')} — v{updateVersion}
                 </Button>
-                <Button variant="outline" size="sm" className="text-ui-caption h-7" onClick={installUpdateLater}>
-                  {t("updateInstallLater")}
-                </Button>
-              </div>
-            )}
-            {updateStatus === "installing" && (
-              <Button variant="outline" size="sm" className="text-ui-caption h-7" disabled>
-                <RefreshCw className="h-3 w-3 mr-1.5 animate-spin" />
-                {t("updateInstalling")}
-              </Button>
+              )
             )}
             {updateStatus === "error" && (
               <div className="space-y-1.5">

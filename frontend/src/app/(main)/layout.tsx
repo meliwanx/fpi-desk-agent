@@ -18,6 +18,7 @@ import { TitleBar } from "@/components/desktop/title-bar";
 import { WindowTopIcons } from "@/components/layout/window-top-icons";
 import { AnnouncementBanner } from "@/components/desktop/announcement-banner";
 import { UpdateBanner } from "@/components/desktop/update-banner";
+import { UpdateDialog } from "@/components/desktop/update-dialog";
 import { Button } from "@/components/ui/button";
 import { FpiAgentLogo } from "@/components/ui/openyak-logo";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -266,6 +267,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         transition={{ type: "spring", damping: 30, stiffness: 300 }}
       >
         <UpdateBanner />
+        <UpdateDialog />
         <AnnouncementBanner />
         {children}
       </motion.main>

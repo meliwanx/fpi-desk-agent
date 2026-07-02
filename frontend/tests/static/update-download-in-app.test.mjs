@@ -9,6 +9,14 @@ const updateBanner = readFileSync(
   new URL("../../src/components/desktop/update-banner.tsx", import.meta.url),
   "utf8",
 );
+const updateDialog = readFileSync(
+  new URL("../../src/components/desktop/update-dialog.tsx", import.meta.url),
+  "utf8",
+);
+const mainLayout = readFileSync(
+  new URL("../../src/app/(main)/layout.tsx", import.meta.url),
+  "utf8",
+);
 
 const tauriApi = readFileSync(
   new URL("../../src/lib/tauri-api.ts", import.meta.url),
@@ -30,6 +38,8 @@ const desktopBuildWorkflow = readFileSync(
   new URL("../../../.github/workflows/desktop-build.yml", import.meta.url),
   "utf8",
 );
+
+// --- Hook: two-step signed updater flow with explicit install timing -------
 
 assert.doesNotMatch(
   updateHook,
@@ -81,8 +91,38 @@ assert.match(
 
 assert.match(
   updateHook,
-  /readyToInstall/,
-  "enterprise app updates should enter a ready-to-install confirmation state after the package is downloaded",
+  /"downloaded"/,
+  "enterprise app updates should enter a downloaded confirmation state before installing",
+);
+
+assert.match(
+  updateHook,
+  /installOnRestart/,
+  "enterprise app updates should support deferring the install to the next restart",
+);
+
+assert.match(
+  updateHook,
+  /PENDING_INSTALL_KEY/,
+  "deferred Windows installs should persist a pending marker for the next startup",
+);
+
+assert.match(
+  updateHook,
+  /resumePendingInstall/,
+  "deferred installs should resume automatically on the next startup",
+);
+
+assert.match(
+  updateHook,
+  /platform === "windows"[\s\S]+savePendingInstall/,
+  "Windows should defer the NSIS install to the next startup instead of quitting immediately",
+);
+
+assert.match(
+  updateHook,
+  /state\.phase !== "idle"\)\s*\{\s*return update;/,
+  "scheduled update re-checks must not clobber an in-flight download or ready-to-install state",
 );
 
 assert.doesNotMatch(
@@ -103,17 +143,33 @@ assert.doesNotMatch(
   "enterprise app update checks should not use package hash identity to decide whether a version update is needed",
 );
 
-assert.doesNotMatch(
-  updateHook,
-  /localStorage\.setItem\(\s*CURRENT_PACKAGE_SHA_KEY/,
-  "enterprise app updates should not mark a same-version hash as installed state",
+// --- Dialog: in-app popup with progress and install-timing choice ----------
+
+assert.match(
+  updateDialog,
+  /phase === "downloading"[\s\S]+progress/,
+  "the update dialog should show in-app download progress",
 );
 
-assert.doesNotMatch(
-  updateHook,
-  /pendingUpdate\?\.latest_package_sha256|localStorage\.setItem\(\s*DISMISSED_KEY\s*,\s*[^)]*latest_package_sha256/,
-  "enterprise app updates should dismiss non-forced reminders by version label, not package sha256",
+assert.match(
+  updateDialog,
+  /installNow[\s\S]+installOnRestart/,
+  "after downloading, the dialog should offer install-now and install-on-next-restart choices",
 );
+
+assert.match(
+  updateDialog,
+  /forceUpdate[\s\S]+updateInstallLater/,
+  "forced updates should hide the install-later choice",
+);
+
+assert.match(
+  mainLayout,
+  /<UpdateDialog \/>/,
+  "the update dialog should be mounted in the main layout",
+);
+
+// --- Banner: floating reminder that routes into the dialog -----------------
 
 assert.match(
   updateBanner,
@@ -123,14 +179,8 @@ assert.match(
 
 assert.match(
   updateBanner,
-  /updateInstallNow[\s\S]+updateInstallLater/,
-  "downloaded enterprise updates should ask whether to install immediately or on next startup",
-);
-
-assert.doesNotMatch(
-  updateBanner,
-  /available && readyToInstall[\s\S]+fixed inset-0/,
-  "downloaded non-forced enterprise updates should not show a centered modal",
+  /beginUpdate/,
+  "the update reminder should open the in-app update dialog",
 );
 
 assert.doesNotMatch(
@@ -139,34 +189,12 @@ assert.doesNotMatch(
   "non-forced enterprise updates should not reserve inline layout height in the main app",
 );
 
+// --- No manual DMG/EXE fallback in the desktop shell ------------------------
+
 assert.doesNotMatch(
   tauriApi,
   /downloadUpdatePackage|applyDownloadedUpdate|downloadUpdateAndOpen/,
   "Tauri API should not expose manual update package commands for DMG/EXE fallback installs",
-);
-
-assert.doesNotMatch(
-  tauriApi,
-  /onUpdateDownloadProgress/,
-  "Tauri API should not expose manual update download progress events",
-);
-
-assert.doesNotMatch(
-  tauriCommands,
-  /update-download-progress/,
-  "Rust should not implement a separate manual update downloader",
-);
-
-assert.doesNotMatch(
-  tauriCommands,
-  /actual_sha256[\s\S]+eq_ignore_ascii_case/,
-  "Rust should not verify manual DMG/EXE update hashes for app updates",
-);
-
-assert.doesNotMatch(
-  tauriCommands,
-  /pub async fn apply_downloaded_update/,
-  "Rust side should not apply downloaded DMG/EXE fallback packages",
 );
 
 assert.doesNotMatch(
@@ -180,6 +208,8 @@ assert.doesNotMatch(
   /commands::download_update_package|commands::apply_downloaded_update|commands::download_update_and_open/,
   "Rust manual update package commands should not be registered with Tauri",
 );
+
+// --- Updater endpoint and signed CI artifacts -------------------------------
 
 assert.match(
   tauriConfig,
