@@ -45,6 +45,11 @@ const CRASH_WINDOW_MS: u64 = 60_000;
 #[cfg(target_os = "windows")]
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
 
+/// Bundle identifiers this app previously shipped under. The chat database
+/// lives in `<app-data>/<identifier>/data`, so a rebrand that changes the
+/// identifier orphans all existing user data unless we migrate it.
+const LEGACY_BUNDLE_IDENTIFIERS: &[&str] = &["com.openyak.desktop"];
+
 fn epoch_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -151,15 +156,11 @@ impl BackendState {
         // Determine binary path and data directory
         let is_dev = cfg!(debug_assertions);
 
-        let data_dir = app
+        let app_data_dir = app
             .path()
             .app_data_dir()
-            .map_err(|e| format!("Failed to get app data dir: {e}"))?
-            .join("data");
-
-        // Ensure data directory exists
-        std::fs::create_dir_all(&data_dir)
-            .map_err(|e| format!("Failed to create data dir: {e}"))?;
+            .map_err(|e| format!("Failed to get app data dir: {e}"))?;
+        let data_dir = app_data_dir.join("data");
 
         // Set up log file
         let log_dir = app
@@ -169,6 +170,15 @@ impl BackendState {
         std::fs::create_dir_all(&log_dir).map_err(|e| format!("Failed to create log dir: {e}"))?;
         let log_path = log_dir.join("backend.log");
         let desktop_log_path = log_dir.join("desktop.log");
+
+        // One-time migration: pull chat data forward from a previous bundle
+        // identifier (e.g. com.openyak.desktop → com.fpiagent.desktop) so
+        // upgrading — manually or in-app — never loses conversations.
+        migrate_legacy_app_data(&app_data_dir, &desktop_log_path);
+
+        // Ensure data directory exists
+        std::fs::create_dir_all(&data_dir)
+            .map_err(|e| format!("Failed to create data dir: {e}"))?;
         write_desktop_log(
             &desktop_log_path,
             &format!(
@@ -683,6 +693,86 @@ async fn attempt_restart(state: &BackendState, app: &AppHandle) {
             error!("Backend restart failed: {err}");
             let _ = app.emit("backend-crash", &format!("Backend restart failed: {err}"));
         }
+    }
+}
+
+/// Location of the chat SQLite database inside a backend data directory.
+/// The backend chdirs into `<data_dir>` and uses the relative URL
+/// `sqlite+aiosqlite:///./data/openyak.db`, so the DB nests one level deeper.
+fn chat_db_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("data").join("openyak.db")
+}
+
+/// Copy `src` into `dst` recursively. Existing files in `dst` are never
+/// overwritten so a partially-used new install keeps its own state.
+fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else if !dst_path.exists() {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
+}
+
+/// One-time migration of user data from a previous bundle identifier.
+///
+/// v1.4.0 shipped as `com.openyak.desktop`; later builds use
+/// `com.fpiagent.desktop`. `app_data_dir()` is keyed on the identifier, so
+/// without this step every chat, upload, and setting appears to vanish after
+/// an upgrade (the old data is still on disk, just under the old folder).
+fn migrate_legacy_app_data(app_data_dir: &Path, desktop_log_path: &Path) {
+    let new_data_dir = app_data_dir.join("data");
+    if chat_db_path(&new_data_dir).exists() {
+        return; // This install already has its own chat data.
+    }
+
+    let Some(base_dir) = app_data_dir.parent() else {
+        return;
+    };
+
+    for legacy_id in LEGACY_BUNDLE_IDENTIFIERS {
+        let legacy_root = base_dir.join(legacy_id);
+        let legacy_data_dir = legacy_root.join("data");
+        if !chat_db_path(&legacy_data_dir).exists() {
+            continue;
+        }
+        // Don't re-import if a previous migration already ran and the user
+        // has since reset the new install's data on purpose.
+        let marker = legacy_root.join(".migrated-to-new-identifier");
+        if marker.exists() {
+            continue;
+        }
+
+        write_desktop_log(
+            desktop_log_path,
+            &format!(
+                "Migrating legacy app data | from={} | to={}",
+                legacy_data_dir.display(),
+                new_data_dir.display()
+            ),
+        );
+        match copy_dir_recursive(&legacy_data_dir, &new_data_dir) {
+            Ok(()) => {
+                let _ = std::fs::write(&marker, "migrated\n");
+                // The session token belongs to the old install's backend run;
+                // the new backend writes a fresh one before serving requests.
+                let _ = std::fs::remove_file(new_data_dir.join("session_token.json"));
+                write_desktop_log(desktop_log_path, "Legacy app data migration complete");
+            }
+            Err(err) => {
+                write_desktop_log(
+                    desktop_log_path,
+                    &format!("Legacy app data migration failed: {err}"),
+                );
+            }
+        }
+        return;
     }
 }
 
