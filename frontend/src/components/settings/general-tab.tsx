@@ -18,9 +18,8 @@ export function GeneralTab() {
   const { theme, resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   const [appVersion, setAppVersion] = useState("0.0.1");
-  const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "up-to-date" | "downloading" | "error">("idle");
+  const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "up-to-date" | "error">("idle");
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
-  const [downloadProgress, setDownloadProgress] = useState(0);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [accountName, setAccountName] = useState("员工");
   const [accountEmail, setAccountEmail] = useState("");
@@ -42,12 +41,6 @@ export function GeneralTab() {
       getVersion().then(setAppVersion)
     ).catch(() => {});
   }, []);
-
-  useEffect(() => {
-    if (updateStatus === "downloading") {
-      setDownloadProgress(enterpriseUpdate.progress);
-    }
-  }, [enterpriseUpdate.progress, updateStatus]);
 
   const checkForUpdate = useCallback(async () => {
     if (!IS_DESKTOP) return;
@@ -75,21 +68,12 @@ export function GeneralTab() {
     }
   }, [enterpriseUpdate]);
 
-  const doUpdate = useCallback(async () => {
+  const doUpdate = useCallback(() => {
     if (!IS_DESKTOP) return;
-    setUpdateStatus("downloading");
     setUpdateError(null);
-    try {
-      setDownloadProgress(0);
-      await enterpriseUpdate.downloadAndInstall();
-      setDownloadProgress(100);
-      setTimeout(() => setUpdateStatus("available"), 1200);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      console.error("Update install failed:", message);
-      setUpdateError(message);
-      setUpdateStatus("error");
-    }
+    // The in-app update dialog takes over: download progress, then
+    // "install now" vs "install on next restart".
+    void enterpriseUpdate.beginUpdate();
   }, [enterpriseUpdate]);
 
   const handleLogout = useCallback(async () => {
@@ -279,20 +263,23 @@ export function GeneralTab() {
               </Button>
             )}
             {updateStatus === "available" && (
-              <Button size="sm" className="text-ui-caption h-7" onClick={doUpdate}>
-                {t('updateNow')} — v{updateVersion}
-              </Button>
-            )}
-            {updateStatus === "downloading" && (
-              <div className="flex items-center gap-2">
-                <div className="h-1.5 w-32 rounded-full bg-[var(--surface-secondary)] overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-[var(--brand-primary)] transition-all duration-300"
-                    style={{ width: `${downloadProgress}%` }}
-                  />
+              enterpriseUpdate.phase === "downloading" || enterpriseUpdate.phase === "installing" ? (
+                <div className="flex items-center gap-2">
+                  <div className="h-1.5 w-32 rounded-full bg-[var(--surface-secondary)] overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-[var(--brand-primary)] transition-all duration-300"
+                      style={{ width: `${enterpriseUpdate.progress}%` }}
+                    />
+                  </div>
+                  <span className="text-ui-caption text-[var(--text-secondary)]">{enterpriseUpdate.progress}%</span>
                 </div>
-                <span className="text-ui-caption text-[var(--text-secondary)]">{downloadProgress}%</span>
-              </div>
+              ) : enterpriseUpdate.phase === "restart-pending" ? (
+                <p className="text-ui-caption text-[var(--text-secondary)]">{t('updateReadyDesc')}</p>
+              ) : (
+                <Button size="sm" className="text-ui-caption h-7" onClick={doUpdate}>
+                  {t('updateNow')} — v{updateVersion}
+                </Button>
+              )
             )}
             {updateStatus === "error" && (
               <div className="space-y-1.5">

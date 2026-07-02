@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, X } from "lucide-react";
+import { CheckCircle2, Download, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
 import { useUpdateCheck } from "@/hooks/use-update-check";
@@ -13,16 +13,20 @@ export function UpdateBanner() {
     version,
     notes,
     forceUpdate,
-    downloading,
+    phase,
+    dialogOpen,
     progress,
     error,
-    downloadAndInstall,
+    beginUpdate,
     dismiss,
   } = useUpdateCheck();
 
+  const busy = phase === "downloading" || phase === "installing";
+  const restartPending = phase === "restart-pending";
+
   return (
     <AnimatePresence>
-      {available && forceUpdate && (
+      {available && forceUpdate && !dialogOpen && !restartPending && (
         <motion.div
           className="fixed inset-0 z-[1000] grid place-items-center bg-black/35 px-6 backdrop-blur-sm"
           initial={{ opacity: 0 }}
@@ -49,10 +53,10 @@ export function UpdateBanner() {
             )}
             <Button
               className="mt-5 w-full"
-              onClick={downloadAndInstall}
-              disabled={downloading}
+              onClick={() => void beginUpdate()}
+              disabled={busy}
             >
-              {downloading ? t("updateOpening") : t("updateDownload")}
+              {busy ? t("updateOpening") : t("updateDownload")}
             </Button>
             <p className="mt-3 text-center text-ui-3xs text-[var(--text-tertiary)]">
               {t("updateRequiredDesc")}
@@ -69,14 +73,19 @@ export function UpdateBanner() {
           className="overflow-hidden"
         >
           <div className="flex items-center justify-center gap-3 px-4 py-1.5 text-xs font-medium bg-[var(--brand-primary)]/10 text-[var(--brand-primary)]">
-            {error ? (
+            {restartPending ? (
+              <>
+                <CheckCircle2 className="h-3 w-3 text-green-500" />
+                <span>{t("updateReadyDesc")}</span>
+              </>
+            ) : error && !busy ? (
               <>
                 <span className="text-[var(--color-destructive)]">{t("updateFailed")}: {error}</span>
                 <Button
                   variant="ghost"
                   size="sm"
                   className="h-5 px-2 text-xs font-semibold text-[var(--brand-primary)] hover:bg-[var(--brand-primary)]/20"
-                  onClick={downloadAndInstall}
+                  onClick={() => void beginUpdate()}
                 >
                   {t("updateRetry")}
                 </Button>
@@ -88,18 +97,22 @@ export function UpdateBanner() {
                   <X className="h-3 w-3" />
                 </button>
               </>
-            ) : downloading ? (
-              <>
-                <div className="flex items-center gap-2">
-                  <div className="h-1 w-24 rounded-full bg-[var(--brand-primary)]/20 overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-[var(--brand-primary)] transition-all duration-300"
-                      style={{ width: `${progress}%` }}
-                    />
-                  </div>
-                  <span>{t("updateDownloading")} {progress}%</span>
+            ) : busy && !dialogOpen ? (
+              <button
+                className="flex items-center gap-2"
+                onClick={() => void beginUpdate()}
+                title={t("updateDialogReopen")}
+              >
+                <div className="h-1 w-24 rounded-full bg-[var(--brand-primary)]/20 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-[var(--brand-primary)] transition-all duration-300"
+                    style={{ width: `${progress}%` }}
+                  />
                 </div>
-              </>
+                <span>{t("updateDownloading")} {progress}%</span>
+              </button>
+            ) : busy ? (
+              <span>{t("updateDownloading")} {progress}%</span>
             ) : (
               <>
                 <Download className="h-3 w-3" />
@@ -108,7 +121,7 @@ export function UpdateBanner() {
                   variant="ghost"
                   size="sm"
                   className="h-5 px-2 text-xs font-semibold text-[var(--brand-primary)] hover:bg-[var(--brand-primary)]/20"
-                  onClick={downloadAndInstall}
+                  onClick={() => void beginUpdate()}
                 >
                   {t("updateNow")}
                 </Button>

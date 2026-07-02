@@ -41,8 +41,20 @@ assert.match(
 
 assert.match(
   updateHook,
-  /downloadAndInstall\(/,
+  /update\.download\(/,
+  "enterprise app updates should download the signed updater package in-app with progress",
+);
+
+assert.match(
+  updateHook,
+  /tauriUpdate\.install\(\)/,
   "enterprise app updates should install the signed updater package instead of opening a DMG/EXE",
+);
+
+assert.match(
+  updateHook,
+  /installOnRestart/,
+  "enterprise app updates should support deferring the install to the next restart",
 );
 
 assert.match(
@@ -65,14 +77,20 @@ assert.match(
 
 assert.match(
   updateHook,
-  /fallbackDownloadAndOpen/,
-  "enterprise app updates should keep the legacy package opener only as a fallback for unsigned/manual packages",
+  /downloadPackageFallback/,
+  "enterprise app updates should keep the legacy package installer only as a fallback for unsigned/manual packages",
 );
 
 assert.match(
   updateHook,
-  /downloadUpdateAndOpen/,
+  /downloadUpdatePackage/,
   "enterprise app updates should still support legacy package fallback for existing admin uploads",
+);
+
+assert.match(
+  updateHook,
+  /installDownloadedUpdate/,
+  "enterprise app updates should install the downloaded fallback package via the Rust command",
 );
 
 assert.match(
@@ -121,6 +139,24 @@ assert.match(
   tauriLib,
   /commands::download_update_and_open/,
   "Rust update download/open command should be registered with Tauri",
+);
+
+assert.match(
+  tauriLib,
+  /commands::download_update_package[\s\S]+commands::install_downloaded_update/,
+  "Rust download-only and deferred-install commands should be registered with Tauri",
+);
+
+assert.match(
+  tauriCommands,
+  /pub async fn download_update_package/,
+  "Rust side should implement a download-only update command for the two-step install flow",
+);
+
+assert.match(
+  tauriCommands,
+  /pub async fn install_downloaded_update/,
+  "Rust side should implement installing a previously downloaded update package",
 );
 
 assert.match(

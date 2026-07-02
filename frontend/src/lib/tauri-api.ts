@@ -35,6 +35,12 @@ export interface DesktopAPI {
     defaultName: string;
     expectedSha256?: string | null;
   }) => Promise<string>;
+  downloadUpdatePackage: (opts: {
+    url: string;
+    defaultName: string;
+    expectedSha256?: string | null;
+  }) => Promise<string>;
+  installDownloadedUpdate: (path: string) => Promise<void>;
   minimize: () => Promise<void>;
   maximize: () => Promise<void>;
   close: () => Promise<void>;
@@ -83,6 +89,9 @@ export const desktopAPI: DesktopAPI = {
     invoke<boolean>("download_and_save", { url, data, defaultName, defaultDirectory }),
   downloadUpdateAndOpen: ({ url, defaultName, expectedSha256 }) =>
     invoke<string>("download_update_and_open", { url, defaultName, expectedSha256 }),
+  downloadUpdatePackage: ({ url, defaultName, expectedSha256 }) =>
+    invoke<string>("download_update_package", { url, defaultName, expectedSha256 }),
+  installDownloadedUpdate: (path) => invoke("install_downloaded_update", { path }),
   minimize: () => invoke("window_minimize"),
   maximize: () => invoke("window_maximize"),
   close: () => invoke("window_close"),

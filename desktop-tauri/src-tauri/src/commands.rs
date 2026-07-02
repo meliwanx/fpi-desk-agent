@@ -219,15 +219,17 @@ fn open_update_package(app: &AppHandle, file_path: &std::path::Path) -> Result<(
     }
 }
 
-/// Download an update package inside the app flow and open it with the OS installer.
-#[tauri::command]
-pub async fn download_update_and_open(
-    app: AppHandle,
-    url: String,
-    default_name: String,
-    expected_sha256: Option<String>,
-) -> Result<String, String> {
-    let mut response = reqwest::get(&url)
+fn update_packages_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("fpi-agent-updates")
+}
+
+async fn download_update_package_to_disk(
+    app: &AppHandle,
+    url: &str,
+    default_name: &str,
+    expected_sha256: Option<&str>,
+) -> Result<std::path::PathBuf, String> {
+    let mut response = reqwest::get(url)
         .await
         .map_err(|e| format!("Download failed: {e}"))?;
     let status = response.status();
@@ -235,18 +237,18 @@ pub async fn download_update_and_open(
         return Err(format!("Download failed with status {status}"));
     }
 
-    let update_dir = std::env::temp_dir().join("fpi-agent-updates");
+    let update_dir = update_packages_dir();
     tokio::fs::create_dir_all(&update_dir)
         .await
         .map_err(|e| format!("Failed to create update directory: {e}"))?;
-    let file_path = update_dir.join(safe_download_name(&default_name));
+    let file_path = update_dir.join(safe_download_name(default_name));
     let mut file = tokio::fs::File::create(&file_path)
         .await
         .map_err(|e| format!("Failed to create update package: {e}"))?;
     let total = response.content_length();
     let mut downloaded = 0_u64;
     let mut hasher = Sha256::new();
-    emit_update_download_progress(&app, downloaded, total)?;
+    emit_update_download_progress(app, downloaded, total)?;
 
     while let Some(chunk) = response
         .chunk()
@@ -258,7 +260,7 @@ pub async fn download_update_and_open(
             .map_err(|e| format!("Failed to write update package: {e}"))?;
         hasher.update(&chunk);
         downloaded = downloaded.saturating_add(chunk.len() as u64);
-        emit_update_download_progress(&app, downloaded, total)?;
+        emit_update_download_progress(app, downloaded, total)?;
     }
     file.flush()
         .await
@@ -266,7 +268,6 @@ pub async fn download_update_and_open(
 
     let actual_sha256 = format!("{:x}", hasher.finalize());
     if let Some(expected) = expected_sha256
-        .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
@@ -278,6 +279,57 @@ pub async fn download_update_and_open(
         }
     }
 
+    Ok(file_path)
+}
+
+/// Download an update package with progress events, without installing it.
+/// Returns the local path of the downloaded package so the frontend can
+/// install it now or defer installation to the next restart.
+#[tauri::command]
+pub async fn download_update_package(
+    app: AppHandle,
+    url: String,
+    default_name: String,
+    expected_sha256: Option<String>,
+) -> Result<String, String> {
+    let file_path =
+        download_update_package_to_disk(&app, &url, &default_name, expected_sha256.as_deref())
+            .await?;
+    Ok(file_path.to_string_lossy().to_string())
+}
+
+/// Open/run a previously downloaded update package. Only accepts paths inside
+/// the app's own update download directory.
+#[tauri::command]
+pub async fn install_downloaded_update(app: AppHandle, path: String) -> Result<(), String> {
+    let file_path = std::path::PathBuf::from(&path);
+    let update_dir = update_packages_dir();
+    let canonical = file_path
+        .canonicalize()
+        .map_err(|e| format!("Update package not found: {e}"))?;
+    let canonical_dir = update_dir
+        .canonicalize()
+        .map_err(|e| format!("Update directory not found: {e}"))?;
+    if !canonical.starts_with(&canonical_dir) {
+        return Err("Update package path is outside the update directory".into());
+    }
+    if !canonical.is_file() {
+        return Err("Update package file not found".into());
+    }
+    open_update_package(&app, &canonical)
+}
+
+/// Download an update package inside the app flow and open it with the OS installer.
+#[tauri::command]
+pub async fn download_update_and_open(
+    app: AppHandle,
+    url: String,
+    default_name: String,
+    expected_sha256: Option<String>,
+) -> Result<String, String> {
+    let file_path =
+        download_update_package_to_disk(&app, &url, &default_name, expected_sha256.as_deref())
+            .await?;
     let path_string = file_path.to_string_lossy().to_string();
     open_update_package(&app, &file_path)?;
     Ok(path_string)

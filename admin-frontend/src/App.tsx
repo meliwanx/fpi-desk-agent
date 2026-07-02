@@ -1532,6 +1532,12 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
 
   if (!policy) return <section className="card muted">加载中...</section>;
 
+  const latestVersion = policy.latest_version.trim();
+  const mismatchedSlots = UPDATE_ASSET_SLOTS.filter((slot) => {
+    const asset = policy[slot.assetKey];
+    return asset !== null && latestVersion !== "" && asset.version.trim() !== latestVersion;
+  });
+
   return (
     <div className="stack">
       <section className="card">
@@ -1557,6 +1563,13 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
         <div className="hint">
           直接上传各平台安装包，服务器会作为文件存储提供下载。最低可用版本以下的客户端会被强制更新；非强制更新时，旧版本仍可继续使用。
         </div>
+        {mismatchedSlots.length > 0 && (
+          <p className="error">
+            警告：{mismatchedSlots.map((slot) => `${slot.label}（v${policy[slot.assetKey]?.version}）`).join("、")}
+            安装包版本与最新版号 v{latestVersion} 不一致。员工端会以对应平台安装包的版本为准判断是否有更新，
+            版本号旧于 v{latestVersion} 的安装包不会推送给用户。请先填写新版号，再重新上传对应平台的新版安装包。
+          </p>
+        )}
         <div className="form-grid update-form">
           <label className="model-field">
             <span>最新版号</span>
@@ -1586,7 +1599,10 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
                   <div className="update-asset-panel" key={slot.platform}>
                     <div className="update-asset-head">
                       <strong>{slot.label}</strong>
-                      <span>{asset ? `v${asset.version}` : "未上传"}</span>
+                      <span>
+                        {asset ? `v${asset.version}` : "未上传"}
+                        {asset && latestVersion !== "" && asset.version.trim() !== latestVersion && " ⚠️ 与最新版号不一致"}
+                      </span>
                     </div>
                     {asset ? (
                       <div className="update-asset-meta">
