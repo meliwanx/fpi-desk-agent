@@ -71,6 +71,7 @@ export interface ChatSessionState {
   isModelLoading: boolean;
 
   pendingUserText: string | null;
+  pendingUserSentAt: string | null;
   pendingAttachments: FileAttachment[] | null;
 
   streamingParts: PartData[];
@@ -90,6 +91,7 @@ export const EMPTY_SESSION_STATE: ChatSessionState = {
   isCompacting: false,
   isModelLoading: false,
   pendingUserText: null,
+  pendingUserSentAt: null,
   pendingAttachments: null,
   streamingParts: [],
   streamingText: "",
@@ -232,6 +234,7 @@ export const useChatStore = create<ChatStore>((set) => ({
         isCompacting: false,
         isModelLoading: false,
         pendingUserText: text,
+        pendingUserSentAt: new Date().toISOString(),
         pendingAttachments: attachments?.length ? attachments : null,
         streamingParts: [],
         streamingText: "",
@@ -290,6 +293,7 @@ export const useChatStore = create<ChatStore>((set) => ({
           isCompacting: true,
           isModelLoading: false,
           pendingUserText: null,
+          pendingUserSentAt: null,
           pendingAttachments: null,
           streamingParts: parts,
           streamingText: text,
@@ -623,6 +627,7 @@ export const useChatStore = create<ChatStore>((set) => ({
           isCompacting: false,
           isModelLoading: false,
           pendingUserText: null,
+          pendingUserSentAt: null,
           pendingAttachments: null,
           pendingPermission: null,
           pendingQuestion: null,
@@ -667,4 +672,3 @@ export function useAnySessionGenerating(): boolean {
     return false;
   });
 }
-

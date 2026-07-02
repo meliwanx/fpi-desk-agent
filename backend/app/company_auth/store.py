@@ -134,15 +134,41 @@ class CompanyUpdatePolicy:
 
 
 @dataclass(frozen=True)
+class CompanyConnectorPolicyEntry:
+    connector_id: str
+    allowed_user_ids: list[str]
+
+
+@dataclass(frozen=True)
+class CompanyConnectorPolicy:
+    connectors: list[CompanyConnectorPolicyEntry]
+
+
+@dataclass(frozen=True)
+class CompanyAnnouncement:
+    id: str
+    enabled: bool
+    content: str
+    target_user_ids: list[str]
+    published_by_user_id: str
+    published_by_email: str
+    published_by_display_name: str
+    time_created: datetime
+    time_updated: datetime
+
+
+@dataclass(frozen=True)
 class CompanyUpdateAsset:
     id: str
     platform: str
+    name: str
     version: str
     original_filename: str
     stored_filename: str
     mime_type: str
     size_bytes: int
     sha256: str
+    md5: str
     signature: str
     uploaded_by_user_id: str
     uploaded_by_email: str
@@ -220,6 +246,25 @@ def _default_update_policy() -> CompanyUpdatePolicy:
     return CompanyUpdatePolicy()
 
 
+def _default_connector_policy() -> CompanyConnectorPolicy:
+    return CompanyConnectorPolicy(connectors=[])
+
+
+def _default_announcement() -> CompanyAnnouncement:
+    now = shanghai_now()
+    return CompanyAnnouncement(
+        id="",
+        enabled=False,
+        content="",
+        target_user_ids=[],
+        published_by_user_id="",
+        published_by_email="",
+        published_by_display_name="",
+        time_created=now,
+        time_updated=now,
+    )
+
+
 class CompanyAuthStore:
     """Company-auth table manager backed by a separate SQLAlchemy engine."""
 
@@ -244,6 +289,7 @@ class CompanyAuthStore:
             Column("password_hash", String(512), nullable=False),
             Column("role", String(50), nullable=False, default="user"),
             Column("is_active", Boolean, nullable=False, default=True),
+            Column("deleted_at", DateTime(timezone=True), nullable=True),
             Column("time_created", DateTime(timezone=True), nullable=False),
             Column("time_updated", DateTime(timezone=True), nullable=False),
         )
@@ -279,12 +325,14 @@ class CompanyAuthStore:
             self.metadata,
             Column("id", String(32), primary_key=True),
             Column("platform", String(20), nullable=False, index=True),
+            Column("name", String(255), nullable=False, default=""),
             Column("version", String(64), nullable=False, index=True),
             Column("original_filename", String(512), nullable=False, default=""),
             Column("stored_filename", String(512), nullable=False),
             Column("mime_type", String(255), nullable=False, default=""),
             Column("size_bytes", Integer, nullable=False, default=0),
             Column("sha256", String(64), nullable=False),
+            Column("md5", String(32), nullable=False, default=""),
             Column("signature", Text, nullable=True),
             Column("uploaded_by_user_id", String(32), nullable=False, default=""),
             Column("uploaded_by_email", String(255), nullable=False, default=""),
@@ -308,6 +356,13 @@ class CompanyAuthStore:
             Column("image_sha256", String(64), nullable=False, default=""),
             Column("time_created", DateTime(timezone=True), nullable=False, index=True),
             Column("time_updated", DateTime(timezone=True), nullable=False),
+        )
+        self.announcement_reads = Table(
+            f"{table_prefix}_announcement_reads",
+            self.metadata,
+            Column("announcement_id", String(32), primary_key=True),
+            Column("user_id", String(32), primary_key=True),
+            Column("time_read", DateTime(timezone=True), nullable=False, index=True),
         )
         connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
         if database_url.startswith("sqlite"):
@@ -388,6 +443,7 @@ class CompanyAuthStore:
                     self.users.c.is_active,
                 )
                 .where(self.users.c.email == normalized)
+                .where(self.users.c.deleted_at.is_(None))
                 .limit(1)
             )
             row = result.mappings().first()
@@ -407,7 +463,9 @@ class CompanyAuthStore:
                     self.users.c.display_name,
                     self.users.c.role,
                     self.users.c.is_active,
-                ).order_by(self.users.c.time_created.asc())
+                )
+                .where(self.users.c.deleted_at.is_(None))
+                .order_by(self.users.c.time_created.asc())
             )
             rows = result.mappings().all()
         return [self._user_from_mapping(row) for row in rows]
@@ -482,6 +540,7 @@ class CompanyAuthStore:
             result = await conn.execute(
                 update(self.users)
                 .where(self.users.c.id == user_id)
+                .where(self.users.c.deleted_at.is_(None))
                 .values(**values)
             )
             if (result.rowcount or 0) == 0:
@@ -497,6 +556,39 @@ class CompanyAuthStore:
                     ).where(self.users.c.id == user_id)
                 )
             ).mappings().one()
+        return self._user_from_mapping(row)
+
+    async def delete_user(self, user_id: str) -> CompanyUser | None:
+        now = shanghai_now()
+        async with self.engine.begin() as conn:
+            row = (
+                await conn.execute(
+                    select(
+                        self.users.c.id,
+                        self.users.c.email,
+                        self.users.c.display_name,
+                        self.users.c.role,
+                        self.users.c.is_active,
+                    )
+                    .where(self.users.c.id == user_id)
+                    .where(self.users.c.deleted_at.is_(None))
+                )
+            ).mappings().first()
+            if row is None:
+                return None
+
+            deleted_email = f"deleted:{user_id}:{row['email']}"[:255]
+            await conn.execute(
+                update(self.users)
+                .where(self.users.c.id == user_id)
+                .where(self.users.c.deleted_at.is_(None))
+                .values(
+                    email=deleted_email,
+                    is_active=False,
+                    deleted_at=now,
+                    time_updated=now,
+                )
+            )
         return self._user_from_mapping(row)
 
     def _add_missing_columns(self, sync_conn) -> None:
@@ -521,11 +613,19 @@ class CompanyAuthStore:
         update_asset_existing = {column["name"] for column in inspector.get_columns(self.update_assets.name)}
         update_asset_table = sync_conn.dialect.identifier_preparer.quote(self.update_assets.name)
         update_asset_columns = {
+            "name": "VARCHAR(255) NOT NULL DEFAULT ''",
+            "md5": "VARCHAR(32) NOT NULL DEFAULT ''",
             "signature": "TEXT NULL",
         }
         for name, ddl_type in update_asset_columns.items():
             if name not in update_asset_existing:
                 sync_conn.exec_driver_sql(f"ALTER TABLE {update_asset_table} ADD COLUMN {name} {ddl_type}")
+
+        user_existing = {column["name"] for column in inspector.get_columns(self.users.name)}
+        user_table = sync_conn.dialect.identifier_preparer.quote(self.users.name)
+        if "deleted_at" not in user_existing:
+            timestamp_type = "DATETIME NULL" if sync_conn.dialect.name in {"sqlite", "mysql"} else "TIMESTAMP NULL"
+            sync_conn.exec_driver_sql(f"ALTER TABLE {user_table} ADD COLUMN deleted_at {timestamp_type}")
 
     def _migrate_sqlite_timestamps_to_shanghai(self, sync_conn) -> None:
         if sync_conn.dialect.name != "sqlite":
@@ -540,11 +640,12 @@ class CompanyAuthStore:
             return
 
         timestamp_columns = {
-            self.users: ("time_created", "time_updated"),
+            self.users: ("time_created", "time_updated", "deleted_at"),
             self.sessions: ("expires_at", "revoked_at", "time_created", "last_seen_at"),
             self.settings: ("time_updated",),
             self.update_assets: ("time_created", "time_updated"),
             self.feedback: ("time_created", "time_updated"),
+            self.announcement_reads: ("time_read",),
         }
         for table, column_names in timestamp_columns.items():
             primary_key = next(iter(table.primary_key.columns))
@@ -647,6 +748,7 @@ class CompanyAuthStore:
                         self.sessions.c.revoked_at.is_(None),
                         self.sessions.c.expires_at > now,
                         self.users.c.is_active.is_(True),
+                        self.users.c.deleted_at.is_(None),
                     )
                 )
                 .limit(1)
@@ -945,16 +1047,199 @@ class CompanyAuthStore:
                 )
         return policy
 
+    async def get_connector_policy(self) -> CompanyConnectorPolicy:
+        async with self.engine.connect() as conn:
+            result = await conn.execute(
+                select(self.settings.c.value).where(self.settings.c.key == "connector_policy").limit(1)
+            )
+            raw = result.scalar_one_or_none()
+        if not raw:
+            return _default_connector_policy()
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            return _default_connector_policy()
+        return self._connector_policy_from_payload(payload)
+
+    async def update_connector_policy(
+        self,
+        *,
+        connectors: list[dict],
+    ) -> CompanyConnectorPolicy:
+        policy = self._connector_policy_from_payload(
+            {"connectors": connectors},
+            strict=True,
+        )
+        payload = json.dumps(self._connector_policy_to_payload(policy), ensure_ascii=False)
+        now = shanghai_now()
+        async with self.engine.begin() as conn:
+            existing = await conn.execute(
+                select(self.settings.c.key).where(self.settings.c.key == "connector_policy").limit(1)
+            )
+            if existing.scalar_one_or_none() is None:
+                await conn.execute(
+                    insert(self.settings).values(
+                        key="connector_policy",
+                        value=payload,
+                        time_updated=now,
+                    )
+                )
+            else:
+                await conn.execute(
+                    update(self.settings)
+                    .where(self.settings.c.key == "connector_policy")
+                    .values(value=payload, time_updated=now)
+                )
+        return policy
+
+    async def is_connector_allowed(self, connector_id: str, user_id: str) -> bool:
+        clean_connector_id = str(connector_id or "").strip()
+        clean_user_id = str(user_id or "").strip()
+        if not clean_connector_id or not clean_user_id:
+            return False
+        policy = await self.get_connector_policy()
+        for entry in policy.connectors:
+            if entry.connector_id == clean_connector_id:
+                return clean_user_id in entry.allowed_user_ids
+        return False
+
+    async def get_announcement(self) -> CompanyAnnouncement:
+        async with self.engine.connect() as conn:
+            result = await conn.execute(
+                select(self.settings.c.value).where(self.settings.c.key == "announcement_policy").limit(1)
+            )
+            raw = result.scalar_one_or_none()
+        if not raw:
+            return _default_announcement()
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            return _default_announcement()
+        return self._announcement_from_payload(payload)
+
+    async def publish_announcement(
+        self,
+        *,
+        enabled: bool,
+        content: str,
+        target_user_ids: list[str],
+        published_by_user_id: str,
+        published_by_email: str,
+        published_by_display_name: str,
+    ) -> CompanyAnnouncement:
+        clean_content = str(content or "").strip()
+        clean_target_user_ids: list[str] = []
+        seen_user_ids: set[str] = set()
+        for raw_user_id in target_user_ids or []:
+            user_id = str(raw_user_id or "").strip()
+            if not user_id or user_id in seen_user_ids:
+                continue
+            seen_user_ids.add(user_id)
+            clean_target_user_ids.append(user_id)
+
+        if enabled and not clean_content:
+            raise ValueError("Announcement content is required when enabled")
+
+        existing = await self.get_announcement()
+        now = shanghai_now()
+        announcement = CompanyAnnouncement(
+            id=generate_ulid() if enabled else existing.id,
+            enabled=bool(enabled),
+            content=clean_content,
+            target_user_ids=clean_target_user_ids,
+            published_by_user_id=str(published_by_user_id or "").strip(),
+            published_by_email=str(published_by_email or "").strip(),
+            published_by_display_name=str(published_by_display_name or "").strip(),
+            time_created=now if enabled or not existing.id else existing.time_created,
+            time_updated=now,
+        )
+        payload = json.dumps(self._announcement_to_payload(announcement), ensure_ascii=False)
+        async with self.engine.begin() as conn:
+            existing_row = await conn.execute(
+                select(self.settings.c.key).where(self.settings.c.key == "announcement_policy").limit(1)
+            )
+            if existing_row.scalar_one_or_none() is None:
+                await conn.execute(
+                    insert(self.settings).values(
+                        key="announcement_policy",
+                        value=payload,
+                        time_updated=now,
+                    )
+                )
+            else:
+                await conn.execute(
+                    update(self.settings)
+                    .where(self.settings.c.key == "announcement_policy")
+                    .values(value=payload, time_updated=now)
+                )
+        return announcement
+
+    async def get_unread_announcement_for_user(self, user_id: str) -> CompanyAnnouncement | None:
+        clean_user_id = str(user_id or "").strip()
+        if not clean_user_id:
+            return None
+        announcement = await self.get_announcement()
+        if not self._announcement_visible_to_user(announcement, clean_user_id):
+            return None
+        async with self.engine.connect() as conn:
+            existing = await conn.execute(
+                select(self.announcement_reads.c.announcement_id)
+                .where(
+                    self.announcement_reads.c.announcement_id == announcement.id,
+                    self.announcement_reads.c.user_id == clean_user_id,
+                )
+                .limit(1)
+            )
+            if existing.scalar_one_or_none() is not None:
+                return None
+        return announcement
+
+    async def mark_announcement_read(self, announcement_id: str, user_id: str) -> bool:
+        clean_announcement_id = str(announcement_id or "").strip()
+        clean_user_id = str(user_id or "").strip()
+        if not clean_announcement_id or not clean_user_id:
+            return False
+        now = shanghai_now()
+        async with self.engine.begin() as conn:
+            existing = await conn.execute(
+                select(self.announcement_reads.c.announcement_id)
+                .where(
+                    self.announcement_reads.c.announcement_id == clean_announcement_id,
+                    self.announcement_reads.c.user_id == clean_user_id,
+                )
+                .limit(1)
+            )
+            if existing.scalar_one_or_none() is None:
+                await conn.execute(
+                    insert(self.announcement_reads).values(
+                        announcement_id=clean_announcement_id,
+                        user_id=clean_user_id,
+                        time_read=now,
+                    )
+                )
+            else:
+                await conn.execute(
+                    update(self.announcement_reads)
+                    .where(
+                        self.announcement_reads.c.announcement_id == clean_announcement_id,
+                        self.announcement_reads.c.user_id == clean_user_id,
+                    )
+                    .values(time_read=now)
+                )
+        return True
+
     async def create_update_asset(
         self,
         *,
         platform: str,
+        name: str = "",
         version: str,
         original_filename: str,
         stored_filename: str,
         mime_type: str,
         size_bytes: int,
         sha256: str,
+        md5: str = "",
         signature: str = "",
         uploaded_by_user_id: str,
         uploaded_by_email: str,
@@ -967,6 +1252,9 @@ class CompanyAuthStore:
         normalized_sha = str(sha256 or "").strip().lower()
         if len(normalized_sha) != 64:
             raise ValueError("Update asset SHA-256 must be 64 hex characters")
+        normalized_md5 = str(md5 or "").strip().lower()
+        if normalized_md5 and len(normalized_md5) != 32:
+            raise ValueError("Update asset MD5 must be 32 hex characters")
 
         asset_id = generate_ulid()
         now = shanghai_now()
@@ -975,12 +1263,14 @@ class CompanyAuthStore:
                 insert(self.update_assets).values(
                     id=asset_id,
                     platform=normalized_platform,
+                    name=str(name or "").strip()[:255],
                     version=normalized_version,
                     original_filename=str(original_filename or "").strip(),
                     stored_filename=str(stored_filename or "").strip(),
                     mime_type=str(mime_type or "").strip(),
                     size_bytes=max(0, int(size_bytes or 0)),
                     sha256=normalized_sha,
+                    md5=normalized_md5,
                     signature=str(signature or "").strip(),
                     uploaded_by_user_id=str(uploaded_by_user_id or "").strip(),
                     uploaded_by_email=str(uploaded_by_email or "").strip(),
@@ -998,7 +1288,7 @@ class CompanyAuthStore:
     async def list_update_assets(self) -> list[CompanyUpdateAsset]:
         async with self.engine.connect() as conn:
             result = await conn.execute(
-                select(self.update_assets).order_by(self.update_assets.c.time_created.asc())
+                select(self.update_assets).order_by(self.update_assets.c.time_created.desc())
             )
             return [self._update_asset_from_mapping(row) for row in result.mappings().all()]
 
@@ -1143,12 +1433,14 @@ class CompanyAuthStore:
         return CompanyUpdateAsset(
             id=row["id"],
             platform=row["platform"],
+            name=row.get("name") or "",
             version=row["version"],
             original_filename=row["original_filename"],
             stored_filename=row["stored_filename"],
             mime_type=row["mime_type"],
             size_bytes=int(row["size_bytes"] or 0),
             sha256=row["sha256"],
+            md5=row.get("md5") or "",
             signature=row["signature"] or "",
             uploaded_by_user_id=row["uploaded_by_user_id"],
             uploaded_by_email=row["uploaded_by_email"],
@@ -1327,8 +1619,16 @@ class CompanyAuthStore:
         latest_version = str(payload.get("latest_version") or "").strip().lstrip("vV")
         min_supported_version = str(payload.get("min_supported_version") or "").strip().lstrip("vV")
         enabled = bool(payload.get("enabled", False))
-        if strict and enabled and not latest_version:
-            raise ValueError("Latest version is required when update policy is enabled")
+        has_selected_asset = any(
+            str(payload.get(key) or "").strip()
+            for key in ("macos_asset_id", "windows_asset_id", "linux_asset_id", "default_asset_id")
+        )
+        has_legacy_download = any(
+            str(payload.get(key) or "").strip()
+            for key in ("macos_download_url", "windows_download_url", "linux_download_url", "default_download_url")
+        )
+        if strict and enabled and not latest_version and not has_selected_asset and not has_legacy_download:
+            raise ValueError("Latest version or update asset is required when update policy is enabled")
 
         return CompanyUpdatePolicy(
             enabled=enabled,
@@ -1363,3 +1663,133 @@ class CompanyAuthStore:
             "linux_download_url": policy.linux_download_url,
             "default_download_url": policy.default_download_url,
         }
+
+    @staticmethod
+    def _connector_policy_from_payload(payload: dict, *, strict: bool = False) -> CompanyConnectorPolicy:
+        if not isinstance(payload, dict):
+            if strict:
+                raise ValueError("Connector policy must be an object")
+            return _default_connector_policy()
+
+        raw_connectors = payload.get("connectors")
+        if raw_connectors is None:
+            raw_connectors = []
+        if not isinstance(raw_connectors, list):
+            if strict:
+                raise ValueError("Connector policy connectors must be a list")
+            return _default_connector_policy()
+
+        entries: list[CompanyConnectorPolicyEntry] = []
+        seen_connectors: set[str] = set()
+        for raw in raw_connectors:
+            if not isinstance(raw, dict):
+                if strict:
+                    raise ValueError("Connector policy entry must be an object")
+                continue
+            connector_id = str(raw.get("connector_id") or raw.get("id") or "").strip()
+            if not connector_id:
+                if strict:
+                    raise ValueError("Connector ID is required")
+                continue
+            if connector_id in seen_connectors:
+                continue
+            seen_connectors.add(connector_id)
+
+            raw_user_ids = raw.get("allowed_user_ids", [])
+            if raw_user_ids is None:
+                raw_user_ids = []
+            if not isinstance(raw_user_ids, list):
+                if strict:
+                    raise ValueError("Connector allowed_user_ids must be a list")
+                raw_user_ids = []
+            allowed_user_ids: list[str] = []
+            seen_users: set[str] = set()
+            for value in raw_user_ids:
+                user_id = str(value or "").strip()
+                if not user_id or user_id in seen_users:
+                    continue
+                seen_users.add(user_id)
+                allowed_user_ids.append(user_id)
+            entries.append(
+                CompanyConnectorPolicyEntry(
+                    connector_id=connector_id,
+                    allowed_user_ids=allowed_user_ids,
+                )
+            )
+
+        return CompanyConnectorPolicy(connectors=entries)
+
+    @staticmethod
+    def _connector_policy_to_payload(policy: CompanyConnectorPolicy) -> dict:
+        return {
+            "connectors": [
+                {
+                    "connector_id": entry.connector_id,
+                    "allowed_user_ids": list(entry.allowed_user_ids),
+                }
+                for entry in policy.connectors
+            ],
+        }
+
+    @staticmethod
+    def _announcement_time_from_payload(value: object, fallback: datetime) -> datetime:
+        if isinstance(value, datetime):
+            return as_shanghai(value)
+        if isinstance(value, str) and value.strip():
+            try:
+                return as_shanghai(datetime.fromisoformat(value.strip()))
+            except ValueError:
+                return fallback
+        return fallback
+
+    @classmethod
+    def _announcement_from_payload(cls, payload: dict) -> CompanyAnnouncement:
+        if not isinstance(payload, dict):
+            return _default_announcement()
+
+        now = shanghai_now()
+        raw_target_user_ids = payload.get("target_user_ids", [])
+        if not isinstance(raw_target_user_ids, list):
+            raw_target_user_ids = []
+        target_user_ids: list[str] = []
+        seen_user_ids: set[str] = set()
+        for raw_user_id in raw_target_user_ids:
+            user_id = str(raw_user_id or "").strip()
+            if not user_id or user_id in seen_user_ids:
+                continue
+            seen_user_ids.add(user_id)
+            target_user_ids.append(user_id)
+
+        return CompanyAnnouncement(
+            id=str(payload.get("id") or "").strip(),
+            enabled=bool(payload.get("enabled", False)),
+            content=str(payload.get("content") or "").strip(),
+            target_user_ids=target_user_ids,
+            published_by_user_id=str(payload.get("published_by_user_id") or "").strip(),
+            published_by_email=str(payload.get("published_by_email") or "").strip(),
+            published_by_display_name=str(payload.get("published_by_display_name") or "").strip(),
+            time_created=cls._announcement_time_from_payload(payload.get("time_created"), now),
+            time_updated=cls._announcement_time_from_payload(payload.get("time_updated"), now),
+        )
+
+    @staticmethod
+    def _announcement_to_payload(announcement: CompanyAnnouncement) -> dict:
+        return {
+            "id": announcement.id,
+            "enabled": announcement.enabled,
+            "content": announcement.content,
+            "target_user_ids": list(announcement.target_user_ids),
+            "published_by_user_id": announcement.published_by_user_id,
+            "published_by_email": announcement.published_by_email,
+            "published_by_display_name": announcement.published_by_display_name,
+            "time_created": as_shanghai(announcement.time_created).isoformat(),
+            "time_updated": as_shanghai(announcement.time_updated).isoformat(),
+        }
+
+    @staticmethod
+    def _announcement_visible_to_user(announcement: CompanyAnnouncement, user_id: str) -> bool:
+        if not announcement.enabled or not announcement.id or not announcement.content:
+            return False
+        if not announcement.target_user_ids:
+            return True
+        return user_id in announcement.target_user_ids

@@ -183,7 +183,7 @@ await smokeTest(binary, port);
 
 async function smokeTest(bin, port) {
   // Isolated data dir so the smoke test never writes into the repo.
-  const dataDir = mkdtempSync(join(tmpdir(), "openyak-smoke-"));
+  const dataDir = mkdtempSync(join(tmpdir(), "fpiagent-smoke-"));
   console.log(`[verify-bundle] smoke: launching ${bin} --port ${port} --data-dir ${dataDir}`);
   const child = spawn(bin, ["--port", String(port), "--data-dir", dataDir], {
     stdio: ["ignore", "pipe", "pipe"],

@@ -16,14 +16,12 @@ import { usePlanReviewStore } from "@/stores/plan-review-store";
 import { SplashScreen } from "@/components/layout/splash-screen";
 import { TitleBar } from "@/components/desktop/title-bar";
 import { WindowTopIcons } from "@/components/layout/window-top-icons";
+import { AnnouncementBanner } from "@/components/desktop/announcement-banner";
 import { UpdateBanner } from "@/components/desktop/update-banner";
-import { UpdateDialog } from "@/components/desktop/update-dialog";
-import { OnboardingScreen } from "@/components/onboarding/onboarding-screen";
 import { Button } from "@/components/ui/button";
 import { FpiAgentLogo } from "@/components/ui/openyak-logo";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSidebarStore } from "@/stores/sidebar-store";
-import { useSettingsStore, useSettingsHasHydrated } from "@/stores/settings-store";
 import { useAutoDetectProvider } from "@/hooks/use-auto-detect-provider";
 import { useIsMacOS } from "@/hooks/use-platform";
 import { useTraySync } from "@/hooks/use-tray-sync";
@@ -70,20 +68,11 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   useAutoDetectProvider();
   useTraySync();
 
-  const settingsHydrated = useSettingsHasHydrated();
-
-  // Onboarding gate — show onboarding on first run.
-  const hasCompletedOnboarding = useSettingsStore((s) => s.hasCompletedOnboarding);
-  const [needsOnboarding, setNeedsOnboarding] = useState(false);
-
   // Client-side only check for desktop mode (prevents hydration mismatch)
   const [showSplash, setShowSplash] = useState(false);
   useEffect(() => {
     setShowSplash(IS_DESKTOP);
-    if (settingsHydrated) {
-      setNeedsOnboarding(!hasCompletedOnboarding);
-    }
-  }, [hasCompletedOnboarding, settingsHydrated]);
+  }, []);
 
   useEffect(() => {
     if (!IS_DESKTOP) return;
@@ -197,9 +186,6 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       {/* Splash screen for desktop app initialization */}
       {showSplash && <SplashScreen />}
 
-      {/* Onboarding flow for first-run users */}
-      {needsOnboarding && <OnboardingScreen />}
-
       {/* Desktop title bar (Electron only) */}
       <TitleBar />
 
@@ -280,7 +266,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         transition={{ type: "spring", damping: 30, stiffness: 300 }}
       >
         <UpdateBanner />
-        <UpdateDialog />
+        <AnnouncementBanner />
         {children}
       </motion.main>
 

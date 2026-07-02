@@ -41,6 +41,7 @@ from app.dependencies import (
 )
 from app.errors import DomainError, InternalError, NotFound
 from app.models.session_file import SessionFile
+from app.runtime_paths import workspace_output_dir
 from app.schemas.session import (
     SessionCompactionRequest,
     SessionCreate,
@@ -243,7 +244,7 @@ async def _list_session_files(
             "tool": entry.tool_id,
         })
 
-    output_dir = Path(session.directory).resolve() / "openyak_written"
+    output_dir = workspace_output_dir(session.directory)
     if output_dir.is_dir():
         for entry in sorted(output_dir.iterdir(), key=lambda e: e.stat().st_mtime):
             resolved = str(entry.resolve())

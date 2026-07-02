@@ -27,6 +27,8 @@ import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
+from app.runtime_paths import APP_CONFIG_DIR_NAME
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/google")
@@ -51,8 +53,8 @@ _pending_states: dict[str, dict[str, str]] = {}
 def _get_token_path(project_dir: str | None) -> Path:
     """Where to store Google OAuth tokens."""
     if project_dir:
-        return Path(project_dir).resolve() / ".openyak" / "google-tokens.json"
-    return Path.home() / ".openyak" / "google-tokens.json"
+        return Path(project_dir).resolve() / APP_CONFIG_DIR_NAME / "google-tokens.json"
+    return Path.home() / APP_CONFIG_DIR_NAME / "google-tokens.json"
 
 
 def load_google_tokens(project_dir: str | None) -> dict[str, Any] | None:

@@ -45,8 +45,9 @@ class TestSystemPrompt:
         build = ar.get("build")
         parts = assemble(build, **_resolve_io(), **_PINNED)
         prompt = parts.as_plain_text()
-        assert "software engineering" in prompt.lower() or "tool" in prompt.lower()
         assert "聚光办公助理" in prompt
+        assert "所有思考、推理、计划、摘要和最终回复都必须使用中文" in prompt
+        assert "默认不要输出英文" in prompt
         assert "Yakyak" not in prompt
         assert "fpi-agent agent assistant" not in prompt
 
@@ -55,35 +56,36 @@ class TestSystemPrompt:
         build = ar.get("build")
         parts = assemble(build, **_resolve_io(), **_PINNED)
         prompt = parts.as_plain_text()
-        assert "Working directory" in prompt
-        assert "Platform" in prompt
-        assert "date" in prompt
+        assert "工作目录" in prompt
+        assert "运行平台" in prompt
+        assert "当前日期" in prompt
 
     def test_no_workspace_disables_full_text_search_guidance(self):
         ar = AgentRegistry()
         build = ar.get("build")
         parts = assemble(build, workspace=None, fts_status=None, **_resolve_io(), **_PINNED)
         prompt = parts.as_plain_text()
-        assert "Full-text `search` is unavailable until the user selects a workspace folder." in prompt
+        assert "用户选择工作区文件夹之前，全文 `search` 不可用。" in prompt
 
     def test_plan_agent_prompt(self):
         ar = AgentRegistry()
         plan = ar.get("plan")
         parts = assemble(plan, **_resolve_io(), **_PINNED)
         prompt = parts.as_plain_text()
-        assert "PLAN MODE" in prompt or "read-only" in prompt.lower()
+        assert "计划模式" in prompt
+        assert "只读" in prompt
 
     def test_with_project_instructions(self, tmp_path: Path):
         instructions = tmp_path / "AGENTS.md"
-        instructions.write_text("# Custom Instructions\nDo X and Y.")
+        instructions.write_text("# 自定义指令\n执行甲和乙。")
 
         ar = AgentRegistry()
         build = ar.get("build")
         pinned = {**_PINNED, "cwd": str(tmp_path)}
         parts = assemble(build, **_resolve_io(str(tmp_path)), **pinned)
         prompt = parts.as_plain_text()
-        assert "Custom Instructions" in prompt
-        assert "Do X and Y" in prompt
+        assert "自定义指令" in prompt
+        assert "执行甲和乙" in prompt
 
     def test_without_project_instructions(self, tmp_path: Path):
         ar = AgentRegistry()
@@ -91,7 +93,7 @@ class TestSystemPrompt:
         pinned = {**_PINNED, "cwd": str(tmp_path)}
         parts = assemble(build, **_resolve_io(str(tmp_path)), **pinned)
         prompt = parts.as_plain_text()
-        assert "Project Instructions" not in prompt
+        assert "项目指令" not in prompt
 
     def test_cached_parts_separate_static_from_dynamic(self):
         ar = AgentRegistry()
@@ -100,7 +102,7 @@ class TestSystemPrompt:
         # Agent base prompt is in cached section
         assert "聚光办公助理" in parts.cached
         # Environment info is in dynamic section
-        assert "Working directory" in parts.dynamic
+        assert "工作目录" in parts.dynamic
 
     def test_as_cached_blocks_format(self):
         ar = AgentRegistry()
@@ -116,7 +118,7 @@ class TestSystemPrompt:
         assert "cache_control" not in blocks[1]
 
     def test_includes_skill_routing_when_skills_available(self, tmp_path: Path):
-        skills_dir = tmp_path / ".openyak" / "skills" / "sheet-helper"
+        skills_dir = tmp_path / ".fpiagent" / "skills" / "sheet-helper"
         skills_dir.mkdir(parents=True)
         (skills_dir / "SKILL.md").write_text(
             "---\nname: sheet-helper\ndescription: Helps with spreadsheet workflows.\n---\nUse for sheets.",
@@ -131,7 +133,7 @@ class TestSystemPrompt:
         build = ar.get("build")
         parts = assemble(build, **_resolve_io(), **_PINNED)
 
-        assert "Skill Routing" in parts.dynamic
+        assert "技能路由" in parts.dynamic
         assert "sheet-helper" in parts.dynamic
 
     def test_skill_routing_skips_non_implicit_skills(self):
@@ -170,4 +172,5 @@ class TestSystemPrompt:
 
         assert section is not None
         assert len(section) <= 8_000
-        assert "more available via the `skill` tool" in section
+        assert "skill-199" in section
+        assert "more available via the `skill` tool" not in section

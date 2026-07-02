@@ -40,34 +40,28 @@ class SkillTool(ToolDefinition):
     def description(self) -> str:
         """Dynamically generated — includes budgeted list of available skills."""
         base = (
-            "Load a specialised skill that provides domain-specific "
-            "instructions and workflows.\n\n"
-            "When you recognise that a task matches one of the available "
-            "skills listed below, use this tool to load the full skill "
-            "instructions. The skill content and bundled resource file "
-            "paths will be returned.\n\n"
-            "IMPORTANT: Do NOT load a skill just to read a file. The `read` "
-            "tool already handles ALL file types natively (PDF, DOCX, XLSX, "
-            "PPTX, images, etc.). Simply call `read` directly — no skill "
-            "needed.\n\n"
-            "Available skills:"
+            "加载提供领域专用指令和工作流的技能。\n\n"
+            "当任务匹配下面某个可用技能时，使用本工具加载完整技能说明。"
+            "工具会返回技能内容和随附资源文件路径。\n\n"
+            "重要：不要只为了读取文件而加载技能。`read` 工具已经能直接处理 PDF、DOCX、XLSX、PPTX、图片等常见文件类型，"
+            "读取文件时直接调用 `read` 即可。\n\n"
+            "可用技能："
         )
 
         active = self._skill_registry.active_skills() if self._skill_registry else []
         if not active:
-            return base + "\n\nNo skills are currently available."
+            return base + "\n\n当前没有可用技能。"
 
         lines = [base, ""]
         shown = 0
         total = len(active)
         for skill in active:
-            desc = _truncate(skill.description or "", self._MAX_DESC_CHARS)
             implicit = getattr(skill, "allow_implicit_invocation", True)
-            suffix = "" if implicit else " [explicit only]"
-            line = f"- {skill.name}{suffix}: {desc}"
+            suffix = "" if implicit else "（仅显式调用）"
+            line = f"- {skill.name}{suffix}"
             remaining_after = total - shown - 1
             reserve = (
-                len(f"\n  (and {remaining_after} more — invoke by name to check availability)")
+                len(f"\n  （还有 {remaining_after} 个，可按名称调用检查可用性）")
                 if remaining_after > 0
                 else 0
             )
@@ -78,7 +72,7 @@ class SkillTool(ToolDefinition):
 
         remaining = total - shown
         if remaining > 0:
-            lines.append(f"  (and {remaining} more — invoke by name to check availability)")
+            lines.append(f"  （还有 {remaining} 个，可按名称调用检查可用性）")
         return "\n".join(lines)
 
     def parameters_schema(self) -> dict[str, Any]:
@@ -87,7 +81,7 @@ class SkillTool(ToolDefinition):
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "The name of the skill to load (from available_skills).",
+                    "description": "要加载的技能名称（来自可用技能列表）。",
                 },
             },
             "required": ["name"],
@@ -97,13 +91,13 @@ class SkillTool(ToolDefinition):
         name: str = args["name"]
 
         if not self._skill_registry:
-            return ToolResult(error="Skill system is not initialised.")
+            return ToolResult(error="技能系统尚未初始化。")
 
         skill = self._skill_registry.get(name)
         if skill is None or self._skill_registry.is_disabled(name):
-            available = ", ".join(self._skill_registry.active_skill_names()) or "none"
+            available = ", ".join(self._skill_registry.active_skill_names()) or "无"
             return ToolResult(
-                error=f'Skill "{name}" not found or disabled. Available skills: {available}',
+                error=f'技能 "{name}" 不存在或已禁用。可用技能：{available}',
             )
 
         # Collect bundled files in the same directory (up to 10)
@@ -118,26 +112,26 @@ class SkillTool(ToolDefinition):
             )
 
         base_dir_hint = (
-            f"\n\nBase directory for this skill: {skill_dir}\n"
-            "Relative paths in this skill (e.g., scripts/, reference/) "
-            "are relative to this base directory."
+            f"\n\n该技能的基础目录：{skill_dir}\n"
+            "技能中的相对路径（例如 scripts/、reference/）都相对于这个基础目录。"
+            "如果技能内容包含英文，只作为内部参考；所有可见思考、计划和回复仍必须使用中文。"
         )
         metadata_block = _metadata_block(skill)
 
         output = (
             f'<skill_content name="{skill.name}">\n'
             f"{metadata_block}\n\n"
-            f"# Skill: {skill.name}\n\n"
+            f"# 技能：{skill.name}\n\n"
             f"{skill.content.strip()}\n"
             f"{base_dir_hint}\n"
             f"{files_block}\n"
             f"</skill_content>"
         )
 
-        ctx.publish_metadata(title=f"Loaded skill: {skill.name}")
+        ctx.publish_metadata(title=f"已加载技能：{skill.name}")
         return ToolResult(
             output=output,
-            title=f"Loaded skill: {skill.name}",
+            title=f"已加载技能：{skill.name}",
             metadata={
                 "name": skill.name,
                 "dir": str(skill_dir),
@@ -178,7 +172,6 @@ def _metadata_block(skill: Any) -> str:
     fields = [
         ("name", skill.name),
         ("display_name", getattr(skill, "display_name", None)),
-        ("description", skill.description),
         ("scope", getattr(skill, "scope", None)),
         ("source", getattr(skill, "source", None)),
         ("metadata_path", getattr(skill, "metadata_path", None)),

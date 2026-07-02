@@ -65,7 +65,7 @@ class TestAssemblePureness:
 
         pinned = {**_PINNED, "cwd": "/anywhere"}
         parts = assemble(_agent(), **pinned)
-        assert "Working directory: /anywhere" in parts.dynamic
+        assert "工作目录：/anywhere" in parts.dynamic
 
 
 class TestCachedSection:
@@ -91,10 +91,10 @@ class TestCachedSection:
     def test_project_instructions_alone(self) -> None:
         parts = assemble(
             _agent(system_prompt=None),
-            project_instructions="# Project Instructions\nOnly project rules.",
+            project_instructions="# 项目指令\nOnly project rules.",
             **_PINNED,
         )
-        assert parts.cached == "# Project Instructions\nOnly project rules."
+        assert parts.cached == "# 项目指令\nOnly project rules."
 
 
 class TestDynamicSection:
@@ -110,21 +110,21 @@ class TestDynamicSection:
         parts = assemble(
             _agent(),
             workspace_memory_section="# Memory\nA",
-            skills_summary="# Skill Routing\nB",
+            skills_summary="# 技能路由\nB",
             **_PINNED,
         )
         idx_mem = parts.dynamic.index("# Memory")
-        idx_skill = parts.dynamic.index("# Skill Routing")
-        idx_env = parts.dynamic.index("# Environment")
+        idx_skill = parts.dynamic.index("# 技能路由")
+        idx_env = parts.dynamic.index("# 环境信息")
         assert idx_mem < idx_skill < idx_env
 
     def test_environment_section_always_present(self) -> None:
         parts = assemble(_agent(), **_PINNED)
-        assert "# Environment" in parts.dynamic
-        assert "Working directory:" in parts.dynamic
-        assert "Platform: Darwin" in parts.dynamic
-        assert "Current date: 2026-05-04 (15:30 PDT)" in parts.dynamic
-        assert "Current year: 2026" in parts.dynamic
+        assert "# 环境信息" in parts.dynamic
+        assert "工作目录：" in parts.dynamic
+        assert "运行平台：Darwin" in parts.dynamic
+        assert "当前日期：2026-05-04（15:30 PDT）" in parts.dynamic
+        assert "当前年份：2026" in parts.dynamic
 
 
 class TestEnvironmentDeterminism:
@@ -137,30 +137,30 @@ class TestEnvironmentDeterminism:
             platform_name="Linux",
             cwd="/srv",
         )
-        assert "Current date: 2030-01-02 (09:05 UTC)" in parts.dynamic
-        assert "Current year: 2030" in parts.dynamic
-        assert "Platform: Linux" in parts.dynamic
+        assert "当前日期：2030-01-02（09:05 UTC）" in parts.dynamic
+        assert "当前年份：2030" in parts.dynamic
+        assert "运行平台：Linux" in parts.dynamic
 
     def test_cwd_value_appears_verbatim(self) -> None:
         pinned = {**_PINNED, "cwd": "/explicit/path"}
         parts = assemble(_agent(), **pinned)
-        assert "Working directory: /explicit/path" in parts.dynamic
+        assert "工作目录：/explicit/path" in parts.dynamic
 
 
 class TestWorkspaceVsNoWorkspace:
     def test_workspace_set_emits_access_guidance(self) -> None:
         parts = assemble(_agent(), workspace="/srv/yak", **_PINNED)
-        assert "# Workspace Access" in parts.dynamic
+        assert "# 工作区访问" in parts.dynamic
         assert "/srv/yak" in parts.dynamic
-        assert "openyak_written" in parts.dynamic
-        assert "# File Reference Format" not in parts.dynamic
+        assert "fpiagent_written" in parts.dynamic
+        assert "# 文件引用格式" not in parts.dynamic
 
     def test_no_workspace_emits_file_reference_format(self) -> None:
         pinned = {**_PINNED, "cwd": "/home/u"}
         parts = assemble(_agent(), workspace=None, **pinned)
-        assert "# File Reference Format" in parts.dynamic
+        assert "# 文件引用格式" in parts.dynamic
         assert "/home/u" in parts.dynamic
-        assert "# Workspace Access" not in parts.dynamic
+        assert "# 工作区访问" not in parts.dynamic
 
 
 class TestFtsStatusBranches:
@@ -170,29 +170,29 @@ class TestFtsStatusBranches:
             fts_status={"status": "indexed", "file_count": 1234},
             **_PINNED,
         )
-        assert "# Full-Text Search" in parts.dynamic
-        assert "indexed (1,234 files)" in parts.dynamic
+        assert "# 全文搜索" in parts.dynamic
+        assert "已建立索引（1,234 个文件）" in parts.dynamic
 
     def test_indexed_without_count(self) -> None:
         parts = assemble(_agent(), fts_status={"status": "indexed"}, **_PINNED)
-        assert "indexed" in parts.dynamic
-        assert "files)" not in parts.dynamic.split("# Full-Text Search", 1)[1]
+        assert "已建立索引" in parts.dynamic
+        assert "个文件）" not in parts.dynamic.split("# 全文搜索", 1)[1]
 
     def test_indexing_in_progress(self) -> None:
         parts = assemble(_agent(), fts_status={"status": "indexing"}, **_PINNED)
-        assert "indexing in progress" in parts.dynamic
+        assert "正在建立索引" in parts.dynamic
 
     def test_unknown_status_no_section(self) -> None:
         parts = assemble(_agent(), fts_status={"status": "unknown"}, **_PINNED)
-        assert "Full-text `search` is unavailable until the user selects a workspace folder." in parts.dynamic
-        assert "indexed" not in parts.dynamic
-        assert "indexing in progress" not in parts.dynamic
+        assert "用户选择工作区文件夹之前，全文 `search` 不可用。" in parts.dynamic
+        assert "已建立索引" not in parts.dynamic
+        assert "正在建立索引" not in parts.dynamic
 
     def test_no_status_dict_no_section(self) -> None:
         parts = assemble(_agent(), fts_status=None, **_PINNED)
-        assert "Full-text `search` is unavailable until the user selects a workspace folder." in parts.dynamic
-        assert "indexed" not in parts.dynamic
-        assert "indexing in progress" not in parts.dynamic
+        assert "用户选择工作区文件夹之前，全文 `search` 不可用。" in parts.dynamic
+        assert "已建立索引" not in parts.dynamic
+        assert "正在建立索引" not in parts.dynamic
 
 
 class TestCachedBlocksFormat:
@@ -215,7 +215,7 @@ class TestCachedBlocksFormat:
         parts = assemble(_agent(system_prompt="A"), **_PINNED)
         plain = parts.as_plain_text()
         assert plain.startswith("A")
-        assert "\n\n# Environment" in plain
+        assert "\n\n# 环境信息" in plain
 
 
 class TestLoadProjectInstructionsHelper:
@@ -226,17 +226,18 @@ class TestLoadProjectInstructionsHelper:
         (tmp_path / "AGENTS.md").write_text("Custom rules here.")
         result = load_project_instructions(str(tmp_path))
         assert result is not None
-        assert result.startswith("# Project Instructions")
+        assert result.startswith("# 项目指令")
         assert "Custom rules here." in result
 
     def test_first_match_wins(self, tmp_path) -> None:
-        # AGENTS.md takes precedence over .openyak/instructions.md.
+        # AGENTS.md takes precedence over .fpiagent/instructions.md.
         (tmp_path / "AGENTS.md").write_text("from-agents-md")
-        (tmp_path / ".openyak").mkdir()
-        (tmp_path / ".openyak" / "instructions.md").write_text("from-instructions-md")
+        (tmp_path / ".fpiagent").mkdir()
+        (tmp_path / ".fpiagent" / "instructions.md").write_text("from-instructions-md")
         result = load_project_instructions(str(tmp_path))
         assert "from-agents-md" in result
         assert "from-instructions-md" not in result
+
 
     def test_empty_file_treated_as_missing(self, tmp_path) -> None:
         (tmp_path / "AGENTS.md").write_text("   \n  ")
@@ -259,18 +260,18 @@ class TestRenderSkillsSectionHelper:
         skills = [self._FakeSkill("triage", "Triage incoming bugs.")]
         result = render_skills_section(skills)
         assert result is not None
-        assert "# Skill Routing" in result
-        assert "triage: Triage incoming bugs." in result
-        assert "and " not in result.split("Currently available skills:", 1)[1]
+        assert "# 技能路由" in result
+        assert "- triage" in result
+        assert "Triage incoming bugs." not in result
+        assert "还有" not in result.split("当前可用技能：", 1)[1]
 
     def test_truncates_long_descriptions(self) -> None:
         long_desc = "x" * 200
         skills = [self._FakeSkill("noisy", long_desc)]
         result = render_skills_section(skills)
         assert result is not None
-        assert "..." in result
-        # Truncated form: 87 chars + "..." per the source.
-        assert "x" * 87 + "..." in result
+        assert "- noisy" in result
+        assert long_desc not in result
 
     def test_lists_small_skill_sets_without_fixed_twelve_cap(self) -> None:
         skills = [self._FakeSkill(f"s{i:02d}", f"desc {i}") for i in range(15)]
@@ -278,4 +279,4 @@ class TestRenderSkillsSectionHelper:
         assert result is not None
         for i in range(15):
             assert f"s{i:02d}" in result
-        assert "more available via the `skill` tool" not in result
+        assert "更多技能可通过 `skill` 工具加载" not in result

@@ -135,9 +135,9 @@ async def run_compaction(
                     data={
                         "type": "text",
                         "text": (
-                            f"[Context Summary]\n\n{result.summary}"
+                            f"【上下文摘要】\n\n{result.summary}"
                             if visible_summary
-                            else f"[Context Summary]\n\n{result.summary}\n\nContinue if you have next steps."
+                            else f"【上下文摘要】\n\n{result.summary}\n\n如果还有后续步骤，请继续执行。"
                         ),
                         "synthetic": True,
                     },
@@ -274,7 +274,7 @@ async def _phase2_summarize(
     # Ask compaction agent to summarize
     try:
         summary_prompt = (
-            "Summarize the conversation above. Follow the format in your system prompt."
+            "请总结以上对话。严格遵循你的系统提示格式，所有内容使用中文。"
         )
         messages = llm_messages + [{"role": "user", "content": summary_prompt}]
 

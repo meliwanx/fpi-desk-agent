@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PartData, ToolPart, StepStartPart, StepFinishPart } from "@/types/message";
 import { TextPart } from "@/components/parts/text-part";
 import { ReasoningPart } from "@/components/parts/reasoning-part";
@@ -13,6 +13,7 @@ import { ActivitySummary } from "@/components/activity/activity-summary";
 import { TodoProgress, type TodoItem } from "@/components/parts/todo-progress";
 import { extractSources } from "@/lib/sources";
 import { cn } from "@/lib/utils";
+import { useActivityStore } from "@/stores/activity-store";
 import type { ActivityData, ChainItem } from "@/stores/activity-store";
 
 interface MessageContentProps {
@@ -111,6 +112,7 @@ export function MessageContent({ parts, isStreaming, activityKey }: MessageConte
   // Thinking duration reported by ReasoningPart's live timer
   const [thinkingDuration, setThinkingDuration] = useState<number | undefined>();
   const handleDurationChange = useCallback((secs: number) => setThinkingDuration(secs), []);
+  const refreshForMessage = useActivityStore((s) => s.refreshForMessage);
 
   // Find the last text part index to pass isStreaming only to that one
   let lastTextIndex = -1;
@@ -210,6 +212,12 @@ export function MessageContent({ parts, isStreaming, activityKey }: MessageConte
     [hasActivity, reasoningTexts, toolParts, thinkingDuration, stepParts, chain, parts, activityKey],
   );
 
+  useEffect(() => {
+    if (isStreaming && activityData && activityKey) {
+      refreshForMessage(activityKey, activityData);
+    }
+  }, [isStreaming, activityData, activityKey, refreshForMessage]);
+
   // Content parts: text, subtask, and deliverable tool calls (shown as inline cards)
   // Exclude error-status artifact calls (e.g. failed update attempts) — they have no content to display
   const contentParts = useMemo(
@@ -249,7 +257,10 @@ export function MessageContent({ parts, isStreaming, activityKey }: MessageConte
 
   return (
     <div className="space-y-3">
-      {/* Reasoning + tools: only show inline while streaming */}
+      {/* Execution summary stays visible during streaming and after completion. */}
+      {activityData && <ActivitySummary data={activityData} />}
+
+      {/* Reasoning + tools: show expanded detail while streaming */}
       {isStreaming && hasActivity && hasMeaningfulActivity && (
         <ReasoningPart
           texts={reasoningTexts}
@@ -258,9 +269,6 @@ export function MessageContent({ parts, isStreaming, activityKey }: MessageConte
           onDurationChange={handleDurationChange}
         />
       )}
-
-      {/* Activity summary — replaces ReasoningPart once streaming is done */}
-      {!isStreaming && activityData && <ActivitySummary data={activityData} />}
 
       {/* Todo progress — visible only while streaming, folds into activity summary when done */}
       {isStreaming && latestTodos.length > 0 && <TodoProgress todos={latestTodos} />}

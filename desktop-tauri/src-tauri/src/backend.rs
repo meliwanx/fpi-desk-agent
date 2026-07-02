@@ -5,13 +5,13 @@
 //! detecting hung processes and auto-restart with exponential backoff.
 
 use std::process::Stdio;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{
     fs::OpenOptions,
     io::Write,
     path::{Path, PathBuf},
 };
-use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use log::{error, info, warn};
 use tauri::{AppHandle, Emitter, Manager};
@@ -166,8 +166,7 @@ impl BackendState {
             .path()
             .app_log_dir()
             .map_err(|e| format!("Failed to get log dir: {e}"))?;
-        std::fs::create_dir_all(&log_dir)
-            .map_err(|e| format!("Failed to create log dir: {e}"))?;
+        std::fs::create_dir_all(&log_dir).map_err(|e| format!("Failed to create log dir: {e}"))?;
         let log_path = log_dir.join("backend.log");
         let desktop_log_path = log_dir.join("desktop.log");
         write_desktop_log(
@@ -204,20 +203,20 @@ impl BackendState {
 
             let mut cmd = Command::new("python");
             cmd.args([
-                    "-m",
-                    "uvicorn",
-                    "app.main:create_app",
-                    "--factory",
-                    "--host",
-                    "127.0.0.1",
-                    "--port",
-                    &port.to_string(),
-                ])
-                .current_dir(&backend_dir)
-                .env("PYTHONUNBUFFERED", "1")
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .stdin(Stdio::null());
+                "-m",
+                "uvicorn",
+                "app.main:create_app",
+                "--factory",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                &port.to_string(),
+            ])
+            .current_dir(&backend_dir)
+            .env("PYTHONUNBUFFERED", "1")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null());
 
             // Windows: isolate process group so CTRL_BREAK_EVENT doesn't leak to Tauri
             #[cfg(target_os = "windows")]
@@ -254,17 +253,17 @@ impl BackendState {
 
             let mut cmd = Command::new(&backend_path);
             cmd.args([
-                    "--port",
-                    &port.to_string(),
-                    "--data-dir",
-                    &data_dir.to_string_lossy(),
-                    "--resource-dir",
-                    &resource_dir.to_string_lossy(),
-                ])
-                .env("PYTHONUNBUFFERED", "1")
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .stdin(Stdio::null());
+                "--port",
+                &port.to_string(),
+                "--data-dir",
+                &data_dir.to_string_lossy(),
+                "--resource-dir",
+                &resource_dir.to_string_lossy(),
+            ])
+            .env("PYTHONUNBUFFERED", "1")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null());
 
             // Windows: isolate process group so CTRL_BREAK_EVENT doesn't leak to Tauri
             #[cfg(target_os = "windows")]
@@ -322,7 +321,8 @@ impl BackendState {
         }
 
         // Wait for backend health check (use lightweight /livez endpoint)
-        self.wait_for_health(port, &log_path, &desktop_log_path).await?;
+        self.wait_for_health(port, &log_path, &desktop_log_path)
+            .await?;
 
         // Load the session token the backend wrote on startup. Every
         // authenticated request from the frontend carries it as a
@@ -588,7 +588,6 @@ impl BackendState {
         inner.process = None;
         Ok(())
     }
-
 }
 
 /// Emit recent backend.log lines to the frontend for crash diagnosis.
@@ -693,13 +692,19 @@ fn validate_backend_resources(
     desktop_log_path: &Path,
 ) -> Result<(), String> {
     if !backend_dir.exists() {
-        let msg = format!("Packaged backend directory is missing: {}", backend_dir.display());
+        let msg = format!(
+            "Packaged backend directory is missing: {}",
+            backend_dir.display()
+        );
         write_desktop_log(desktop_log_path, &msg);
         return Err(msg);
     }
 
     if !backend_path.exists() {
-        let msg = format!("Packaged backend executable is missing: {}", backend_path.display());
+        let msg = format!(
+            "Packaged backend executable is missing: {}",
+            backend_path.display()
+        );
         write_desktop_log(desktop_log_path, &msg);
         return Err(msg);
     }
@@ -791,11 +796,7 @@ async fn load_session_token(data_dir: &Path) -> Result<String, String> {
                 sleep(TOKEN_POLL_INTERVAL).await;
             }
             Err(err) => {
-                return Err(format!(
-                    "Cannot read {}: {}",
-                    token_path.display(),
-                    err
-                ));
+                return Err(format!("Cannot read {}: {}", token_path.display(), err));
             }
         }
     }

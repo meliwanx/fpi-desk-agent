@@ -1,6 +1,6 @@
-Summarize the changes made in this conversation. Include:
-- Files added, modified, or deleted
-- Lines added and removed (approximate counts)
-- Brief description of what changed and why
+总结本轮对话中完成的代码变更，必须使用中文。包括：
+- 新增、修改或删除的文件。
+- 大致新增和删除行数。
+- 简要说明改了什么，以及为什么改。
 
-Format as a concise bullet list. Focus on what changed, not on the discussion.
+格式使用简洁项目符号。聚焦变更本身，不复述讨论过程。除代码、命令、路径、文件名、接口字段和专有名词外，不要输出英文。

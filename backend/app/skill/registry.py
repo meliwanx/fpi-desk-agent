@@ -6,6 +6,7 @@ import json
 import logging
 from pathlib import Path
 
+from app.runtime_paths import APP_CONFIG_DIR_NAME
 from app.skill.model import SkillInfo, parse_skill_file
 
 logger = logging.getLogger(__name__)
@@ -14,7 +15,6 @@ logger = logging.getLogger(__name__)
 _ADMIN_SKILL_DIR = Path("/etc/codex/skills")
 _CODEX_SKILL_DIR = ".agents"
 _EXTERNAL_SKILL_DIRS = [".claude"]
-_OPENYAK_SKILL_DIR = ".openyak"
 
 
 class SkillRegistry:
@@ -23,10 +23,10 @@ class SkillRegistry:
     Discovery order (lowest → highest priority):
       1. Bundled skills shipped with the application
       2. Admin skills        (/etc/codex/skills/)
-      3. Global user skills  (~/.agents/skills/, ~/.openyak/skills/)
+      3. Global user skills  (~/.agents/skills/, ~/.fpiagent/skills/)
       4. Repo skills         ({repo..project}/.agents/skills/)
       5. External skills     ({project}/.claude/skills/)
-      6. Project skills      ({project}/.openyak/skills/)
+      6. Project skills      ({project}/.fpiagent/skills/)
 
     Later-discovered skills with the same name override earlier ones.
     """
@@ -69,7 +69,7 @@ class SkillRegistry:
         home = Path.home()
         for global_dir in (
             home / _CODEX_SKILL_DIR / "skills",
-            home / _OPENYAK_SKILL_DIR / "skills",
+            home / APP_CONFIG_DIR_NAME / "skills",
         ):
             if global_dir.is_dir():
                 search_dirs.append((global_dir, "user"))
@@ -89,8 +89,8 @@ class SkillRegistry:
                 if ext_dir.is_dir():
                     search_dirs.append((ext_dir, "external"))
 
-            # 6. Project-level .openyak/skills (highest priority)
-            proj_dir = project / _OPENYAK_SKILL_DIR / "skills"
+            # 6. Project-level .fpiagent/skills (highest priority)
+            proj_dir = project / APP_CONFIG_DIR_NAME / "skills"
             if proj_dir.is_dir():
                 search_dirs.append((proj_dir, "project"))
 
@@ -199,8 +199,8 @@ class SkillRegistry:
 
     def _resolve_disabled_path(self) -> Path | None:
         if self._project_dir:
-            return Path(self._project_dir).resolve() / ".openyak" / "skills.disabled.json"
-        return Path.home() / ".openyak" / "skills.disabled.json"
+            return Path(self._project_dir).resolve() / APP_CONFIG_DIR_NAME / "skills.disabled.json"
+        return Path.home() / APP_CONFIG_DIR_NAME / "skills.disabled.json"
 
     def _load_disabled(self) -> set[str]:
         if not self._disabled_path or not self._disabled_path.is_file():

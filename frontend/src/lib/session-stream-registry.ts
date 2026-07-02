@@ -7,6 +7,7 @@ import { API, IS_DESKTOP, getBackendToken, getBackendUrl, queryKeys } from "@/li
 import { isRemoteMode } from "@/lib/remote-connection";
 import { desktopAPI } from "@/lib/tauri-api";
 import { api } from "@/lib/api";
+import { latestVisibleAssistantMessage } from "@/lib/message-visibility";
 import { SSE_EVENTS } from "@/types/streaming";
 import { notifyBackgroundFinish } from "@/lib/background-notify";
 import { useChatStore } from "@/stores/chat-store";
@@ -215,7 +216,9 @@ export async function startStream(sessionId: string, streamId: string): Promise<
     const data = qc.getQueryData<InfiniteData<PaginatedMessages>>(
       queryKeys.messages.list(sid),
     );
-    const latestMessage = data?.pages.at(-1)?.messages.at(-1);
+    const latestMessage = latestVisibleAssistantMessage(
+      data?.pages.flatMap((page) => page.messages) ?? [],
+    );
     if (!latestMessage || latestMessage.data.role !== "assistant") return false;
     return latestMessage.parts.some((part) => {
       if (part.data.type !== "step-finish") return false;
@@ -224,7 +227,7 @@ export async function startStream(sessionId: string, streamId: string): Promise<
   };
 
   const canFinalizeFromPayload = (messages: PaginatedMessages | null | undefined) => {
-    const latestMessage = messages?.messages.at(-1);
+    const latestMessage = latestVisibleAssistantMessage(messages?.messages ?? []);
     if (!latestMessage || latestMessage.data.role !== "assistant") return false;
     return latestMessage.parts.some((part) => {
       if (part.data.type !== "step-finish") return false;
@@ -279,6 +282,7 @@ export async function startStream(sessionId: string, streamId: string): Promise<
     if (instances.size === 0) connectionStore.getState().setStatus("idle");
     const workspace = useWorkspaceStore.getState();
     if (
+      workspace.activeSessionId === sid &&
       workspace.todos.length > 0 &&
       workspace.todos.every((todo) => todo.status === "completed")
     ) {
@@ -368,14 +372,17 @@ export async function startStream(sessionId: string, streamId: string): Promise<
         const args = data.arguments as Record<string, string>;
         const command = args.command || "create";
         if (command === "create" && args.type && args.title && args.content) {
-          useArtifactStore.getState().openArtifact({
-            id: data.call_id,
-            type: args.type as ArtifactType,
-            title: args.title,
-            content: args.content,
-            language: args.language,
-            identifier: args.identifier,
-          });
+          const focusedSessionId = store.getState().focusedSessionId;
+          if (focusedSessionId === sessionId) {
+            useArtifactStore.getState().openArtifact({
+              id: data.call_id,
+              type: args.type as ArtifactType,
+              title: args.title,
+              content: args.content,
+              language: args.language,
+              identifier: args.identifier,
+            });
+          }
         }
       }
     }
@@ -395,10 +402,13 @@ export async function startStream(sessionId: string, streamId: string): Promise<
     if (data.tool === "todo" && data.metadata) {
       const meta = data.metadata as { todos?: Array<{ content: string; status: string; activeForm?: string }> };
       if (meta.todos) {
-        useWorkspaceStore.getState().setTodos(meta.todos as WorkspaceTodo[]);
         const ws = useWorkspaceStore.getState();
-        if (!ws.isOpen) ws.open();
-        ws.expandSection("progress");
+        ws.setTodos(meta.todos as WorkspaceTodo[], sessionId);
+        if (useWorkspaceStore.getState().activeSessionId === sessionId) {
+          const latest = useWorkspaceStore.getState();
+          if (!latest.isOpen) latest.open();
+          latest.expandSection("progress");
+        }
       }
     }
 
@@ -409,6 +419,7 @@ export async function startStream(sessionId: string, streamId: string): Promise<
         if (res.files) {
           useWorkspaceStore.getState().setWorkspaceFiles(
             res.files.map((f) => ({ name: f.name, path: f.path, type: f.type as WorkspaceFile["type"] })),
+            sessionId,
           );
         }
       }).catch((e) => console.warn("[stream-registry] Failed to refresh workspace files:", e));
@@ -421,14 +432,17 @@ export async function startStream(sessionId: string, streamId: string): Promise<
         meta.content &&
         meta.identifier
       ) {
-        useArtifactStore.getState().openArtifact({
-          id: data.call_id,
-          type: (meta.type || "code") as ArtifactType,
-          title: meta.title || "Untitled",
-          content: meta.content,
-          language: meta.language,
-          identifier: meta.identifier,
-        });
+        const focusedSessionId = store.getState().focusedSessionId;
+        if (focusedSessionId === sessionId) {
+          useArtifactStore.getState().openArtifact({
+            id: data.call_id,
+            type: (meta.type || "code") as ArtifactType,
+            title: meta.title || "Untitled",
+            content: meta.content,
+            language: meta.language,
+            identifier: meta.identifier,
+          });
+        }
       }
     }
   });
@@ -498,9 +512,11 @@ export async function startStream(sessionId: string, streamId: string): Promise<
       batch_id: data.batch_id,
       mode: data.mode === "sequential" ? "sequential" : "parallel",
       tasks: data.tasks as WorkspaceTaskBatch["tasks"],
-    });
-    if (!ws.isOpen) ws.open();
-    ws.expandSection("progress");
+    }, sessionId);
+    if (useWorkspaceStore.getState().activeSessionId !== sessionId) return;
+    const latest = useWorkspaceStore.getState();
+    if (!latest.isOpen) latest.open();
+    latest.expandSection("progress");
   };
 
   client.on(SSE_EVENTS.TASK_BATCH_START, (data) => {
@@ -588,11 +604,14 @@ export async function startStream(sessionId: string, streamId: string): Promise<
       filesToModify: data.files_to_modify ?? [],
     };
     store.getState().setPlanReview(sessionId, reviewData);
-    try {
-      const { usePlanReviewStore } = require("@/stores/plan-review-store");
-      usePlanReviewStore.getState().openReview(reviewData);
-    } catch {
-      // ignore — store may not be available during SSR
+    const focusedSessionId = store.getState().focusedSessionId;
+    if (focusedSessionId === sessionId) {
+      try {
+        const { usePlanReviewStore } = require("@/stores/plan-review-store");
+        usePlanReviewStore.getState().openReview(reviewData);
+      } catch {
+        // ignore — store may not be available during SSR
+      }
     }
   });
 

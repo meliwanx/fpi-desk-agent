@@ -226,6 +226,92 @@ async def test_admin_can_create_list_and_deactivate_users(tmp_path):
         assert updated is not None
         assert updated.is_active is False
         assert await store.authenticate("employee@example.com", "NewPassword123!") is None
+
+        reactivated = await store.update_user(created.id, is_active=True)
+        assert reactivated is not None
+        assert reactivated.is_active is True
+        assert await store.authenticate("employee@example.com", "NewPassword123!") is not None
+        session = await store.create_session(created.id)
+
+        deleted = await store.delete_user(created.id)
+        assert deleted is not None
+        assert deleted.email == "employee@example.com"
+        assert await store.list_users() == []
+        assert await store.authenticate("employee@example.com", "EmployeePassword123!") is None
+        assert await store.get_session_user(session.token) is None
+
+        recreated = await store.create_user(
+            email="employee@example.com",
+            display_name="Employee Recreated",
+            password="EmployeePassword123!",
+            role="user",
+        )
+        assert recreated.id != created.id
+        assert await store.authenticate("employee@example.com", "EmployeePassword123!") is not None
+    finally:
+        await store.dispose()
+
+
+@pytest.mark.asyncio
+async def test_announcement_targets_and_read_receipts(tmp_path):
+    store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
+    await store.startup()
+    try:
+        admin = await store.create_user(
+            email="admin@example.com",
+            display_name="Admin",
+            password="AdminPassword123!",
+            role="admin",
+        )
+        alice = await store.create_user(
+            email="alice@example.com",
+            display_name="Alice",
+            password="EmployeePassword123!",
+            role="user",
+        )
+        bob = await store.create_user(
+            email="bob@example.com",
+            display_name="Bob",
+            password="EmployeePassword123!",
+            role="user",
+        )
+
+        empty = await store.get_announcement()
+        assert empty.enabled is False
+        assert await store.get_unread_announcement_for_user(alice.id) is None
+
+        announcement = await store.publish_announcement(
+            enabled=True,
+            content="今天 18:00 前请完成日报。",
+            target_user_ids=[],
+            published_by_user_id=admin.id,
+            published_by_email=admin.email,
+            published_by_display_name=admin.display_name,
+        )
+
+        assert announcement.enabled is True
+        assert announcement.content == "今天 18:00 前请完成日报。"
+        assert announcement.target_user_ids == []
+        assert (await store.get_unread_announcement_for_user(alice.id)).id == announcement.id
+        assert (await store.get_unread_announcement_for_user(bob.id)).id == announcement.id
+
+        await store.mark_announcement_read(announcement.id, alice.id)
+        assert await store.get_unread_announcement_for_user(alice.id) is None
+        assert (await store.get_unread_announcement_for_user(bob.id)).id == announcement.id
+
+        targeted = await store.publish_announcement(
+            enabled=True,
+            content="陈列设备请明早巡检。",
+            target_user_ids=[bob.id],
+            published_by_user_id=admin.id,
+            published_by_email=admin.email,
+            published_by_display_name=admin.display_name,
+        )
+
+        assert targeted.id != announcement.id
+        assert targeted.target_user_ids == [bob.id]
+        assert await store.get_unread_announcement_for_user(alice.id) is None
+        assert (await store.get_unread_announcement_for_user(bob.id)).id == targeted.id
     finally:
         await store.dispose()
 
@@ -481,6 +567,18 @@ async def test_update_policy_defaults_and_updates(tmp_path):
 
         reloaded = await store.get_update_policy()
         assert reloaded == updated
+
+        asset_only_policy = await store.update_update_policy(
+            enabled=True,
+            latest_version="",
+            min_supported_version="",
+            force_update=False,
+            release_notes="按安装包 hash 判断",
+            macos_asset_id="asset-macos-latest",
+        )
+        assert asset_only_policy.enabled is True
+        assert asset_only_policy.latest_version == ""
+        assert asset_only_policy.macos_asset_id == "asset-macos-latest"
     finally:
         await store.dispose()
 
@@ -492,12 +590,14 @@ async def test_update_assets_persist_metadata_and_download_counts(tmp_path):
     try:
         asset = await store.create_update_asset(
             platform="macos",
+            name="macOS 1.4.0 正式包",
             version="v1.4.0",
             original_filename="FPI Agent 1.4.0.dmg",
             stored_filename="asset-1.dmg",
             mime_type="application/x-apple-diskimage",
             size_bytes=12345,
             sha256="a" * 64,
+            md5="b" * 32,
             signature="signed-updater-package-signature",
             uploaded_by_user_id="admin-1",
             uploaded_by_email="admin@example.com",
@@ -505,10 +605,12 @@ async def test_update_assets_persist_metadata_and_download_counts(tmp_path):
         )
 
         assert asset.platform == "macos"
+        assert asset.name == "macOS 1.4.0 正式包"
         assert asset.version == "1.4.0"
         assert asset.original_filename == "FPI Agent 1.4.0.dmg"
         assert asset.download_count == 0
         assert asset.uploaded_by_email == "admin@example.com"
+        assert asset.md5 == "b" * 32
         assert asset.signature == "signed-updater-package-signature"
 
         listed = await store.list_update_assets()

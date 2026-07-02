@@ -61,14 +61,12 @@ class CodeExecuteTool(ToolDefinition):
     @property
     def description(self) -> str:
         return (
-            "Execute Python code on this computer. "
-            "When the local sandbox is available, code runs inside that sandbox; "
-            "otherwise auto mode falls back to the backend's Python environment "
-            "with pandas, numpy, matplotlib and other bundled packages. "
-            "IMPORTANT: Each call runs in a fresh, isolated namespace — no state "
-            "(variables, imports, data) persists between calls. You MUST include "
-            "all imports and data loading in every call. For multi-step analysis, "
-            "put ALL code in a single call rather than splitting across multiple calls."
+            "在本机执行 Python 代码。"
+            "如果本地沙箱可用，代码会在沙箱中运行；否则自动使用后端 Python 环境，"
+            "其中包含 pandas、numpy、matplotlib 等内置依赖。"
+            "重要：每次调用都在全新的隔离命名空间中执行，变量、导入和数据不会跨调用保留。"
+            "每次调用都必须包含所需的 import 和数据加载。多步骤分析应尽量放在一次调用中完成，"
+            "不要拆成多个依赖状态的调用。"
         )
 
     def parameters_schema(self) -> dict[str, Any]:
@@ -77,11 +75,11 @@ class CodeExecuteTool(ToolDefinition):
             "properties": {
                 "code": {
                     "type": "string",
-                    "description": "Python code to execute",
+                    "description": "要执行的 Python 代码",
                 },
                 "timeout": {
                     "type": "integer",
-                    "description": f"Timeout in seconds (default {DEFAULT_TIMEOUT}, max {MAX_TIMEOUT})",
+                    "description": f"超时时间，单位秒（默认 {DEFAULT_TIMEOUT}，最大 {MAX_TIMEOUT}）",
                     "default": DEFAULT_TIMEOUT,
                 },
             },

@@ -10,11 +10,11 @@ mod tray;
 
 use backend::BackendState;
 use log::{error, info};
-use tokio::sync::Mutex;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, WebviewWindow};
+use tauri_plugin_deep_link::DeepLinkExt;
 #[cfg(target_os = "macos")]
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
-use tauri_plugin_deep_link::DeepLinkExt;
+use tokio::sync::Mutex;
 use url::Url;
 
 pub struct PendingNavigationState(Mutex<Option<String>>);
@@ -45,11 +45,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // Focus existing window when a second instance is launched
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-                if window.is_minimized().unwrap_or(false) {
-                    let _ = window.unminimize();
-                }
+                show_main_window(&window);
             }
         }))
         .plugin(tauri_plugin_deep_link::init())
@@ -57,12 +53,11 @@ pub fn run() {
             tauri_plugin_window_state::Builder::new()
                 // SIZE/POSITION intentionally excluded: we want every cold
                 // start to open at the golden-ratio default from tauri.conf
-                // (width/height), centered on screen. Only DECORATIONS and
-                // VISIBLE state persist — which is a no-op for us in practice
-                // but kept so the plugin has something to do.
+                // (width/height), centered on screen. Do not persist VISIBLE:
+                // close-to-tray hides the window, and restoring that hidden
+                // state can make Windows cold starts appear tray-only.
                 .with_state_flags(
-                    tauri_plugin_window_state::StateFlags::DECORATIONS
-                        | tauri_plugin_window_state::StateFlags::VISIBLE,
+                    tauri_plugin_window_state::StateFlags::DECORATIONS,
                 )
                 .build(),
         )
@@ -82,12 +77,10 @@ pub fn run() {
             commands::window_maximize,
             commands::window_close,
             commands::is_maximized,
+            commands::toggle_devtools,
             commands::get_platform,
             commands::open_external,
             commands::download_and_save,
-            commands::download_update_and_open,
-            commands::download_update_package,
-            commands::install_downloaded_update,
             commands::update_tray_recents,
         ])
         // -- Setup --
@@ -231,7 +224,7 @@ pub fn run() {
                     }
                     if let Some(window) = app_handle.get_webview_window("main") {
                         let _ = window.center();
-                        let _ = window.show();
+                        show_main_window(&window);
                     }
                 });
             } else {
@@ -243,7 +236,7 @@ pub fn run() {
                             info!("Backend started at {url}");
                             if let Some(window) = app_handle.get_webview_window("main") {
                                 let _ = window.center();
-                                let _ = window.show();
+                                show_main_window(&window);
                             }
                         }
                         Err(err) => {
@@ -251,7 +244,7 @@ pub fn run() {
                             let _ = app_handle.emit("backend-crash", &err);
                             if let Some(window) = app_handle.get_webview_window("main") {
                                 let _ = window.center();
-                                let _ = window.show();
+                                show_main_window(&window);
                             }
                         }
                     }
@@ -280,8 +273,7 @@ pub fn run() {
                 tauri::RunEvent::Reopen { .. } => {
                     // macOS: clicking Dock icon re-shows the hidden window
                     if let Some(window) = app_handle.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
+                        show_main_window(&window);
                     }
                 }
                 _ => {}
@@ -303,7 +295,7 @@ fn extract_route_from_urls<'a>(mut urls: impl Iterator<Item = &'a str>) -> Optio
 
 fn extract_route_from_url(raw: &str) -> Option<String> {
     let url = Url::parse(raw).ok()?;
-    if url.scheme() != "openyak" {
+    if url.scheme() != "fpiagent" {
         return None;
     }
 
@@ -327,9 +319,17 @@ fn extract_route_from_url(raw: &str) -> Option<String> {
 
 fn focus_and_emit_navigation(app: &tauri::AppHandle, route: &str) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
+        show_main_window(&window);
         let _ = window.emit("navigate", route);
     }
+}
+
+fn show_main_window(window: &WebviewWindow) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = window.set_skip_taskbar(false);
+    }
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
 }

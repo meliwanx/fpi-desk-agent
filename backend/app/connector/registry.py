@@ -18,9 +18,12 @@ from urllib.parse import urlparse
 from app.connector.model import ConnectorInfo
 from app.mcp.manager import McpManager
 from app.mcp.tool_wrapper import McpToolWrapper
+from app.runtime_paths import APP_CONFIG_DIR_NAME
 from app.tool.base import ToolDefinition
 
 logger = logging.getLogger(__name__)
+
+BUILTIN_CONNECTOR_ALLOWLIST = frozenset({"sim-data-agent"})
 
 
 class ConnectorRegistry:
@@ -34,14 +37,15 @@ class ConnectorRegistry:
 
         # Persistence paths
         if project_dir:
-            self._state_path = Path(project_dir).resolve() / ".openyak" / "connectors.json"
+            self._state_path = Path(project_dir).resolve() / APP_CONFIG_DIR_NAME / "connectors.json"
         else:
-            self._state_path = Path.home() / ".openyak" / "connectors.json"
+            self._state_path = Path.home() / APP_CONFIG_DIR_NAME / "connectors.json"
 
         self._persisted_state = self._load_state()
 
         # Load static catalog (enriched metadata for known connectors)
         self._catalog = self._load_catalog()
+        self._register_builtin_catalog_connectors()
 
     # ------------------------------------------------------------------
     # Registration (called during startup)
@@ -69,6 +73,14 @@ class ConnectorRegistry:
             else:
                 connector_id = raw_key
 
+            if connector_id not in BUILTIN_CONNECTOR_ALLOWLIST:
+                logger.debug(
+                    "Skipping bundled connector outside allowlist: %s from plugin %s",
+                    connector_id,
+                    plugin_name,
+                )
+                continue
+
             url = config.get("url", "")
             server_type = config.get("type", "remote")
 
@@ -83,6 +95,7 @@ class ConnectorRegistry:
                 # Add plugin reference if not already there
                 if plugin_name not in existing.referenced_by:
                     existing.referenced_by.append(plugin_name)
+                self._sync_mcp_config(existing)
                 connector_ids.append(existing.id)
                 continue
 
@@ -99,7 +112,8 @@ class ConnectorRegistry:
                     f"{connector_id.replace('-', ' ').title()} integration",
                 ),
                 category=catalog_entry.get("category", "other"),
-                enabled=connector_id in self._persisted_state.get("enabled", []),
+                icon_url=catalog_entry.get("icon_url", ""),
+                enabled=False,
                 source="builtin",
                 local_config=(
                     {
@@ -114,6 +128,7 @@ class ConnectorRegistry:
             )
 
             self._connectors[connector_id] = connector
+            self._sync_mcp_config(connector)
             connector_ids.append(connector_id)
 
         return connector_ids
@@ -141,6 +156,7 @@ class ConnectorRegistry:
             source="custom",
         )
         self._connectors[id] = connector
+        self._sync_mcp_config(connector)
 
         # Persist custom connector
         customs = self._persisted_state.setdefault("custom", [])
@@ -155,6 +171,37 @@ class ConnectorRegistry:
 
         return connector
 
+    def _register_builtin_catalog_connectors(self) -> None:
+        """Register allowlisted bundled connectors from the static catalog."""
+        enabled_ids = set(self._persisted_state.get("enabled", []))
+        for connector_id in sorted(BUILTIN_CONNECTOR_ALLOWLIST):
+            if connector_id in self._connectors:
+                continue
+            catalog_entry = self._catalog.get(connector_id)
+            if not isinstance(catalog_entry, dict):
+                continue
+            url = str(catalog_entry.get("url") or "").strip()
+            if not url:
+                continue
+            connector = ConnectorInfo(
+                id=connector_id,
+                name=str(catalog_entry.get("name") or connector_id.replace("-", " ").title()),
+                url=url,
+                type=str(catalog_entry.get("type") or "remote"),
+                description=str(
+                    catalog_entry.get(
+                        "description",
+                        f"{connector_id.replace('-', ' ').title()} integration",
+                    )
+                ),
+                category=str(catalog_entry.get("category") or "other"),
+                icon_url=str(catalog_entry.get("icon_url") or ""),
+                enabled=connector_id in enabled_ids,
+                source="builtin",
+                referenced_by=["builtin"],
+            )
+            self._connectors[connector_id] = connector
+
     def remove_custom(self, id: str) -> bool:
         """Remove a custom connector. Returns False if not found or not custom."""
         connector = self._connectors.get(id)
@@ -162,6 +209,9 @@ class ConnectorRegistry:
             return False
 
         del self._connectors[id]
+        if self._mcp_manager:
+            self._mcp_manager._config.pop(id, None)
+            self._mcp_manager._clients.pop(id, None)
 
         # Remove from persisted custom list
         customs = self._persisted_state.get("custom", [])
@@ -190,6 +240,7 @@ class ConnectorRegistry:
                     type="remote",
                     description=custom.get("description", ""),
                     category=custom.get("category", "custom"),
+                    icon_url=custom.get("icon_url", ""),
                     enabled=cid in self._persisted_state.get("enabled", []),
                     source="custom",
                 )
@@ -198,20 +249,10 @@ class ConnectorRegistry:
         self._inject_local_credentials()
 
         # Build MCP config dict from all connectors (enabled or not)
-        mcp_config: dict[str, Any] = {}
-        for cid, connector in self._connectors.items():
-            if connector.type == "local":
-                mcp_config[cid] = {
-                    "type": "local",
-                    "enabled": connector.enabled,
-                    **connector.local_config,
-                }
-            else:
-                mcp_config[cid] = {
-                    "type": "remote",
-                    "url": connector.url,
-                    "enabled": connector.enabled,
-                }
+        mcp_config: dict[str, Any] = {
+            cid: self._mcp_config_for(connector)
+            for cid, connector in self._connectors.items()
+        }
 
         self._mcp_manager = McpManager(mcp_config, project_dir=self._project_dir)
         await self._mcp_manager.startup()
@@ -254,6 +295,7 @@ class ConnectorRegistry:
 
         # Actually connect the MCP server
         if self._mcp_manager:
+            self._sync_mcp_config(connector)
             try:
                 await self._mcp_manager.reconnect(id)
             except Exception as e:
@@ -277,6 +319,7 @@ class ConnectorRegistry:
 
         # Disconnect the MCP server
         if self._mcp_manager:
+            self._sync_mcp_config(connector)
             client = self._mcp_manager._clients.get(id)
             if client:
                 try:
@@ -447,6 +490,25 @@ class ConnectorRegistry:
 
         if tokens and tokens.get("refresh_token"):
             env["GOOGLE_WORKSPACE_REFRESH_TOKEN"] = tokens["refresh_token"]
+
+    @staticmethod
+    def _mcp_config_for(connector: ConnectorInfo) -> dict[str, Any]:
+        if connector.type == "local":
+            return {
+                "type": "local",
+                "enabled": connector.enabled,
+                **connector.local_config,
+            }
+        return {
+            "type": "remote",
+            "url": connector.url,
+            "enabled": connector.enabled,
+        }
+
+    def _sync_mcp_config(self, connector: ConnectorInfo) -> None:
+        if not self._mcp_manager:
+            return
+        self._mcp_manager._config[connector.id] = self._mcp_config_for(connector)
 
     def _find_by_url(self, url: str) -> ConnectorInfo | None:
         """Find a connector by URL (for dedup)."""

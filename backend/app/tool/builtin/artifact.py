@@ -26,12 +26,11 @@ class ArtifactTool(ToolDefinition):
     @property
     def description(self) -> str:
         return (
-            "Manage artifacts in the visual preview panel. Commands:\n"
-            "- 'create': Generate a new artifact with full content\n"
-            "- 'update': Targeted string replacement using old_str/new_str (token-efficient)\n"
-            "- 'rewrite': Full content replacement for major changes\n"
-            "Use this for interactive or visual content: React components, HTML pages, "
-            "SVG graphics, code files, Markdown documents, or Mermaid diagrams."
+            "管理可视化预览面板中的 artifact。命令：\n"
+            "- 'create'：使用完整内容创建新 artifact。\n"
+            "- 'update'：通过 old_str/new_str 做定点字符串替换，节省上下文。\n"
+            "- 'rewrite'：用于重大修改的完整内容替换。\n"
+            "适用于交互式或可视化内容，例如 React 组件、HTML 页面、SVG 图形、代码文件、Markdown 文档或 Mermaid 图。"
         )
 
     def parameters_schema(self) -> dict[str, Any]:
@@ -42,43 +41,42 @@ class ArtifactTool(ToolDefinition):
                     "type": "string",
                     "enum": ["create", "update", "rewrite"],
                     "description": (
-                        "The operation: 'create' for a new artifact, "
-                        "'update' for targeted old_str→new_str replacement, "
-                        "'rewrite' for full content replacement."
+                        "操作类型：'create' 创建新 artifact，"
+                        "'update' 做 old_str→new_str 定点替换，"
+                        "'rewrite' 做完整内容替换。"
                     ),
                 },
                 "identifier": {
                     "type": "string",
                     "description": (
-                        "A stable kebab-case identifier for the artifact. "
-                        "Reuse the same identifier across create/update/rewrite "
-                        "to track the artifact across iterations."
+                        "稳定的 kebab-case 标识符。"
+                        "同一个 artifact 在 create/update/rewrite 中应复用同一 identifier，便于跨轮次追踪。"
                     ),
                 },
                 "type": {
                     "type": "string",
                     "enum": ["react", "html", "svg", "code", "markdown", "mermaid"],
-                    "description": "The artifact type (required for 'create').",
+                    "description": "artifact 类型（create 时必填）。",
                 },
                 "title": {
                     "type": "string",
-                    "description": "A brief, descriptive title (required for 'create').",
+                    "description": "简短清晰的标题（create 时必填）。",
                 },
                 "content": {
                     "type": "string",
-                    "description": "Full content for 'create' or 'rewrite' commands.",
+                    "description": "create 或 rewrite 命令使用的完整内容。",
                 },
                 "old_str": {
                     "type": "string",
-                    "description": "The exact string to find (for 'update' command).",
+                    "description": "update 命令中要查找的精确字符串。",
                 },
                 "new_str": {
                     "type": "string",
-                    "description": "The replacement string (for 'update' command).",
+                    "description": "update 命令中的替换字符串。",
                 },
                 "language": {
                     "type": "string",
-                    "description": "Programming language for 'code' type (e.g. 'python').",
+                    "description": "code 类型使用的编程语言（例如 'python'）。",
                 },
             },
             "required": ["command", "identifier"],
@@ -103,7 +101,7 @@ class ArtifactTool(ToolDefinition):
             content = args.get("content", "")
             if not artifact_type or not title or not content:
                 return ToolResult(
-                    error="'create' requires 'type', 'title', and 'content' parameters.",
+                    error="'create' 需要提供 'type'、'title' 和 'content' 参数。",
                 )
 
             cache[identifier] = {
@@ -114,7 +112,7 @@ class ArtifactTool(ToolDefinition):
             }
 
             return ToolResult(
-                output=f"Artifact '{title}' created.",
+                output=f"Artifact '{title}' 已创建。",
                 metadata={
                     "command": "create",
                     "type": artifact_type,
@@ -129,14 +127,14 @@ class ArtifactTool(ToolDefinition):
             old_str = args.get("old_str", "")
             new_str = args.get("new_str", "")
             if not old_str:
-                return ToolResult(error="'update' requires 'old_str' parameter.")
+                return ToolResult(error="'update' 需要提供 'old_str' 参数。")
 
             cached = cache.get(identifier)
             if not cached:
                 return ToolResult(
                     error=(
-                        f"No artifact found with identifier '{identifier}'. "
-                        "Use 'create' command first."
+                        f"没有找到 identifier 为 '{identifier}' 的 artifact。"
+                        "请先使用 'create' 命令。"
                     ),
                 )
 
@@ -144,9 +142,9 @@ class ArtifactTool(ToolDefinition):
             if old_str not in current_content:
                 return ToolResult(
                     error=(
-                        f"old_str not found in artifact '{identifier}'. "
-                        f"The content may have changed. "
-                        f"Current content length: {len(current_content)} chars."
+                        f"在 artifact '{identifier}' 中没有找到 old_str。"
+                        f"内容可能已经变化。"
+                        f"当前内容长度：{len(current_content)} 个字符。"
                     ),
                 )
 
@@ -158,7 +156,7 @@ class ArtifactTool(ToolDefinition):
                 cached["type"] = artifact_type
 
             return ToolResult(
-                output=f"Artifact '{identifier}' updated ({len(old_str)} chars replaced).",
+                output=f"Artifact '{identifier}' 已更新（替换 {len(old_str)} 个字符）。",
                 metadata={
                     "command": "update",
                     "type": cached["type"],
@@ -172,14 +170,14 @@ class ArtifactTool(ToolDefinition):
         elif command == "rewrite":
             content = args.get("content", "")
             if not content:
-                return ToolResult(error="'rewrite' requires 'content' parameter.")
+                return ToolResult(error="'rewrite' 需要提供 'content' 参数。")
 
             cached = cache.get(identifier)
             if not cached:
                 return ToolResult(
                     error=(
-                        f"No artifact found with identifier '{identifier}'. "
-                        "Use 'create' command first."
+                        f"没有找到 identifier 为 '{identifier}' 的 artifact。"
+                        "请先使用 'create' 命令。"
                     ),
                 )
 
@@ -190,7 +188,7 @@ class ArtifactTool(ToolDefinition):
                 cached["type"] = artifact_type
 
             return ToolResult(
-                output=f"Artifact '{identifier}' rewritten.",
+                output=f"Artifact '{identifier}' 已重写。",
                 metadata={
                     "command": "rewrite",
                     "type": artifact_type or cached["type"],
@@ -202,4 +200,4 @@ class ArtifactTool(ToolDefinition):
             )
 
         else:
-            return ToolResult(error=f"Unknown command: '{command}'")
+            return ToolResult(error=f"未知命令：'{command}'")

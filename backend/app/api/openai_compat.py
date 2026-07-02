@@ -14,7 +14,7 @@ import logging
 import time
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -26,6 +26,7 @@ from app.dependencies import (
     StreamManagerDep,
     ToolRegistryDep,
 )
+from app.connector.access import tool_registry_for_request
 from app.schemas.chat import PromptRequest
 from app.session.manager import create_session, get_session
 from app.session.processor import run_generation
@@ -54,10 +55,10 @@ _MODEL_PREFIX = "openyak-"
 
 # Available agents exposed as model IDs.
 _AGENT_MODELS = {
-    "openyak-build": {"agent": "build", "description": "Full-featured assistant with all tools"},
-    "openyak-plan": {"agent": "plan", "description": "Read-only analysis and planning"},
-    "openyak-explore": {"agent": "explore", "description": "Fast search and exploration"},
-    "openyak-general": {"agent": "general", "description": "General-purpose assistant"},
+    "openyak-build": {"agent": "build", "description": "具备完整工具能力的助理"},
+    "openyak-plan": {"agent": "plan", "description": "只读分析和计划"},
+    "openyak-explore": {"agent": "explore", "description": "快速搜索和探索"},
+    "openyak-general": {"agent": "general", "description": "通用助理"},
 }
 
 
@@ -337,6 +338,7 @@ async def list_models():
 
 @router.post("/v1/chat/completions")
 async def chat_completions(
+    request: Request,
     body: ChatCompletionRequest,
     sm: StreamManagerDep,
     session_factory: SessionFactoryDep,
@@ -386,13 +388,14 @@ async def chat_completions(
         model=model_id,
     )
 
+    request_tool_registry = await tool_registry_for_request(request, tool_registry)
     coro = run_generation(
         job,
         prompt_request,
         session_factory=session_factory,
         provider_registry=provider_registry,
         agent_registry=agent_registry,
-        tool_registry=tool_registry,
+        tool_registry=request_tool_registry,
         index_manager=index_manager,
     )
     task = asyncio.create_task(

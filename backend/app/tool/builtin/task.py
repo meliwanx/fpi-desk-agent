@@ -39,11 +39,10 @@ class TaskTool(ToolDefinition):
     @property
     def description(self) -> str:
         return (
-            "Launch a specialized subagent to handle a complex subtask. "
-            "Available agent types: 'explore' (fast codebase search), "
-            "'general' (full access minus todo). "
-            "The subagent runs its own agent loop and returns the result. "
-            "Pass task_id from a previous result to resume an existing subtask session."
+            "启动专门的子任务助理处理复杂子任务。"
+            "可用类型：explore（快速搜索和探索代码库）、general（通用工具能力，不含 todo）。"
+            "子任务助理会运行独立循环并返回结果。"
+            "传入先前结果中的 task_id 可继续已有子任务会话。"
         )
 
     def parameters_schema(self) -> dict[str, Any]:
@@ -52,21 +51,21 @@ class TaskTool(ToolDefinition):
             "properties": {
                 "description": {
                     "type": "string",
-                    "description": "Short description of the subtask (3-5 words)",
+                    "description": "子任务简短描述（3 到 5 个词）",
                 },
                 "prompt": {
                     "type": "string",
-                    "description": "Detailed instructions for the subagent",
+                    "description": "给子任务助理的详细指令",
                 },
                 "agent": {
                     "type": "string",
-                    "description": "Subagent type: 'explore' or 'general'",
+                    "description": "子任务助理类型：explore 或 general",
                     "default": "explore",
                     "enum": ["explore", "general"],
                 },
                 "task_id": {
                     "type": "string",
-                    "description": "Optional. Resume a previous subtask by passing the task_id from a prior result.",
+                    "description": "可选。传入之前结果里的 task_id 以继续某个子任务。",
                 },
             },
             "required": ["description", "prompt"],
@@ -89,15 +88,15 @@ class TaskTool(ToolDefinition):
         if parent_depth >= MAX_SUBTASK_DEPTH:
             return ToolResult(
                 error=(
-                    f"Maximum subtask nesting depth ({MAX_SUBTASK_DEPTH}) exceeded. "
-                    "Complete the current task directly instead of delegating further."
+                    f"子任务嵌套深度已超过上限（{MAX_SUBTASK_DEPTH}）。"
+                    "请直接完成当前任务，不要继续分派。"
                 ),
             )
 
         # Access app-level registries through the _app_state injected by processor
         app_state = getattr(ctx, "_app_state", None)
         if not app_state:
-            return ToolResult(error="SubAgent not available: missing app state")
+            return ToolResult(error="子任务助理不可用：缺少应用状态。")
 
         session_factory = app_state["session_factory"]
         child_stream_id = generate_ulid()
@@ -179,8 +178,8 @@ class TaskTool(ToolDefinition):
             )
             # Still extract whatever output was produced before timeout
         except Exception as e:
-            logger.exception("SubAgent error")
-            return ToolResult(error=f"SubAgent failed: {e}")
+            logger.exception("子任务助理执行异常")
+            return ToolResult(error=f"子任务助理执行失败：{e}")
 
         # Extract text output and key tool results from child events
         output_parts: list[str] = []
@@ -197,7 +196,7 @@ class TaskTool(ToolDefinition):
                 if tool_name and tool_output:
                     # Truncate individual results to avoid overwhelming the parent
                     if len(tool_output) > 2000:
-                        tool_output = tool_output[:2000] + "... [truncated]"
+                        tool_output = tool_output[:2000] + "... [已截断]"
                     tool_results.append(f"[{tool_name}] {tool_output}")
             elif event.event == "error":
                 error_parts.append(event.data.get("message", ""))
@@ -208,17 +207,17 @@ class TaskTool(ToolDefinition):
         # can see what the subagent discovered, not just its text summary.
         if tool_results:
             recent_results = tool_results[-5:]
-            output += "\n\n--- Key tool results ---\n"
+            output += "\n\n--- 关键工具结果 ---\n"
             output += "\n\n".join(recent_results)
 
         if error_parts:
-            output += "\n[Errors: " + "; ".join(error_parts) + "]"
+            output += "\n[错误：" + "; ".join(error_parts) + "]"
         if not output.strip():
-            output = "(subagent produced no text output)"
+            output = "（子任务助理没有产生文本输出）"
 
         return ToolResult(
             output=output,
-            title=f"SubAgent ({agent_name}): {description}",
+            title=f"子任务助理（{agent_name}）：{description}",
             metadata={
                 "task_id": child_session_id,
                 "session_id": child_session_id,

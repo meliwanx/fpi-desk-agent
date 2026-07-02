@@ -219,14 +219,14 @@ async def _execute_loop(
         iter_prompt = base_prompt
         if progress_entries:
             progress_text = "\n".join(
-                f"- Iteration {j+1}: {entry}"
+                f"- 第 {j+1} 次迭代：{entry}"
                 for j, entry in enumerate(progress_entries)
             )
             iter_prompt = (
                 f"{base_prompt}\n\n"
-                f"## Progress from previous iterations\n{progress_text}\n\n"
-                "Continue from where the previous iteration left off. "
-                "Do NOT repeat already completed work."
+                f"## 前几次迭代进展\n{progress_text}\n\n"
+                "请从上一次迭代停止的位置继续。"
+                "不要重复已经完成的工作。所有思考、计划和回复必须使用中文。"
             )
 
         # Create TaskRun for this iteration

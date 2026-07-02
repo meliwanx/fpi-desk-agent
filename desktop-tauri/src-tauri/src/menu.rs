@@ -8,8 +8,7 @@ use tauri::{
 pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     // File menu
     let new_chat = MenuItem::with_id(app, "menu_new_chat", "新建对话", true, Some("CmdOrCtrl+N"))?;
-    let settings =
-        MenuItem::with_id(app, "menu_settings", "设置", true, Some("CmdOrCtrl+,"))?;
+    let settings = MenuItem::with_id(app, "menu_settings", "设置", true, Some("CmdOrCtrl+,"))?;
     let file_menu = Submenu::with_items(
         app,
         "文件",
@@ -84,23 +83,14 @@ pub fn create_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     )?;
 
     // Help menu
-    let check_updates = MenuItem::with_id(
-        app,
-        "menu_check_updates",
-        "检查更新…",
-        true,
-        None::<&str>,
-    )?;
+    let check_updates =
+        MenuItem::with_id(app, "menu_check_updates", "检查更新…", true, None::<&str>)?;
     let about = PredefinedMenuItem::about(app, Some("关于聚光办公助理"), None)?;
     let help_menu = Submenu::with_items(
         app,
         "帮助",
         true,
-        &[
-            &check_updates,
-            &PredefinedMenuItem::separator(app)?,
-            &about,
-        ],
+        &[&check_updates, &PredefinedMenuItem::separator(app)?, &about],
     )?;
 
     let menu = Menu::with_items(

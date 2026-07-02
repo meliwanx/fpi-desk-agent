@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "sim-data-agent": {
+      "type": "http",
+      "url": "http://120.26.208.161:5166/mcp/sim-data/mcp"
+    }
+  }
+}

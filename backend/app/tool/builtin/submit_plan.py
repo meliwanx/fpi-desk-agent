@@ -71,9 +71,8 @@ class SubmitPlanTool(ToolDefinition):
     @property
     def description(self) -> str:
         return (
-            "Submit a structured implementation plan for user review. "
-            "The plan will be displayed in a review panel where the user can "
-            "accept it (switching to build mode for execution) or request revisions."
+            "提交结构化实施计划给用户审查。计划会显示在审查面板中，"
+            "用户可以接受计划（随后切换到构建模式执行）或要求修改。"
         )
 
     def parameters_schema(self) -> dict[str, Any]:
@@ -82,20 +81,19 @@ class SubmitPlanTool(ToolDefinition):
             "properties": {
                 "title": {
                     "type": "string",
-                    "description": "Short title for the plan (e.g. 'Add dark mode toggle')",
+                    "description": "计划短标题（例如：添加深色模式开关）",
                 },
                 "plan": {
                     "type": "string",
                     "description": (
-                        "The full plan in markdown format. Include: "
-                        "context/summary, numbered implementation steps with file paths, "
-                        "and verification steps."
+                        "Markdown 格式的完整计划。应包含背景/摘要、带文件路径的编号实施步骤，"
+                        "以及验证步骤。"
                     ),
                 },
                 "files_to_modify": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "List of file paths that will be created or modified",
+                    "description": "将要创建或修改的文件路径列表",
                 },
             },
             "required": ["title", "plan", "files_to_modify"],
@@ -135,8 +133,8 @@ class SubmitPlanTool(ToolDefinition):
         # If no job context or not interactive — degrade gracefully
         if job is None or not job.interactive:
             return ToolResult(
-                output=f"[No user connected] Plan submitted: {title}",
-                title=f"Plan: {title}",
+                output=f"[当前没有用户连接] 已提交计划：{title}",
+                title=f"计划：{title}",
                 metadata=plan_meta,
             )
 
@@ -158,10 +156,10 @@ class SubmitPlanTool(ToolDefinition):
                     mode = response.get("mode", "auto")
                     return ToolResult(
                         output=(
-                            f"Plan accepted by user (mode: {mode}). "
-                            f"Switch to build mode and implement the plan:\n\n{plan}"
+                            f"用户已接受计划（模式：{mode}）。"
+                            f"请切换到构建模式并执行计划：\n\n{plan}"
                         ),
-                        title=f"Plan accepted: {title}",
+                        title=f"计划已接受：{title}",
                         metadata={
                             **plan_meta,
                             "switch_agent": "build",
@@ -173,35 +171,34 @@ class SubmitPlanTool(ToolDefinition):
                     # User wants to stop and review the plan at their leisure
                     return ToolResult(
                         output=(
-                            "User chose to stop and review the plan independently. "
-                            "The plan is saved for their review. Do not continue — "
-                            "wait for the user's next message."
+                            "用户选择停止并自行审查计划。计划已经保存。"
+                            "不要继续执行，请等待用户下一条消息。"
                         ),
-                        title=f"Plan saved: {title}",
+                        title=f"计划已保存：{title}",
                         metadata={**plan_meta, "plan_stopped": True},
                     )
                 else:  # revise
                     feedback = response.get("feedback", "")
                     return ToolResult(
                         output=(
-                            f"User requested revisions to the plan.\n"
-                            f"Feedback: {feedback}\n\n"
-                            "Revise your plan based on this feedback and call submit_plan again."
+                            f"用户要求修改计划。\n"
+                            f"反馈：{feedback}\n\n"
+                            "请根据反馈修订计划，并再次调用 submit_plan。"
                         ),
-                        title="Plan revision requested",
+                        title="用户要求修改计划",
                         metadata={**plan_meta, "plan_revised": True, "feedback": feedback},
                     )
             else:
                 # Simple string response — treat as feedback
                 return ToolResult(
-                    output=f"User response: {response}\n\nRevise your plan and call submit_plan again.",
-                    title="Plan response received",
+                    output=f"用户回复：{response}\n\n请修订计划并再次调用 submit_plan。",
+                    title="已收到计划反馈",
                     metadata=plan_meta,
                 )
 
         except TimeoutError:
             return ToolResult(
-                output="(user did not respond within 10 minutes)",
-                error="Plan review timed out — no response from user",
+                output="（用户 10 分钟内没有回复）",
+                error="计划审查超时：用户没有回复",
                 metadata=plan_meta,
             )

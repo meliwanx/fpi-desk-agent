@@ -71,9 +71,9 @@ class TestResolveForRead:
 
 
 class TestResolveForWrite:
-    def test_relative_path_to_openyak_written(self, tmp_path: Path):
+    def test_relative_path_to_fpiagent_written(self, tmp_path: Path):
         result = resolve_for_write("output.txt", str(tmp_path))
-        expected = str((tmp_path / "openyak_written" / "output.txt").resolve())
+        expected = str((tmp_path / "fpiagent_written" / "output.txt").resolve())
         assert result == expected
 
     def test_absolute_within_workspace(self, tmp_path: Path):

@@ -52,7 +52,7 @@ class TestSkillRegistry:
         assert shared.source == str((project / ".agents" / "skills").resolve())
 
     def test_scan_project_skills(self, tmp_path: Path):
-        skills_dir = tmp_path / ".openyak" / "skills"
+        skills_dir = tmp_path / ".fpiagent" / "skills"
         _create_skill(skills_dir, "my-skill", "A project skill.")
 
         registry = SkillRegistry()
@@ -97,7 +97,7 @@ class TestSkillRegistry:
         _create_skill(bundled, "shared", "From bundled")
 
         project = tmp_path / "project"
-        project_skills = project / ".openyak" / "skills"
+        project_skills = project / ".fpiagent" / "skills"
         _create_skill(project_skills, "shared", "From project")
 
         registry = SkillRegistry(bundled_dir=bundled)
@@ -139,7 +139,7 @@ class TestSkillRegistry:
         assert skills[0].name == "one"
 
     def test_invalid_skill_file_skipped(self, tmp_path: Path):
-        skills_dir = tmp_path / ".openyak" / "skills" / "bad"
+        skills_dir = tmp_path / ".fpiagent" / "skills" / "bad"
         skills_dir.mkdir(parents=True)
         (skills_dir / "SKILL.md").write_text(
             "No frontmatter at all", encoding="utf-8"

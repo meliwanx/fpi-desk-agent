@@ -122,6 +122,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     app.state.engine = engine
     app.state.session_factory = session_factory
+    app.state.audit_outbox_task = None
+    if settings.audit_sync_enabled and settings.audit_server_url.strip():
+        from app.audit.client import audit_outbox_worker
+
+        app.state.audit_outbox_task = asyncio.create_task(
+            audit_outbox_worker(session_factory, settings),
+            name="audit-outbox-worker",
+        )
 
     # Company-user auth lives in a separate remote database so local chat data
     # can stay in the existing desktop SQLite store.
@@ -376,7 +384,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.provider_registry = registry
     set_provider_registry(registry)
 
-    # Agent registry (built-in + custom agents from config / .openyak/agents/*.md)
+    # Agent registry (built-in + custom agents from config / .fpiagent/agents/*.md)
     agent_registry = AgentRegistry()
     agent_registry.load_custom_agents(settings.agents, settings.project_dir)
     app.state.agent_registry = agent_registry
@@ -568,6 +576,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     im = get_index_manager()
     if im is not None:
         await im.shutdown()
+
+    audit_outbox_task = getattr(app.state, "audit_outbox_task", None)
+    if audit_outbox_task is not None:
+        audit_outbox_task.cancel()
+        await asyncio.gather(audit_outbox_task, return_exceptions=True)
 
     # Stop managed Ollama process
     ollama_mgr = getattr(app.state, "ollama_manager", None)

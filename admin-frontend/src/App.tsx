@@ -21,6 +21,8 @@ type Tab =
   | "users"
   | "actions"
   | "models"
+  | "connectors"
+  | "announcements"
   | "updates";
 
 interface UserInfo {
@@ -34,6 +36,35 @@ interface UserInfo {
 interface LoginResponse {
   token: string;
   user: UserInfo;
+}
+
+interface ConnectorPolicyEntry {
+  connector_id: string;
+  name: string;
+  description: string;
+  category: string;
+  icon_url: string;
+  enabled: boolean;
+  status: string;
+  allowed_user_ids: string[];
+}
+
+interface ConnectorPolicy {
+  connectors: ConnectorPolicyEntry[];
+  users: UserInfo[];
+}
+
+interface AnnouncementPolicy {
+  id: string;
+  enabled: boolean;
+  content: string;
+  target_user_ids: string[];
+  published_by_user_id: string;
+  published_by_email: string;
+  published_by_display_name: string;
+  time_created: string;
+  time_updated: string;
+  users: UserInfo[];
 }
 
 interface Summary {
@@ -179,6 +210,9 @@ interface TranscriptMessage {
   id: string;
   role: string;
   data: Record<string, unknown>;
+  model_id: string | null;
+  provider_id: string | null;
+  time_created?: string;
   parts: TranscriptPart[];
 }
 
@@ -218,6 +252,8 @@ interface AuditEntry extends TranscriptPart {
     id: string;
     role: string;
     data: Record<string, unknown>;
+    model_id: string | null;
+    provider_id: string | null;
     time_created: string;
   };
   session: AuditSession | null;
@@ -246,11 +282,13 @@ interface UpdatePolicy {
 interface UpdateAsset {
   id: string;
   platform: string;
+  name: string;
   version: string;
   original_filename: string;
   mime_type: string;
   size_bytes: number;
   sha256: string;
+  md5: string;
   signature: string;
   uploaded_by_user_id: string;
   uploaded_by_email: string;
@@ -258,6 +296,10 @@ interface UpdateAsset {
   download_count: number;
   time_created: string;
   time_updated: string;
+}
+
+interface UpdateAssetList {
+  items: UpdateAsset[];
 }
 
 type UpdateAssetIdKey = "macos_asset_id" | "windows_asset_id" | "linux_asset_id" | "default_asset_id";
@@ -302,6 +344,11 @@ function roleLabel(role: string): string {
     system: "系统",
     tool: "工具",
   }[role] || role || "消息";
+}
+
+function modelLabel(modelId?: string | null, providerId?: string | null): string {
+  if (providerId && modelId) return `${providerId} / ${modelId}`;
+  return modelId || providerId || "";
 }
 
 function partTypeLabel(type: string): string {
@@ -376,6 +423,7 @@ function RawDataDetails({ data }: { data: unknown }) {
 function AuditPartView({ part, token }: { part: TranscriptPart; token: string }) {
   const text = textFromPart(part);
   const hasStructured = Boolean(part.tool_call || part.file || part.usage || (part.risks && part.risks.length > 0));
+  const fileSource = part.data?.source === "generated" ? "AI 生成文件" : "用户上传文件";
   return (
     <div className="audit-part">
       <div className="audit-part-header">
@@ -391,7 +439,7 @@ function AuditPartView({ part, token }: { part: TranscriptPart; token: string })
         <div className="audit-box">
           <div>
             <strong>{part.file.name}</strong>
-            <div className="muted">{part.file.mime_type || "文件"} · {formatNumber(part.file.size)} bytes</div>
+            <div className="muted">{fileSource} · {part.file.mime_type || "文件"} · {formatNumber(part.file.size)} bytes</div>
           </div>
           {part.file.content_uploaded && part.file.download_url ? (
             <button className="button outline" onClick={() => void downloadFile(part.file!.download_url!, token)}>下载</button>
@@ -447,6 +495,71 @@ async function downloadFile(url: string, token: string): Promise<void> {
   URL.revokeObjectURL(objectUrl);
 }
 
+interface TranscriptTurn {
+  id: string;
+  user: TranscriptMessage | null;
+  assistants: TranscriptMessage[];
+}
+
+function buildTranscriptTurns(messages: TranscriptMessage[]): TranscriptTurn[] {
+  const turns: TranscriptTurn[] = [];
+  let current: TranscriptTurn | null = null;
+  for (const message of messages) {
+    if (message.role === "user") {
+      current = { id: message.id, user: message, assistants: [] };
+      turns.push(current);
+      continue;
+    }
+    if (!current) {
+      current = { id: `orphan-${message.id}`, user: null, assistants: [] };
+      turns.push(current);
+    }
+    current.assistants.push(message);
+  }
+  return turns;
+}
+
+function AuditChatMessage({ message, token }: { message: TranscriptMessage; token: string }) {
+  const isUser = message.role === "user";
+  return (
+    <article className={`admin-chat-message ${isUser ? "user" : "assistant"}`}>
+      <div className="admin-chat-avatar">{isUser ? "用" : "AI"}</div>
+      <div className="admin-chat-bubble">
+        <div className="admin-chat-head">
+          <span className={`role-badge ${message.role}`}>{roleLabel(message.role)}</span>
+          {modelLabel(message.model_id, message.provider_id) && (
+            <span className="model-badge">模型：{modelLabel(message.model_id, message.provider_id)}</span>
+          )}
+          {message.time_created && <span className="muted">{compactDate(message.time_created)}</span>}
+        </div>
+        <div className="admin-chat-parts">
+          {message.parts.map((part) => (
+            <AuditPartView key={part.id} part={part} token={token} />
+          ))}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function AuditChatTranscript({ messages, token }: { messages: TranscriptMessage[]; token: string }) {
+  const turns = buildTranscriptTurns(messages).slice().reverse();
+  return (
+    <div className="admin-chat-scroll">
+      <div className="admin-chat-thread">
+        {turns.map((turn) => (
+          <section className="admin-chat-turn" key={turn.id}>
+            {turn.user && <AuditChatMessage message={turn.user} token={token} />}
+            {turn.assistants.map((message) => (
+              <AuditChatMessage key={message.id} message={message} token={token} />
+            ))}
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function useApi(token: string) {
   return async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers = new Headers(init.headers);
@@ -458,6 +571,40 @@ function useApi(token: string) {
     return response.json() as Promise<T>;
   };
 }
+
+const NAV_GROUPS: Array<{
+  title: string;
+  items: Array<{ key: Tab; label: string; marker: string }>;
+}> = [
+  {
+    title: "运营概览",
+    items: [
+      { key: "overview", label: "总览", marker: "总" },
+      { key: "analytics", label: "数据分析", marker: "析" },
+    ],
+  },
+  {
+    title: "审计追踪",
+    items: [
+      { key: "sessions", label: "会话审计", marker: "会" },
+      { key: "allInfo", label: "全部信息", marker: "全" },
+      { key: "risks", label: "风险发现", marker: "险" },
+      { key: "tools", label: "工具调用", marker: "工" },
+      { key: "feedback", label: "问题反馈", marker: "馈" },
+    ],
+  },
+  {
+    title: "企业管控",
+    items: [
+      { key: "users", label: "员工管理", marker: "员" },
+      { key: "actions", label: "管控日志", marker: "志" },
+      { key: "models", label: "模型管控", marker: "模" },
+      { key: "connectors", label: "连接器管控", marker: "连" },
+      { key: "announcements", label: "通知公告", marker: "告" },
+      { key: "updates", label: "版本更新", marker: "版" },
+    ],
+  },
+];
 
 export function App() {
   const [session, setSession] = useState<LoginResponse | null>(() => storedSession());
@@ -485,41 +632,45 @@ export function App() {
           </div>
         </div>
         <nav className="nav">
-          {[
-            ["overview", "总览"],
-            ["sessions", "会话审计"],
-            ["allInfo", "全部信息"],
-            ["analytics", "数据分析"],
-            ["risks", "风险发现"],
-            ["tools", "工具调用"],
-            ["feedback", "问题反馈"],
-            ["users", "员工管理"],
-            ["actions", "管控日志"],
-            ["models", "模型管控"],
-            ["updates", "版本更新"],
-          ].map(([key, label]) => (
-            <button
-              key={key}
-              className={`nav-item ${tab === key ? "active" : ""}`}
-              onClick={() => setTab(key as Tab)}
-            >
-              {label}
-            </button>
+          {NAV_GROUPS.map((group) => (
+            <div className="nav-group" key={group.title}>
+              <div className="nav-group-title">{group.title}</div>
+              {group.items.map((item) => (
+                <button
+                  key={item.key}
+                  className={`nav-item ${tab === item.key ? "active" : ""}`}
+                  onClick={() => setTab(item.key)}
+                >
+                  <span className="nav-marker">{item.marker}</span>
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
         <div className="sidebar-footer">
-          <div className="muted">{session.user.display_name || session.user.email}</div>
+          <div className="sidebar-user">
+            <span>{(session.user.display_name || session.user.email || "A").slice(0, 1).toUpperCase()}</span>
+            <div>
+              <strong>{session.user.display_name || session.user.email}</strong>
+              <small>{session.user.role || "admin"}</small>
+            </div>
+          </div>
           <button className="button ghost full" onClick={logout}>退出登录</button>
         </div>
       </aside>
 
       <main className="content">
         <header className="page-header">
-          <div>
+          <div className="page-title-block">
+            <span className="page-kicker">FPI Agent Console</span>
             <h1>{tabTitle(tab)}</h1>
             <p>{tabSubtitle(tab)}</p>
           </div>
-          <button className="button outline" onClick={() => window.location.reload()}>刷新</button>
+          <div className="header-actions">
+            <span className="user-chip">{session.user.display_name || session.user.email}</span>
+            <button className="button outline" onClick={() => window.location.reload()}>刷新</button>
+          </div>
         </header>
 
         {tab === "overview" && <Overview api={api} />}
@@ -529,9 +680,11 @@ export function App() {
         {tab === "risks" && <Risks api={api} />}
         {tab === "tools" && <ToolCalls api={api} />}
         {tab === "feedback" && <FeedbackPanel api={api} token={token} />}
-        {tab === "users" && <Users api={api} />}
+        {tab === "users" && <Users api={api} currentUserId={session.user.id} />}
         {tab === "actions" && <AdminActions api={api} />}
         {tab === "models" && <ModelPolicyPanel api={api} />}
+        {tab === "connectors" && <ConnectorPolicyPanel api={api} />}
+        {tab === "announcements" && <AnnouncementPanel api={api} />}
         {tab === "updates" && <UpdatePolicyPanel api={api} />}
       </main>
     </div>
@@ -550,6 +703,8 @@ function tabTitle(tab: Tab): string {
     users: "员工管理",
     actions: "管控日志",
     models: "模型管控",
+    connectors: "连接器管控",
+    announcements: "通知公告",
     updates: "版本更新",
   }[tab];
 }
@@ -566,6 +721,8 @@ function tabSubtitle(tab: Tab): string {
     users: "创建员工账号、查看角色和启用状态。",
     actions: "追踪管理员的下载、踢号、批量管控等关键动作。",
     models: "统一控制客户端可见模型和默认模型。",
+    connectors: "按员工开放连接器能力，未授权员工客户端不可见也不可启用。",
+    announcements: "发布客户端顶部公告，可选择全员或指定员工展示。",
     updates: "发布客户端版本策略，控制是否强制员工升级。",
   }[tab];
 }
@@ -790,17 +947,7 @@ function Sessions({ api, token }: { api: ReturnType<typeof useApi>; token: strin
         {messages.length === 0 ? (
           <p className="muted">选择上方会话查看详情</p>
         ) : (
-          messages.map((message) => (
-            <article className="message" key={message.id}>
-              <div className="message-head">
-                <span className={`role-badge ${message.role}`}>{roleLabel(message.role)}</span>
-                <span className="muted">{message.parts.length} 条内容</span>
-              </div>
-              {message.parts.map((part) => (
-                <AuditPartView key={part.id} part={part} token={token} />
-              ))}
-            </article>
-          ))
+          <AuditChatTranscript messages={messages} token={token} />
         )}
       </section>
     </div>
@@ -898,6 +1045,9 @@ function AllAuditInfo({ api, token }: { api: ReturnType<typeof useApi>; token: s
               <div className="detail-meta">
                 <span>{selectedEntry.session?.title || selectedEntry.session?.id || "-"}</span>
                 <span>{roleLabel(selectedEntry.message.role)}</span>
+                {modelLabel(selectedEntry.message.model_id, selectedEntry.message.provider_id) && (
+                  <span>模型：{modelLabel(selectedEntry.message.model_id, selectedEntry.message.provider_id)}</span>
+                )}
                 <span>{compactDate(selectedEntry.time_created)}</span>
               </div>
             )}
@@ -1154,7 +1304,7 @@ function FeedbackImagePreview({ url, token, alt }: { url: string; token: string;
   );
 }
 
-function Users({ api }: { api: ReturnType<typeof useApi> }) {
+function Users({ api, currentUserId }: { api: ReturnType<typeof useApi>; currentUserId: string }) {
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [sessions, setSessions] = useState<CompanySession[]>([]);
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
@@ -1226,6 +1376,28 @@ function Users({ api }: { api: ReturnType<typeof useApi> }) {
     setSelectedSessionIds([]);
     setMessage("已踢下线该员工的全部设备");
     await loadSessions();
+  }
+
+  async function deleteUser(user: UserInfo) {
+    if (user.id === currentUserId) {
+      setError("不能删除当前登录账号");
+      return;
+    }
+    const name = user.display_name || user.email;
+    if (!confirm(`确认删除员工「${name}」？删除后该账号无法登录，并会踢下线所有设备。`)) return;
+
+    setError("");
+    setMessage("");
+    try {
+      await api(`/api/admin/users/${encodeURIComponent(user.id)}`, {
+        method: "DELETE",
+      });
+      setSelectedSessionIds([]);
+      setMessage(`已删除员工：${name}`);
+      await loadAll();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "删除员工失败");
+    }
   }
 
   async function revokeSelectedSessions() {
@@ -1318,7 +1490,16 @@ function Users({ api }: { api: ReturnType<typeof useApi> }) {
                 <td>{user.is_active ? "启用" : "停用"}</td>
                 <td>{sessionsForUser(user.id).filter((session) => session.is_online).length}</td>
                 <td>
-                  <button className="button ghost danger-text" onClick={() => void revokeUserSessions(user.id)}>踢全部设备</button>
+                  <div className="table-actions">
+                    <button className="button ghost danger-text" onClick={() => void revokeUserSessions(user.id)}>踢全部设备</button>
+                    <button
+                      className="button ghost danger-text"
+                      disabled={user.id === currentUserId}
+                      onClick={() => void deleteUser(user)}
+                    >
+                      删除员工
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -1329,9 +1510,303 @@ function Users({ api }: { api: ReturnType<typeof useApi> }) {
   );
 }
 
+function ConnectorPolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
+  const [policy, setPolicy] = useState<ConnectorPolicy | null>(null);
+  const [message, setMessage] = useState("");
+
+  async function loadPolicy() {
+    const data = await api<ConnectorPolicy>("/api/admin/connector-policy");
+    setPolicy(data);
+  }
+
+  useEffect(() => {
+    void loadPolicy();
+  }, []);
+
+  function toggleUser(connectorId: string, userId: string, checked: boolean) {
+    if (!policy) return;
+    setPolicy({
+      ...policy,
+      connectors: policy.connectors.map((connector) => {
+        if (connector.connector_id !== connectorId) return connector;
+        const current = new Set(connector.allowed_user_ids);
+        if (checked) {
+          current.add(userId);
+        } else {
+          current.delete(userId);
+        }
+        return {
+          ...connector,
+          allowed_user_ids: Array.from(current),
+        };
+      }),
+    });
+  }
+
+  async function savePolicy() {
+    if (!policy) return;
+    setMessage("");
+    try {
+      const saved = await api<ConnectorPolicy>("/api/admin/connector-policy", {
+        method: "PUT",
+        body: JSON.stringify({
+          connectors: policy.connectors.map((connector) => ({
+            connector_id: connector.connector_id,
+            allowed_user_ids: connector.allowed_user_ids,
+          })),
+        }),
+      });
+      setPolicy(saved);
+      setMessage("已保存，员工客户端刷新连接器列表后生效");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "保存失败");
+    }
+  }
+
+  if (!policy) return <section className="card muted">加载中...</section>;
+
+  return (
+    <section className="card">
+      <div className="toolbar">
+        <div>
+          <h2>连接器开放范围</h2>
+          <p className="muted">默认不开放。勾选员工后，该员工才能在客户端看到并手动启用对应连接器。</p>
+        </div>
+        <button className="button outline" onClick={() => void loadPolicy()}>刷新</button>
+        <button className="button" onClick={() => void savePolicy()}>保存策略</button>
+      </div>
+
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>连接器</th>
+              <th>状态</th>
+              <th>开放员工</th>
+            </tr>
+          </thead>
+          <tbody>
+            {policy.connectors.map((connector) => (
+              <tr key={connector.connector_id}>
+                <td>
+                  <div className="connector-policy-name">
+                    {connector.icon_url && <img src={connector.icon_url} alt="" />}
+                    <div>
+                      <strong>{connector.name || connector.connector_id}</strong>
+                      <span>{connector.description || connector.connector_id}</span>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <span className={`pill ${connector.enabled ? "success" : "muted-pill"}`}>
+                    {connector.enabled ? "已启用" : "默认关闭"}
+                  </span>
+                </td>
+                <td>
+                  <div className="connector-user-grid">
+                    {policy.users.map((user) => (
+                      <label className="connector-user-choice" key={`${connector.connector_id}-${user.id}`}>
+                        <input
+                          type="checkbox"
+                          checked={connector.allowed_user_ids.includes(user.id)}
+                          disabled={user.is_active === false}
+                          onChange={(event) => toggleUser(connector.connector_id, user.id, event.target.checked)}
+                        />
+                        <span>{user.display_name || user.email}</span>
+                      </label>
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {policy.connectors.length === 0 && (
+              <tr>
+                <td colSpan={3} className="muted">当前没有可管控的连接器</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {message && <p className={message.startsWith("已保存") ? "success" : "error"}>{message}</p>}
+    </section>
+  );
+}
+
+function AnnouncementPanel({ api }: { api: ReturnType<typeof useApi> }) {
+  const [policy, setPolicy] = useState<AnnouncementPolicy | null>(null);
+  const [scope, setScope] = useState<"all" | "selected">("all");
+  const [message, setMessage] = useState("");
+
+  async function loadPolicy() {
+    const data = await api<AnnouncementPolicy>("/api/admin/announcement");
+    setPolicy(data);
+    setScope(data.target_user_ids.length > 0 ? "selected" : "all");
+  }
+
+  useEffect(() => {
+    void loadPolicy();
+  }, []);
+
+  function updateContent(content: string) {
+    if (!policy) return;
+    setPolicy({ ...policy, content });
+  }
+
+  function toggleTargetUser(userId: string, checked: boolean) {
+    if (!policy) return;
+    const current = new Set(policy.target_user_ids);
+    if (checked) {
+      current.add(userId);
+    } else {
+      current.delete(userId);
+    }
+    setPolicy({ ...policy, target_user_ids: Array.from(current) });
+  }
+
+  async function saveAnnouncement(enabled: boolean) {
+    if (!policy) return;
+    const target_user_ids = scope === "all" ? [] : policy.target_user_ids;
+    if (enabled && !policy.content.trim()) {
+      setMessage("请先填写公告内容");
+      return;
+    }
+    if (enabled && scope === "selected" && target_user_ids.length === 0) {
+      setMessage("请选择至少一名员工，或切换为全员公告");
+      return;
+    }
+
+    setMessage("");
+    try {
+      const saved = await api<AnnouncementPolicy>("/api/admin/announcement", {
+        method: "PUT",
+        body: JSON.stringify({
+          enabled,
+          content: policy.content,
+          target_user_ids,
+        }),
+      });
+      setPolicy(saved);
+      setScope(saved.target_user_ids.length > 0 ? "selected" : "all");
+      setMessage(enabled ? "公告已发布，员工客户端将在下一次轮询时显示" : "公告已停用");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "保存失败");
+    }
+  }
+
+  if (!policy) return <section className="card muted">加载中...</section>;
+
+  return (
+    <div className="stack">
+      <section className="card">
+        <div className="toolbar">
+          <div>
+            <h2>发布公告</h2>
+            <p className="muted">员工端每 30 秒检查一次新公告。每次发布都会生成新的公告版本。</p>
+          </div>
+          <button className="button outline" onClick={() => void loadPolicy()}>刷新</button>
+          <button className="button outline" onClick={() => void saveAnnouncement(false)} disabled={!policy.enabled}>
+            停用公告
+          </button>
+          <button className="button" onClick={() => void saveAnnouncement(true)}>发布公告</button>
+        </div>
+
+        <div className="form-grid announcement-form">
+          <label className="model-field model-field-wide">
+            <span>公告内容（支持 Markdown）</span>
+            <textarea
+              className="input textarea announcement-textarea"
+              placeholder="请输入需要展示给员工的通知公告，例如：[下载地址](https://example.com)"
+              value={policy.content}
+              onChange={(event) => updateContent(event.target.value)}
+            />
+            <small className="muted">支持加粗、列表和链接；链接会在员工客户端中直接点击打开。</small>
+          </label>
+
+          <div className="model-field model-field-wide">
+            <span>展示范围</span>
+            <div className="announcement-scope-row">
+              <label className="connector-user-choice">
+                <input
+                  type="radio"
+                  checked={scope === "all"}
+                  onChange={() => setScope("all")}
+                />
+                <span>全员</span>
+              </label>
+              <label className="connector-user-choice">
+                <input
+                  type="radio"
+                  checked={scope === "selected"}
+                  onChange={() => setScope("selected")}
+                />
+                <span>指定员工</span>
+              </label>
+            </div>
+          </div>
+
+          {scope === "selected" && (
+            <div className="model-field model-field-wide">
+              <span>选择员工</span>
+              <div className="connector-user-grid announcement-user-grid">
+                {policy.users.map((user) => (
+                  <label className="connector-user-choice" key={`announcement-${user.id}`}>
+                    <input
+                      type="checkbox"
+                      checked={policy.target_user_ids.includes(user.id)}
+                      disabled={user.is_active === false}
+                      onChange={(event) => toggleTargetUser(user.id, event.target.checked)}
+                    />
+                    <span>{user.display_name || user.email}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {message && <p className={message.startsWith("公告已") ? "success" : "error"}>{message}</p>}
+      </section>
+
+      <section className="card">
+        <div className="toolbar">
+          <div>
+            <h2>当前公告</h2>
+            <p className="muted">
+              {policy.enabled ? "启用中" : "未启用"}
+              {policy.id ? ` · ${compactDate(policy.time_updated)}` : ""}
+            </p>
+          </div>
+          <span className={`pill ${policy.enabled ? "success" : "muted-pill"}`}>
+            {policy.enabled ? "展示中" : "已关闭"}
+          </span>
+        </div>
+        {policy.content ? (
+          <div className="announcement-preview">
+            <p>{policy.content}</p>
+            <span>
+              范围：
+              {policy.target_user_ids.length === 0
+                ? "全员"
+                : `指定员工 ${policy.target_user_ids.length} 人`}
+            </span>
+            <span>发布人：{policy.published_by_display_name || policy.published_by_email || "-"}</span>
+          </div>
+        ) : (
+          <p className="muted">暂无公告内容</p>
+        )}
+      </section>
+    </div>
+  );
+}
+
 function ModelPolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
   const [policy, setPolicy] = useState<ModelPolicy | null>(null);
   const [message, setMessage] = useState("");
+  const [dialog, setDialog] = useState<{
+    mode: "create" | "edit";
+    index: number | null;
+    model: ModelEntry;
+  } | null>(null);
 
   async function loadPolicy() {
     const data = await api<ModelPolicy>("/api/admin/model-policy");
@@ -1345,6 +1820,42 @@ function ModelPolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
   function updateModel(index: number, patch: Partial<ModelEntry>) {
     if (!policy) return;
     setPolicy(updateModelInPolicy(policy, index, patch));
+  }
+
+  function openCreateDialog() {
+    setDialog({
+      mode: "create",
+      index: null,
+      model: {
+        provider_id: `custom_${Math.random().toString(36).slice(2, 8)}`,
+        id: "",
+        name: "",
+        protocol: DEFAULT_MODEL_PROTOCOL,
+        base_url: "https://",
+        enabled: true,
+        api_key: "",
+      },
+    });
+  }
+
+  function openEditDialog(index: number) {
+    if (!policy) return;
+    setDialog({
+      mode: "edit",
+      index,
+      model: { ...policy.models[index], api_key: "" },
+    });
+  }
+
+  function applyDialogModel(model: ModelEntry) {
+    if (!policy || !dialog) return;
+    if (dialog.mode === "create") {
+      setPolicy(addModelToPolicy(policy, model));
+    } else if (dialog.index !== null) {
+      setPolicy(updateModelInPolicy(policy, dialog.index, model));
+    }
+    setDialog(null);
+    setMessage("模型配置已更新，请点击保存策略使员工客户端生效");
   }
 
   async function savePolicy() {
@@ -1368,94 +1879,226 @@ function ModelPolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
   return (
     <section className="card">
       <div className="toolbar">
-        <button
-          className="button outline"
-          onClick={() => setPolicy(addModelToPolicy(policy, {
-            provider_id: `custom_${Math.random().toString(36).slice(2, 8)}`,
-            id: "",
-            name: "",
-            protocol: DEFAULT_MODEL_PROTOCOL,
-            base_url: "https://",
-            enabled: true,
-            api_key: "",
-          }))}
-        >
-          添加模型
-        </button>
+        <button className="button outline" onClick={openCreateDialog}>新增模型</button>
         <button className="button" onClick={() => void savePolicy()}>保存策略</button>
       </div>
-      <div className="model-list">
-        {policy.models.map((model, index) => {
-          const enabled = model.enabled !== false;
-          return (
-          <div className={`model-row ${enabled ? "" : "is-disabled"}`} key={`${index}-${model.provider_id}-${model.id}`}>
-            <label className="default-model-choice">
-              <input
-                type="radio"
-                name="default-model"
-                checked={model.provider_id === policy.default_provider_id && model.id === policy.default_model_id}
-                disabled={!enabled || !model.provider_id.trim() || !model.id.trim()}
-                onChange={() => setPolicy(setDefaultModelInPolicy(policy, index))}
-              />
-              <span>默认</span>
-            </label>
-            <button
-              className={`button ghost ${enabled ? "" : "button-state-muted"}`}
-              onClick={() => updateModel(index, { enabled: !enabled })}
-            >
-              {enabled ? "禁用" : "启用"}
-            </button>
-            <label className="model-field">
-              <span>协议</span>
-              <select className="input" value={model.protocol || DEFAULT_MODEL_PROTOCOL} onChange={(e) => updateModel(index, { protocol: e.target.value })}>
-                <option value="openai_compatible">OpenAI 兼容</option>
-                <option value="anthropic">Anthropic</option>
-              </select>
-            </label>
-            <label className="model-field">
-              <span>供应商 ID</span>
-              <input className="input" placeholder="custom_provider" value={model.provider_id} onChange={(e) => updateModel(index, { provider_id: e.target.value })} />
-            </label>
-            <label className="model-field model-field-wide">
-              <span>Base URL</span>
-              <input className="input" placeholder={model.protocol === "anthropic" ? "Anthropic 可留空" : "https://example.com/v1"} value={model.base_url} onChange={(e) => updateModel(index, { base_url: e.target.value })} />
-            </label>
-            <label className="model-field">
-              <span>Model</span>
-              <input className="input" placeholder="gpt-5.5" value={model.id} onChange={(e) => updateModel(index, { id: e.target.value })} />
-            </label>
-            <label className="model-field">
-              <span>显示名称</span>
-              <input className="input" placeholder="GPT-5.5" value={model.name} onChange={(e) => updateModel(index, { name: e.target.value })} />
-            </label>
-            <label className="model-field model-field-wide">
-              <span>API Key</span>
-              <input
-                className="input"
-                type="password"
-                placeholder={model.masked_key ? `已保存 ${model.masked_key}，留空不修改` : "sk-..."}
-                value={model.api_key || ""}
-                onChange={(e) => updateModel(index, { api_key: e.target.value })}
-              />
-            </label>
-          </div>
-          );
-        })}
+      <div className="table-scroll">
+        <table className="model-policy-table">
+          <thead>
+            <tr>
+              <th>默认</th>
+              <th>状态</th>
+              <th>协议</th>
+              <th>供应商 ID</th>
+              <th>模型 ID</th>
+              <th>显示名称</th>
+              <th>Base URL</th>
+              <th>Key</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {policy.models.map((model, index) => {
+              const enabled = model.enabled !== false;
+              const isDefault = model.provider_id === policy.default_provider_id && model.id === policy.default_model_id;
+              return (
+                <tr className={enabled ? "" : "is-disabled"} key={`${index}-${model.provider_id}-${model.id}`}>
+                  <td>
+                    <label className="default-model-choice compact">
+                      <input
+                        type="radio"
+                        name="default-model"
+                        checked={isDefault}
+                        disabled={!enabled || !model.provider_id.trim() || !model.id.trim()}
+                        onChange={() => setPolicy(setDefaultModelInPolicy(policy, index))}
+                      />
+                      <span>{isDefault ? "当前" : "设为默认"}</span>
+                    </label>
+                  </td>
+                  <td>
+                    <span className={`pill ${enabled ? "success" : "muted-pill"}`}>{enabled ? "启用" : "禁用"}</span>
+                  </td>
+                  <td>{model.protocol === "anthropic" ? "Anthropic" : "OpenAI 兼容"}</td>
+                  <td className="mono">{model.provider_id || "-"}</td>
+                  <td className="mono">{model.id || "-"}</td>
+                  <td>{model.name || "-"}</td>
+                  <td className="mono">{model.protocol === "anthropic" ? "-" : model.base_url || "-"}</td>
+                  <td>{model.masked_key || (model.api_key ? "待保存新 Key" : "-")}</td>
+                  <td>
+                    <div className="table-actions">
+                      <button className="button ghost" onClick={() => openEditDialog(index)}>编辑</button>
+                      <button
+                        className={`button ghost ${enabled ? "danger-text" : ""}`}
+                        onClick={() => updateModel(index, { enabled: !enabled })}
+                      >
+                        {enabled ? "禁用" : "启用"}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
       {message && <p className={message.startsWith("已保存") ? "success" : "error"}>{message}</p>}
+      {dialog && (
+        <ModelPolicyDialog
+          api={api}
+          mode={dialog.mode}
+          model={dialog.model}
+          onClose={() => setDialog(null)}
+          onSave={applyDialogModel}
+        />
+      )}
     </section>
+  );
+}
+
+interface ModelPolicyTestResponse {
+  ok: boolean;
+  message: string;
+  test_token: string;
+}
+
+function ModelPolicyDialog({
+  api,
+  mode,
+  model,
+  onClose,
+  onSave,
+}: {
+  api: ReturnType<typeof useApi>;
+  mode: "create" | "edit";
+  model: ModelEntry;
+  onClose: () => void;
+  onSave: (model: ModelEntry) => void;
+}) {
+  const [draft, setDraft] = useState<ModelEntry>(model);
+  const [testState, setTestState] = useState<{
+    status: "idle" | "testing" | "passed" | "failed";
+    message: string;
+  }>({ status: "idle", message: "保存前必须测试通过。" });
+
+  function patchDraft(patch: Partial<ModelEntry>) {
+    setDraft((prev) => ({ ...prev, ...patch, test_token: "" }));
+    setTestState({ status: "idle", message: "配置已变更，请重新测试。" });
+  }
+
+  async function testModel() {
+    setTestState({ status: "testing", message: "正在测试模型连通性..." });
+    try {
+      const result = await api<ModelPolicyTestResponse>("/api/admin/model-policy/test", {
+        method: "POST",
+        body: JSON.stringify(draft),
+      });
+      setDraft((prev) => ({ ...prev, test_token: result.test_token }));
+      setTestState({
+        status: result.ok ? "passed" : "failed",
+        message: result.message || (result.ok ? "测试通过" : "测试失败"),
+      });
+    } catch (error) {
+      setDraft((prev) => ({ ...prev, test_token: "" }));
+      setTestState({
+        status: "failed",
+        message: error instanceof Error ? error.message : "模型测试失败",
+      });
+    }
+  }
+
+  const canSave = testState.status === "passed" && !!draft.test_token;
+  const isAnthropic = draft.protocol === "anthropic";
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal-card" role="dialog" aria-modal="true" aria-label={mode === "create" ? "新增模型" : "编辑模型"}>
+        <div className="modal-header">
+          <div>
+            <h2>{mode === "create" ? "新增模型" : "编辑模型"}</h2>
+            <p>新增或更改模型必须测试通过后才能保存。</p>
+          </div>
+          <button className="button ghost" onClick={onClose}>关闭</button>
+        </div>
+
+        <div className="modal-grid">
+          <label className="model-field">
+            <span>协议</span>
+            <select className="input" value={draft.protocol || DEFAULT_MODEL_PROTOCOL} onChange={(event) => patchDraft({ protocol: event.target.value, base_url: event.target.value === "anthropic" ? "" : draft.base_url })}>
+              <option value="openai_compatible">OpenAI 兼容</option>
+              <option value="anthropic">Anthropic</option>
+            </select>
+          </label>
+          <label className="model-field">
+            <span>供应商 ID</span>
+            <input className="input" placeholder="custom_provider" value={draft.provider_id} onChange={(event) => patchDraft({ provider_id: event.target.value })} />
+          </label>
+          <label className="model-field">
+            <span>模型 ID</span>
+            <input className="input" placeholder="gpt-5.5" value={draft.id} onChange={(event) => patchDraft({ id: event.target.value })} />
+          </label>
+          <label className="model-field">
+            <span>显示名称</span>
+            <input className="input" placeholder="GPT-5.5" value={draft.name} onChange={(event) => patchDraft({ name: event.target.value })} />
+          </label>
+          <label className="model-field model-field-wide">
+            <span>Base URL</span>
+            <input
+              className="input"
+              disabled={isAnthropic}
+              placeholder={isAnthropic ? "Anthropic 不需要填写" : "https://example.com/v1"}
+              value={isAnthropic ? "" : draft.base_url}
+              onChange={(event) => patchDraft({ base_url: event.target.value })}
+            />
+          </label>
+          <label className="model-field model-field-wide">
+            <span>API Key</span>
+            <input
+              className="input"
+              type="password"
+              placeholder={draft.masked_key ? `已保存 ${draft.masked_key}，留空沿用旧 Key` : "sk-..."}
+              value={draft.api_key || ""}
+              onChange={(event) => patchDraft({ api_key: event.target.value })}
+            />
+          </label>
+        </div>
+
+        <p className={testState.status === "passed" ? "success" : testState.status === "failed" ? "error" : "muted"}>
+          {testState.message}
+        </p>
+
+        <div className="modal-actions">
+          <button className="button outline" disabled={testState.status === "testing"} onClick={() => void testModel()}>
+            {testState.status === "testing" ? "测试中..." : "测试连接"}
+          </button>
+          <button
+            className="button"
+            disabled={testState.status !== "passed" || !canSave}
+            onClick={() => onSave({ ...draft, enabled: draft.enabled !== false })}
+          >
+            保存模型
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
 function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
   const [policy, setPolicy] = useState<UpdatePolicy | null>(null);
+  const [assets, setAssets] = useState<UpdateAsset[]>([]);
   const [message, setMessage] = useState("");
   const [uploadingSlot, setUploadingSlot] = useState<string | null>(null);
+  const [packageName, setPackageName] = useState<Record<string, string>>({});
+  const [assetVersions, setAssetVersions] = useState<Record<string, string>>({});
   const [assetSignatures, setAssetSignatures] = useState<Record<string, string>>({});
 
   async function loadPolicy() {
-    const data = await api<UpdatePolicy>("/api/admin/update-policy");
-    setPolicy(data);
+    const [policyData, assetData] = await Promise.all([
+      api<UpdatePolicy>("/api/admin/update-policy"),
+      api<UpdateAssetList>("/api/admin/update-assets").catch(() => ({ items: [] })),
+    ]);
+    setPolicy(policyData);
+    setAssets(assetData.items || []);
   }
 
   useEffect(() => {
@@ -1467,26 +2110,26 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
     setPolicy({ ...policy, ...patch });
   }
 
-  async function savePolicy() {
-    if (!policy) return;
+  async function savePolicy(nextPolicy = policy) {
+    if (!nextPolicy) return;
     setMessage("");
     try {
       const saved = await api<UpdatePolicy>("/api/admin/update-policy", {
         method: "PUT",
         body: JSON.stringify({
-          enabled: policy.enabled,
-          latest_version: policy.latest_version,
-          min_supported_version: policy.min_supported_version,
-          force_update: policy.force_update,
-          release_notes: policy.release_notes,
-          macos_asset_id: policy.macos_asset_id,
-          windows_asset_id: policy.windows_asset_id,
-          linux_asset_id: policy.linux_asset_id,
-          default_asset_id: policy.default_asset_id,
-          macos_download_url: policy.macos_download_url,
-          windows_download_url: policy.windows_download_url,
-          linux_download_url: policy.linux_download_url,
-          default_download_url: policy.default_download_url,
+          enabled: nextPolicy.enabled,
+          latest_version: nextPolicy.latest_version,
+          min_supported_version: nextPolicy.min_supported_version,
+          force_update: nextPolicy.force_update,
+          release_notes: nextPolicy.release_notes,
+          macos_asset_id: nextPolicy.macos_asset_id,
+          windows_asset_id: nextPolicy.windows_asset_id,
+          linux_asset_id: nextPolicy.linux_asset_id,
+          default_asset_id: nextPolicy.default_asset_id,
+          macos_download_url: nextPolicy.macos_download_url,
+          windows_download_url: nextPolicy.windows_download_url,
+          linux_download_url: nextPolicy.linux_download_url,
+          default_download_url: nextPolicy.default_download_url,
         }),
       });
       setPolicy(saved);
@@ -1496,16 +2139,51 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
     }
   }
 
-  async function uploadAsset(slot: (typeof UPDATE_ASSET_SLOTS)[number], file: File | null) {
-    if (!policy || !file) return;
-    const version = policy.latest_version.trim();
-    if (!version) {
-      setMessage("请先填写最新版号，再上传安装包");
+  function slotForPlatform(platform: string) {
+    return UPDATE_ASSET_SLOTS.find((slot) => slot.platform === platform) || UPDATE_ASSET_SLOTS[3];
+  }
+
+  function setLatestAsset(slot: (typeof UPDATE_ASSET_SLOTS)[number], asset: UpdateAsset) {
+    if (!policy) return;
+    setPolicy({
+      ...policy,
+      latest_version: asset.version,
+      [slot.assetIdKey]: asset.id,
+      [slot.assetKey]: asset,
+    });
+    setMessage(`${slot.label} 已选择 ${asset.name || asset.original_filename}，保存策略后生效`);
+  }
+
+  async function deleteAsset(asset: UpdateAsset, isLatest: boolean) {
+    if (isLatest) return;
+    const displayName = asset.name || asset.original_filename;
+    if (!window.confirm(`确认删除历史包「${displayName}」吗？删除后服务器文件也会移除。`)) {
       return;
     }
+    setMessage("");
+    try {
+      await api<{ success: boolean }>(`/api/admin/update-assets/${asset.id}`, {
+        method: "DELETE",
+      });
+      setAssets((items) => items.filter((item) => item.id !== asset.id));
+      setMessage(`历史包「${displayName}」已删除`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "删除失败");
+    }
+  }
+
+  async function uploadAsset(slot: (typeof UPDATE_ASSET_SLOTS)[number], file: File | null) {
+    if (!policy || !file) return;
+    const version = (assetVersions[slot.platform] || policy.latest_version || "").trim();
+    if (!version) {
+      setMessage("请先填写这个安装包的版本号，再上传安装包");
+      return;
+    }
+    const name = (packageName[slot.platform] || `${slot.label} ${version}`).trim();
 
     const form = new FormData();
     form.set("platform", slot.platform);
+    form.set("name", name);
     form.set("version", version);
     form.set("signature", (assetSignatures[slot.platform] ?? policy[slot.assetKey]?.signature ?? "").trim());
     form.set("file", file);
@@ -1517,12 +2195,9 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
         method: "POST",
         body: form,
       });
-      setPolicy({
-        ...policy,
-        [slot.assetIdKey]: asset.id,
-        [slot.assetKey]: asset,
-      });
-      setMessage(`${slot.label} 安装包已上传，请保存策略后生效`);
+      setAssets((items) => [asset, ...items.filter((item) => item.id !== asset.id)]);
+      setPackageName({ ...packageName, [slot.platform]: "" });
+      setMessage(`${slot.label} 安装包已上传，已进入历史列表，可手动设为最新包`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "上传失败");
     } finally {
@@ -1561,7 +2236,7 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
           <button className="button" onClick={() => void savePolicy()}>保存策略</button>
         </div>
         <div className="hint">
-          直接上传各平台安装包，服务器会作为文件存储提供下载。最低可用版本以下的客户端会被强制更新；非强制更新时，旧版本仍可继续使用。
+          版本号用于展示和发布记录；员工端是否需要更新以当前安装包 SHA-256 是否等于所选最新包为准。上传的历史包都会保留，需要手动选择某个平台的最新包。
         </div>
         {mismatchedSlots.length > 0 && (
           <p className="error">
@@ -1571,17 +2246,17 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
           </p>
         )}
         <div className="form-grid update-form">
-          <label className="model-field">
-            <span>最新版号</span>
-            <input
-              className="input"
-              placeholder="1.4.0"
-              value={policy.latest_version}
-              onChange={(event) => updatePolicy({ latest_version: event.target.value })}
+          <label className="model-field model-field-wide">
+            <span>更新说明</span>
+            <textarea
+              className="input textarea"
+              placeholder="本次更新修复了..."
+              value={policy.release_notes}
+              onChange={(event) => updatePolicy({ release_notes: event.target.value })}
             />
           </label>
-          <label className="model-field">
-            <span>最低可用版本</span>
+          <label className="model-field model-field-wide">
+            <span>兼容旧客户端的最低版本</span>
             <input
               className="input"
               placeholder="1.3.0"
@@ -1590,7 +2265,7 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
             />
           </label>
           <div className="model-field model-field-wide">
-            <span>安装包文件</span>
+            <span>上传新安装包</span>
             <div className="update-asset-grid">
               {UPDATE_ASSET_SLOTS.map((slot) => {
                 const asset = policy[slot.assetKey];
@@ -1606,17 +2281,41 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
                     </div>
                     {asset ? (
                       <div className="update-asset-meta">
-                        <b>{asset.original_filename}</b>
+                        <b>{asset.name || asset.original_filename}</b>
+                        <span>文件：{asset.original_filename}</span>
                         <span>{asset.mime_type || "文件"} · {formatNumber(asset.size_bytes)} bytes</span>
                         <span>上传人：{asset.uploaded_by_display_name || asset.uploaded_by_email || "-"}</span>
                         <span>上传时间：{compactDate(asset.time_created)}</span>
                         <span>下载次数：{formatNumber(asset.download_count)}</span>
                         <span>SHA-256：{asset.sha256.slice(0, 16)}...</span>
+                        <span>MD5：{asset.md5 ? `${asset.md5.slice(0, 16)}...` : "-"}</span>
                         <span>应用内更新签名：{asset.signature ? `${asset.signature.slice(0, 18)}...` : "未配置"}</span>
                       </div>
                     ) : (
                       <p className="muted">员工端匹配不到该平台包时会使用默认包。</p>
                     )}
+                    <input
+                      className="input"
+                      placeholder={`${slot.label} 包名，例如：${slot.label} 1.4.1 正式包`}
+                      value={packageName[slot.platform] || ""}
+                      onChange={(event) =>
+                        setPackageName({
+                          ...packageName,
+                          [slot.platform]: event.target.value,
+                        })
+                      }
+                    />
+                    <input
+                      className="input"
+                      placeholder="版本号，例如：1.4.1"
+                      value={assetVersions[slot.platform] || ""}
+                      onChange={(event) =>
+                        setAssetVersions({
+                          ...assetVersions,
+                          [slot.platform]: event.target.value,
+                        })
+                      }
+                    />
                     <textarea
                       className="input textarea"
                       placeholder="粘贴 Tauri .sig 文件内容；留空则只能打开安装包兜底"
@@ -1638,24 +2337,96 @@ function UpdatePolicyPanel({ api }: { api: ReturnType<typeof useApi> }) {
                           void uploadAsset(slot, selected);
                         }}
                       />
-                      {isUploading ? "上传中..." : asset ? "替换文件" : "上传文件"}
+                      {isUploading ? "上传中..." : "上传为历史包"}
                     </label>
                   </div>
                 );
               })}
             </div>
           </div>
-          <label className="model-field model-field-wide">
-            <span>更新说明</span>
-            <textarea
-              className="input textarea"
-              placeholder="本次更新修复了..."
-              value={policy.release_notes}
-              onChange={(event) => updatePolicy({ release_notes: event.target.value })}
-            />
-          </label>
         </div>
-        {message && <p className={message.startsWith("已保存") ? "success" : "error"}>{message}</p>}
+        {message && (
+          <p className={/(已保存|已选择|已上传|已删除)/.test(message) ? "success" : "error"}>
+            {message}
+          </p>
+        )}
+      </section>
+      <section className="card">
+        <div className="section-title">
+          <h3>版本包历史</h3>
+          <span>共 {formatNumber(assets.length)} 个包</span>
+        </div>
+        <div className="table-scroll">
+          <table className="table update-history-table">
+            <thead>
+              <tr>
+                <th>状态</th>
+                <th>包名</th>
+                <th>平台</th>
+                <th>版本</th>
+                <th>文件</th>
+                <th>Hash</th>
+                <th>上传</th>
+                <th>下载</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {assets.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="muted">暂无上传记录</td>
+                </tr>
+              ) : (
+                assets.map((asset) => {
+                  const slot = slotForPlatform(asset.platform);
+                  const isLatest = policy[slot.assetIdKey] === asset.id;
+                  return (
+                    <tr key={asset.id}>
+                      <td>{isLatest ? <span className="pill success">最新</span> : <span className="muted">历史</span>}</td>
+                      <td>
+                        <strong>{asset.name || asset.original_filename}</strong>
+                        <span className="muted block">ID：{asset.id}</span>
+                      </td>
+                      <td>{slot.label}</td>
+                      <td>v{asset.version}</td>
+                      <td>
+                        <span>{asset.original_filename}</span>
+                        <span className="muted block">{formatNumber(asset.size_bytes)} bytes</span>
+                      </td>
+                      <td>
+                        <code>SHA：{asset.sha256.slice(0, 18)}...</code>
+                        <code>MD5：{asset.md5 ? `${asset.md5.slice(0, 18)}...` : "-"}</code>
+                      </td>
+                      <td>
+                        <span>{asset.uploaded_by_display_name || asset.uploaded_by_email || "-"}</span>
+                        <span className="muted block">{compactDate(asset.time_created)}</span>
+                      </td>
+                      <td>{formatNumber(asset.download_count)}</td>
+                      <td>
+                        <div className="table-actions">
+                          <button
+                            className="button outline"
+                            disabled={isLatest}
+                            onClick={() => setLatestAsset(slot, asset)}
+                          >
+                            {isLatest ? "已是最新" : "设为最新"}
+                          </button>
+                          <button
+                            className="button ghost danger-text"
+                            disabled={isLatest}
+                            onClick={() => void deleteAsset(asset, isLatest)}
+                          >
+                            删除
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
     </div>
   );
@@ -1691,6 +2462,9 @@ interface ModelAnalytics {
     total_tokens: number;
     input_tokens: number;
     output_tokens: number;
+    reasoning_tokens: number;
+    cache_read_tokens: number;
+    cache_write_tokens: number;
     total_cost: number;
     avg_cost_per_session: number;
   }>;
@@ -1730,6 +2504,81 @@ interface TimelineAnalytics {
   }>;
 }
 
+interface UserDailyTokenAnalytics {
+  period_days: number;
+  items: Array<{
+    date: string;
+    user_id: string;
+    user_email: string;
+    user_display_name: string;
+    input_tokens: number;
+    output_tokens: number;
+    reasoning_tokens: number;
+    cache_read_tokens: number;
+    cache_write_tokens: number;
+    total_tokens: number;
+    total_cost: number;
+    conversation_count: number;
+    conversations: Array<{
+      session_id: string;
+      title: string;
+      workspace: string;
+      total_tokens: number;
+      total_cost: number;
+    }>;
+    models: Array<{
+      provider_id: string | null;
+      model_id: string | null;
+      input_tokens: number;
+      output_tokens: number;
+      reasoning_tokens: number;
+      total_tokens: number;
+      total_cost: number;
+    }>;
+  }>;
+}
+
+function ActiveUsersLineChart({ timeline }: { timeline: TimelineAnalytics | null }) {
+  const points = timeline?.timeline || [];
+  if (points.length === 0) {
+    return <div className="active-users-chart empty">暂无趋势数据</div>;
+  }
+  const width = 720;
+  const height = 180;
+  const padX = 34;
+  const padY = 22;
+  const maxActive = Math.max(1, ...points.map((item) => item.active_users));
+  const maxTokens = Math.max(1, ...points.map((item) => item.total_tokens));
+  const xFor = (index: number) => padX + (index * (width - padX * 2)) / Math.max(points.length - 1, 1);
+  const yForActive = (value: number) => height - padY - (value / maxActive) * (height - padY * 2);
+  const yForTokens = (value: number) => height - padY - (value / maxTokens) * (height - padY * 2);
+  const activeLine = points.map((item, index) => `${xFor(index)},${yForActive(item.active_users)}`).join(" ");
+  const tokenLine = points.map((item, index) => `${xFor(index)},${yForTokens(item.total_tokens)}`).join(" ");
+
+  return (
+    <div className="active-users-chart">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="活跃人数和 Token 趋势折线图">
+        <line x1={padX} y1={height - padY} x2={width - padX} y2={height - padY} className="chart-axis" />
+        <line x1={padX} y1={padY} x2={padX} y2={height - padY} className="chart-axis" />
+        <polyline points={activeLine} className="chart-line active" />
+        <polyline points={tokenLine} className="chart-line tokens" />
+        {points.map((item, index) => (
+          <g key={item.date}>
+            <circle cx={xFor(index)} cy={yForActive(item.active_users)} r="3" className="chart-dot active" />
+            <text x={xFor(index)} y={height - 4} textAnchor="middle" className="chart-label">
+              {item.date.slice(5)}
+            </text>
+          </g>
+        ))}
+      </svg>
+      <div className="chart-legend">
+        <span><i className="legend-active" />活跃人数</span>
+        <span><i className="legend-tokens" />Token 趋势</span>
+      </div>
+    </div>
+  );
+}
+
 function Analytics({ api, token }: { api: ReturnType<typeof useApi>; token: string }) {
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(true);
@@ -1739,6 +2588,7 @@ function Analytics({ api, token }: { api: ReturnType<typeof useApi>; token: stri
   const [toolStats, setToolStats] = useState<ToolAnalytics | null>(null);
   const [contentStats, setContentStats] = useState<ContentAnalytics | null>(null);
   const [timeline, setTimeline] = useState<TimelineAnalytics | null>(null);
+  const [userDailyTokens, setUserDailyTokens] = useState<UserDailyTokenAnalytics | null>(null);
 
   useEffect(() => {
     void loadAnalytics();
@@ -1757,19 +2607,21 @@ function Analytics({ api, token }: { api: ReturnType<typeof useApi>; token: stri
         }
       }
 
-      const [users, models, tools, content, time] = await Promise.all([
+      const [users, models, tools, content, time, userDaily] = await Promise.all([
         loadOne<UserAnalytics>(`/api/admin/audit/analytics/users?days=${days}`),
         loadOne<ModelAnalytics>(`/api/admin/audit/analytics/models?days=${days}`),
         loadOne<ToolAnalytics>(`/api/admin/audit/analytics/tools?days=${days}`),
         loadOne<ContentAnalytics>(`/api/admin/audit/analytics/content?days=${days}`),
         loadOne<TimelineAnalytics>(`/api/admin/audit/analytics/timeline?days=${days}`),
+        loadOne<UserDailyTokenAnalytics>(`/api/admin/audit/analytics/user-daily-tokens?days=${days}`),
       ]);
       setUserStats(users);
       setModelStats(models);
       setToolStats(tools);
       setContentStats(content);
       setTimeline(time);
-      if ([users, models, tools, content, time].some((item) => item === null)) {
+      setUserDailyTokens(userDaily);
+      if ([users, models, tools, content, time, userDaily].some((item) => item === null)) {
         setError("部分分析数据加载失败，已展示可用数据。");
       }
     } catch (error) {
@@ -1872,31 +2724,30 @@ function Analytics({ api, token }: { api: ReturnType<typeof useApi>; token: stri
       {/* 时间趋势图 */}
       <div className="card">
         <h2>趋势分析</h2>
+        <ActiveUsersLineChart timeline={timeline} />
         {timeline && timeline.timeline.length > 0 && (
-          <div className="timeline-chart">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>日期</th>
-                  <th>会话数</th>
-                  <th>活跃用户</th>
-                  <th>Token 消耗</th>
-                  <th>成本</th>
+          <table className="table compact-table">
+            <thead>
+              <tr>
+                <th>日期</th>
+                <th>会话数</th>
+                <th>活跃用户</th>
+                <th>Token 消耗</th>
+                <th>成本</th>
+              </tr>
+            </thead>
+            <tbody>
+              {timeline.timeline.slice(-7).map((item) => (
+                <tr key={item.date}>
+                  <td>{item.date}</td>
+                  <td>{item.session_count}</td>
+                  <td>{item.active_users}</td>
+                  <td>{formatNumber(item.total_tokens)}</td>
+                  <td>${item.total_cost.toFixed(2)}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {timeline.timeline.slice(-14).map((item) => (
-                  <tr key={item.date}>
-                    <td>{item.date}</td>
-                    <td>{item.session_count}</td>
-                    <td>{item.active_users}</td>
-                    <td>{formatNumber(item.total_tokens)}</td>
-                    <td>${item.total_cost.toFixed(2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
 
@@ -1934,6 +2785,66 @@ function Analytics({ api, token }: { api: ReturnType<typeof useApi>; token: stri
         </table>
       </div>
 
+      <div className="card">
+        <h2>用户每日 Token</h2>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>日期</th>
+              <th>用户</th>
+              <th>总 Token</th>
+              <th>输入 / 输出 / 推理</th>
+              <th>成本</th>
+              <th>模型</th>
+              <th>对话内容</th>
+            </tr>
+          </thead>
+          <tbody>
+            {userDailyTokens?.items.slice(0, 30).map((item) => (
+              <tr key={`${item.user_id}-${item.date}`}>
+                <td>{item.date}</td>
+                <td>
+                  <strong>{item.user_display_name || item.user_email}</strong>
+                  <div className="muted">{item.user_email}</div>
+                </td>
+                <td>{formatNumber(item.total_tokens)}</td>
+                <td>
+                  {formatNumber(item.input_tokens)} / {formatNumber(item.output_tokens)} / {formatNumber(item.reasoning_tokens)}
+                </td>
+                <td>${item.total_cost.toFixed(2)}</td>
+                <td>
+                  {item.models.slice(0, 2).map((model) => (
+                    <div className="muted" key={`${model.provider_id}-${model.model_id}`}>
+                      {modelLabel(model.model_id, model.provider_id)} · {formatNumber(model.total_tokens)}
+                    </div>
+                  ))}
+                </td>
+                <td>
+                  <div className="conversation-links">
+                    {item.conversations.slice(0, 3).map((conversation) => (
+                      <button
+                        className="link-button"
+                        key={conversation.session_id}
+                        onClick={() => {
+                          window.location.hash = `audit-session=${encodeURIComponent(conversation.session_id)}`;
+                        }}
+                      >
+                        {conversation.title || conversation.session_id}
+                      </button>
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {(!userDailyTokens || userDailyTokens.items.length === 0) && (
+              <tr>
+                <td colSpan={7} className="muted">暂无用户每日 Token 数据</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
       {/* 模型分析 */}
       <div className="card">
         <h2>模型使用分析</h2>
@@ -1947,6 +2858,8 @@ function Analytics({ api, token }: { api: ReturnType<typeof useApi>; token: stri
               <th>总 Token</th>
               <th>输入 Token</th>
               <th>输出 Token</th>
+              <th>推理 Token</th>
+              <th>缓存读/写</th>
               <th>总成本</th>
               <th>平均成本</th>
             </tr>
@@ -1961,6 +2874,8 @@ function Analytics({ api, token }: { api: ReturnType<typeof useApi>; token: stri
                 <td>{formatNumber(model.total_tokens)}</td>
                 <td>{formatNumber(model.input_tokens)}</td>
                 <td>{formatNumber(model.output_tokens)}</td>
+                <td>{formatNumber(model.reasoning_tokens)}</td>
+                <td>{formatNumber(model.cache_read_tokens)} / {formatNumber(model.cache_write_tokens)}</td>
                 <td>${model.total_cost.toFixed(2)}</td>
                 <td>${model.avg_cost_per_session.toFixed(3)}</td>
               </tr>

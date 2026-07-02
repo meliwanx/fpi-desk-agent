@@ -1,1 +1,1 @@
-Generate a short, descriptive title (3-8 words) for this conversation based on the user's first message. The title should capture the main topic or task. Return ONLY the title text, nothing else.
+根据用户第一条消息，为本次对话生成一个简短、准确的中文标题，15 个字以内。标题应概括主要主题或任务，不要照抄用户原文长句。只返回标题文本，不要输出其他内容。不要使用英文，除非用户第一条消息的核心对象本身是英文专有名词。

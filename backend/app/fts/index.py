@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # Directories to skip during indexing
 _SKIP_DIRS = {
     ".git", ".hg", ".svn", "node_modules", "__pycache__",
-    ".venv", "venv", ".openyakdb", ".tox", "dist",
+    ".venv", "venv", ".fpiagentdb", ".tox", "dist",
     "build", ".next", ".nuxt", "target", ".mypy_cache",
     ".pytest_cache", ".ruff_cache", "env",
 }

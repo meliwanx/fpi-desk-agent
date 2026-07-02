@@ -2,9 +2,10 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Check, ChevronDown, Plus } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Loader2, Mic, Plug, Plus, RefreshCw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
 import { ChatTextarea } from "./chat-textarea";
 import { ChatActions } from "./chat-actions";
 import { WorkspaceToggle } from "./workspace-toggle";
@@ -12,6 +13,13 @@ import { FileChip } from "./file-chip";
 import { FileMentionPopup } from "./file-mention-popup";
 import { useAutoResize } from "@/hooks/use-auto-resize";
 import { uploadFile, browseFiles, attachByPath, ingestFiles } from "@/lib/upload";
+import {
+  canRequestMicrophone,
+  createVoiceRecorder,
+  transcribeVoiceInput,
+  VoiceRecordingUnsupportedError,
+  type VoiceRecorder,
+} from "@/lib/voice-input";
 import type { FileSearchResult } from "@/lib/upload";
 import { cn } from "@/lib/utils";
 import type { FileAttachment } from "@/types/chat";
@@ -21,8 +29,10 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useProviderModels } from "@/hooks/use-provider-models";
 import { useIndexStatus } from "@/hooks/use-index-status";
 import { hasImageAttachments, selectedModelSupportsVision } from "@/hooks/use-chat";
+import { useConnectors, useConnectorToggle } from "@/hooks/use-connectors";
 import { IS_DESKTOP } from "@/lib/constants";
 import type { TaskBatchMode, TaskBatchTask } from "@/types/chat";
+import type { ConnectorInfo } from "@/types/connectors";
 
 interface ChatFormProps {
   isGenerating: boolean;
@@ -116,6 +126,10 @@ function mergeAttachments(
 type PathBackedFile = File & {
   path?: string;
 };
+
+type VoiceInputState = "idle" | "requesting" | "recording" | "transcribing";
+
+const VOICE_INPUT_VISIBLE = false;
 
 function pathsFromDataTransfer(dataTransfer: DataTransfer): string[] {
   const paths = new Set<string>();
@@ -216,13 +230,17 @@ export function ChatForm({ isGenerating, isCompacting = false, onSend, onStop, c
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [voiceState, setVoiceState] = useState<VoiceInputState>("idle");
   const { ref, resize } = useAutoResize();
   const dropTargetRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { data: providerModels, activeProvider } = useProviderModels();
+  const voiceRecorderRef = useRef<VoiceRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const mediaChunksRef = useRef<Blob[]>([]);
+  const mountedRef = useRef(true);
+  const { data: providerModels } = useProviderModels();
   const selectedModel = useSettingsStore((s) => s.selectedModel);
   const selectedProviderId = useSettingsStore((s) => s.selectedProviderId);
-  const noModelsAvailable = !activeProvider || providerModels.length === 0;
   // Surface the vision constraint up front: an image is attached but the
   // selected model can't read images. The send is also blocked server-side and
   // in useChat, but that only fires on send — leaving the composer looking like
@@ -291,7 +309,8 @@ export function ChatForm({ isGenerating, isCompacting = false, onSend, onStop, c
     }
     return null;
   })();
-  const isInputDisabled = isGenerating || isCompacting || noModelsAvailable;
+  const isVoiceTranscribing = voiceState === "requesting" || voiceState === "transcribing";
+  const isInputDisabled = isGenerating || isCompacting || isVoiceTranscribing;
 
   const addAttachments = useCallback((files: FileAttachment[]) => {
     setAttachments((prev) => {
@@ -337,6 +356,158 @@ export function ChatForm({ isGenerating, isCompacting = false, onSend, onStop, c
       setUploading(false);
     }
   }, [addAttachments, t]);
+
+  const stopActiveVoiceStream = useCallback(() => {
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    mediaStreamRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      const recorder = voiceRecorderRef.current;
+      if (recorder && recorder.state !== "inactive") {
+        void recorder.close();
+      }
+      stopActiveVoiceStream();
+    };
+  }, [stopActiveVoiceStream]);
+
+  const insertVoiceTextIntoInput = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    const textarea = ref.current;
+    const current = inputRef.current;
+    const selectionStart = textarea?.selectionStart ?? current.length;
+    const selectionEnd = textarea?.selectionEnd ?? selectionStart;
+    let nextCursor = selectionStart + trimmed.length;
+
+    setInput((prev) => {
+      const start = Math.min(selectionStart, prev.length);
+      const end = Math.min(selectionEnd, prev.length);
+      const before = prev.slice(0, start);
+      const after = prev.slice(end);
+      const prefix = before && !/\s$/.test(before) ? " " : "";
+      const suffix = after && !/^\s/.test(after) ? " " : "";
+      const next = `${before}${prefix}${trimmed}${suffix}${after}`;
+      nextCursor = before.length + prefix.length + trimmed.length;
+      inputRef.current = next;
+      return next;
+    });
+    setMentionActive(false);
+
+    requestAnimationFrame(() => {
+      ref.current?.focus();
+      ref.current?.setSelectionRange(nextCursor, nextCursor);
+      resize();
+    });
+  }, [ref, resize]);
+
+  const handleRecordingStopped = useCallback(async () => {
+    const recorder = voiceRecorderRef.current;
+    const mimeType = recorder?.mimeType || "audio/webm";
+    const chunks = mediaChunksRef.current;
+    mediaChunksRef.current = [];
+    voiceRecorderRef.current = null;
+    stopActiveVoiceStream();
+
+    if (!mountedRef.current) return;
+    if (chunks.length === 0) {
+      setVoiceState("idle");
+      toast.error(t("voiceEmpty"));
+      return;
+    }
+
+    setVoiceState("transcribing");
+    try {
+      const result = await transcribeVoiceInput(new Blob(chunks, { type: mimeType }), "zh");
+      const text = (result.text || result.summary || result.transcript || "").trim();
+      if (!text) {
+        toast.error(t("voiceEmptyResult"));
+        return;
+      }
+      insertVoiceTextIntoInput(text);
+      if (result.summary_failed && result.summary_error) {
+        toast.info(t("voiceCleanupFailed"));
+      }
+    } catch (err) {
+      console.error("Voice transcription failed:", err);
+      const message = err instanceof Error && err.message ? err.message : t("voiceTranscribeFailed");
+      toast.error(message);
+    } finally {
+      if (mountedRef.current) setVoiceState("idle");
+    }
+  }, [insertVoiceTextIntoInput, stopActiveVoiceStream, t]);
+
+  const handleVoiceButtonClick = useCallback(async () => {
+    if (voiceState === "recording") {
+      const recorder = voiceRecorderRef.current;
+      if (recorder && recorder.state !== "inactive") {
+        setVoiceState("transcribing");
+        void Promise.resolve(recorder.stop()).catch((err) => {
+          console.error("Voice recording stop failed:", err);
+          mediaChunksRef.current = [];
+          voiceRecorderRef.current = null;
+          stopActiveVoiceStream();
+          if (mountedRef.current) setVoiceState("idle");
+          toast.error(t("voiceRecordFailed"));
+        });
+      }
+      return;
+    }
+    if (voiceState !== "idle" || isInputDisabled) return;
+    if (!canRequestMicrophone()) {
+      toast.error(t("voiceUnsupported"));
+      return;
+    }
+
+    setVoiceState("requesting");
+    try {
+      mediaChunksRef.current = [];
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!mountedRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
+      mediaStreamRef.current = stream;
+      const recorder = await createVoiceRecorder(stream, {
+        onData: (blob) => {
+          if (blob.size > 0) {
+            mediaChunksRef.current.push(blob);
+          }
+        },
+        onStop: () => {
+          void handleRecordingStopped();
+        },
+        onError: (event) => {
+          console.error("Voice recording failed:", event);
+          mediaChunksRef.current = [];
+          voiceRecorderRef.current = null;
+          stopActiveVoiceStream();
+          if (mountedRef.current) setVoiceState("idle");
+          toast.error(t("voiceRecordFailed"));
+        },
+      });
+      voiceRecorderRef.current = recorder;
+      await recorder.start();
+      if (!mountedRef.current) {
+        void recorder.close();
+        mediaChunksRef.current = [];
+        stopActiveVoiceStream();
+        return;
+      }
+      setVoiceState("recording");
+    } catch (err) {
+      console.error("Voice recording start failed:", err);
+      mediaChunksRef.current = [];
+      voiceRecorderRef.current = null;
+      stopActiveVoiceStream();
+      if (mountedRef.current) setVoiceState("idle");
+      toast.error(err instanceof VoiceRecordingUnsupportedError ? t("voiceUnsupported") : t("voicePermissionDenied"));
+    }
+  }, [handleRecordingStopped, isInputDisabled, stopActiveVoiceStream, t, voiceState]);
 
   const handleDropDataTransfer = useCallback((dataTransfer: DataTransfer) => {
     const paths = pathsFromDataTransfer(dataTransfer);
@@ -572,6 +743,15 @@ export function ChatForm({ isGenerating, isCompacting = false, onSend, onStop, c
     }
     return t("contextCompactingNow");
   }, [compactingLabel, isCompacting, t]);
+  const voiceButtonLabel = voiceState === "recording"
+    ? t("voiceStop")
+    : voiceState === "requesting" || voiceState === "transcribing"
+      ? t("voiceTranscribing")
+      : t("voiceStart");
+  const voiceButtonDisabled =
+    voiceState === "requesting" ||
+    voiceState === "transcribing" ||
+    (voiceState === "idle" && isInputDisabled);
   return (
     <div className={cn("px-4 pb-4", className)}>
       <div className="mx-auto max-w-3xl xl:max-w-4xl">
@@ -643,7 +823,7 @@ export function ChatForm({ isGenerating, isCompacting = false, onSend, onStop, c
               onSelect={handleSelect}
               onSubmit={handleSend}
               mentionActive={mentionActive}
-              placeholder={noModelsAvailable ? t('noModelPlaceholder') : hasWorkspace ? t('placeholder') + t('placeholderMention') : t('workspaceRequired')}
+              placeholder={hasWorkspace ? t('placeholder') + t('placeholderMention') : t('workspaceRequired')}
               className="min-h-[28px] max-h-[200px] py-1"
               disabled={isInputDisabled}
             />
@@ -667,18 +847,47 @@ export function ChatForm({ isGenerating, isCompacting = false, onSend, onStop, c
             />
 
             <button
+              type="button"
+              disabled={isInputDisabled}
+              className="shrink-0 flex items-center justify-center h-8 w-8 rounded-full hover:bg-[var(--surface-tertiary)] transition-colors text-[var(--text-secondary)]"
+              aria-label={t('attachFile')}
+              title={t('attachFile')}
+              onClick={handleBrowse}
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+
+            {VOICE_INPUT_VISIBLE && (
+              <button
                 type="button"
-                disabled={isInputDisabled}
-                className="shrink-0 flex items-center justify-center h-8 w-8 rounded-full hover:bg-[var(--surface-tertiary)] transition-colors text-[var(--text-secondary)]"
-                aria-label={t('attachFile')}
-                title={t('attachFile')}
-                onClick={handleBrowse}
+                disabled={voiceButtonDisabled}
+                className={cn(
+                  "shrink-0 flex items-center justify-center h-8 w-8 rounded-full transition-colors",
+                  voiceState === "recording"
+                    ? "bg-red-500/10 text-red-600 hover:bg-red-500/15"
+                    : "text-[var(--text-secondary)] hover:bg-[var(--surface-tertiary)]",
+                  voiceButtonDisabled && "opacity-50",
+                )}
+                aria-label={voiceButtonLabel}
+                title={voiceButtonLabel}
+                onClick={handleVoiceButtonClick}
               >
-                <Plus className="h-4 w-4" />
+                {voiceState === "requesting" || voiceState === "transcribing" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : voiceState === "recording" ? (
+                  <Square className="h-3.5 w-3.5 fill-current" />
+                ) : (
+                  <Mic className="h-4 w-4" />
+                )}
               </button>
+            )}
 
             <div className={cn(isInputDisabled && "pointer-events-none opacity-50")}>
               <AgentToggle />
+            </div>
+
+            <div className={cn(isInputDisabled && "pointer-events-none opacity-50")}>
+              <ConnectorToggle />
             </div>
 
             <div className="flex-1" />
@@ -691,7 +900,7 @@ export function ChatForm({ isGenerating, isCompacting = false, onSend, onStop, c
 
             <ChatActions
               isBusy={isGenerating || isCompacting}
-              canSend={hasWorkspace && (input.trim().length > 0 || attachments.length > 0) && !isIndexing && !isCompacting && !noModelsAvailable}
+              canSend={hasWorkspace && (input.trim().length > 0 || attachments.length > 0) && !isIndexing && !isCompacting}
               onSend={handleSend}
               onStop={onStop}
             />
@@ -709,6 +918,167 @@ export function ChatForm({ isGenerating, isCompacting = false, onSend, onStop, c
         </div>
       </div>
     </div>
+  );
+}
+
+const CONNECTOR_STATUS_COLORS: Record<ConnectorInfo["status"] | "off", string> = {
+  connected: "bg-emerald-500",
+  needs_auth: "bg-amber-500",
+  failed: "bg-red-500",
+  disconnected: "bg-[var(--text-tertiary)]",
+  disabled: "bg-[var(--text-tertiary)]",
+  off: "bg-[var(--text-tertiary)]",
+};
+
+function ConnectorMenuIcon({ connector }: { connector: ConnectorInfo }) {
+  return (
+    <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--surface-secondary)] text-[var(--text-secondary)]">
+      {connector.icon_url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={connector.icon_url}
+          alt=""
+          className="h-full w-full object-cover"
+          draggable={false}
+        />
+      ) : (
+        <Plug className="h-4 w-4" />
+      )}
+    </div>
+  );
+}
+
+/** WorkBuddy-style connector selector in the composer toolbar. */
+function ConnectorToggle() {
+  const { t } = useTranslation('chat');
+  const [open, setOpen] = useState(false);
+  const { data, isLoading, isFetching, refetch } = useConnectors();
+  const toggle = useConnectorToggle();
+
+  const connectors = useMemo(
+    () => Object.entries(data?.connectors ?? {})
+      .sort(([, a], [, b]) => {
+        const category = a.category.localeCompare(b.category);
+        return category || a.name.localeCompare(b.name);
+      }),
+    [data],
+  );
+
+  const enabledConnectors = connectors.filter(([, connector]) => connector.enabled);
+  const connectedCount = connectors.filter(([, connector]) => connector.status === "connected").length;
+  const activeLabel = (() => {
+    if (enabledConnectors.length === 0) return t("connectors");
+    if (enabledConnectors.length === 1) return enabledConnectors[0][1].name;
+    return t("connectorActiveCount", { count: enabledConnectors.length });
+  })();
+
+  const statusLabel = (connector: ConnectorInfo) => {
+    if (!connector.enabled) return t("connectorStatusOff");
+    if (connector.status === "connected" && connector.tools_count > 0) {
+      return `${t("connectorStatusConnected")} · ${connector.tools_count} ${t("tools")}`;
+    }
+    if (connector.status === "connected") return t("connectorStatusConnected");
+    if (connector.status === "needs_auth") return t("connectorStatusNeedsAuth");
+    if (connector.status === "failed") return t("connectorStatusFailed");
+    return t("connectorStatusDisconnected");
+  };
+
+  const handleToggle = (id: string, enable: boolean) => {
+    toggle.mutate(
+      { id, enable },
+      {
+        onError: () => {
+          toast.error(t("connectorToggleFailed"));
+        },
+      },
+    );
+  };
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (nextOpen) void refetch();
+  };
+
+  const handleRefresh = () => {
+    void refetch();
+  };
+
+  return (
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "inline-flex max-w-[190px] items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors",
+            "bg-[var(--surface-tertiary)] text-[var(--text-primary)] hover:bg-[var(--surface-tertiary)]/80",
+          )}
+          title={t("connectors")}
+          aria-label={t("connectors")}
+        >
+          <Plug className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{activeLabel}</span>
+          {connectedCount > 0 && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />}
+          <ChevronDown className="h-3 w-3 shrink-0 opacity-50" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" sideOffset={6} className="w-80 p-1.5">
+        <div className="flex items-center justify-between gap-2 border-b border-[var(--border-default)] px-2 py-1.5">
+          <span className="text-[12px] font-medium text-[var(--text-secondary)]">{t("connectors")}</span>
+          <button
+            type="button"
+            onClick={handleRefresh}
+            disabled={isFetching}
+            className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[12px] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)] disabled:opacity-50"
+          >
+            {isFetching ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3 w-3" />
+            )}
+            {t("connectorRefresh")}
+          </button>
+        </div>
+        <div className="max-h-[320px] overflow-y-auto">
+          {isLoading ? (
+            <div className="flex items-center gap-2 px-3 py-3 text-[13px] text-[var(--text-tertiary)]">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              {t("connectorLoading")}
+            </div>
+          ) : connectors.length === 0 ? (
+            <div className="px-3 py-3 text-[13px] text-[var(--text-tertiary)]">
+              {t("connectorEmpty")}
+            </div>
+          ) : (
+            connectors.map(([id, connector]) => {
+              const effectiveStatus = connector.enabled ? connector.status : "off";
+              return (
+                <div
+                  key={id}
+                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-[var(--surface-secondary)]"
+                >
+                  <ConnectorMenuIcon connector={connector} />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[13px] font-medium text-[var(--text-primary)]">
+                      {connector.name}
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-[var(--text-tertiary)]">
+                      <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", CONNECTOR_STATUS_COLORS[effectiveStatus])} />
+                      <span className="truncate">{statusLabel(connector)}</span>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={connector.enabled}
+                    disabled={toggle.isPending}
+                    aria-label={`${connector.name} ${connector.enabled ? t("connectorDisable") : t("connectorEnable")}`}
+                    onCheckedChange={(checked) => handleToggle(id, checked)}
+                  />
+                </div>
+              );
+            })
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 

@@ -133,8 +133,8 @@ def microcompact_messages(
             if tokens > max_tool_output_tokens:
                 msg = dict(msg)
                 msg["content"] = (
-                    f"[Previous {tool_name} output cleared — "
-                    f"{tokens} tokens. Re-run tool if needed.]"
+                    f"[先前 {tool_name} 输出已清理，共 {tokens} token。"
+                    f"如有需要，请重新运行该工具。]"
                 )
                 replaced += 1
 

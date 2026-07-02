@@ -25,6 +25,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.dependencies import SkillRegistryDep
+from app.runtime_paths import APP_CONFIG_DIR_NAME
 from app.skill.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
@@ -191,7 +192,7 @@ def _slug(name: str) -> str:
 
 
 def _global_skills_dir() -> Path:
-    d = Path.home() / ".openyak" / "skills"
+    d = Path.home() / APP_CONFIG_DIR_NAME / "skills"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -290,7 +291,7 @@ async def install_skill(
     body: InstallRequest,
 ) -> dict[str, Any]:
     """Download a SKILL.md from GitHub and install it to the global
-    user skills directory (``~/.openyak/skills/<slug>/SKILL.md``).
+    user skills directory (``~/.fpiagent/skills/<slug>/SKILL.md``).
 
     The registry is rescanned so the new skill is immediately available
     without restarting the backend. Existing skills with the same

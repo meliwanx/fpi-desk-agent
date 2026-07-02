@@ -8,6 +8,7 @@ from typing import Any
 
 import yaml
 
+from app.runtime_paths import APP_CONFIG_DIR_NAME
 from app.schemas.agent import AgentInfo, PermissionRule, Ruleset
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ def _load_prompt(name: str) -> str:
 BUILTIN_AGENTS: dict[str, AgentInfo] = {
     "build": AgentInfo(
         name="build",
-        description="Full-featured AI assistant with all tools",
+        description="具备完整工具能力的办公助理",
         mode="primary",
         tools=[],  # Empty = all tools (filtered by permissions)
         permissions=Ruleset(rules=[
@@ -44,7 +45,7 @@ BUILTIN_AGENTS: dict[str, AgentInfo] = {
     ),
     "plan": AgentInfo(
         name="plan",
-        description="Read-only analysis and planning mode",
+        description="只读分析和计划模式",
         mode="primary",
         tools=[],
         permissions=Ruleset(rules=[
@@ -64,7 +65,7 @@ BUILTIN_AGENTS: dict[str, AgentInfo] = {
     ),
     "explore": AgentInfo(
         name="explore",
-        description="Fast search and exploration subagent",
+        description="用于快速搜索和探索的子任务助理",
         mode="subagent",
         tools=["read", "glob", "grep", "search", "bash", "web_fetch", "web_search", "skill"],
         permissions=Ruleset(rules=[
@@ -81,7 +82,7 @@ BUILTIN_AGENTS: dict[str, AgentInfo] = {
     ),
     "general": AgentInfo(
         name="general",
-        description="General-purpose subagent with full access",
+        description="具备常规工具能力的通用子任务助理",
         mode="subagent",
         tools=[],
         permissions=Ruleset(rules=[
@@ -96,7 +97,7 @@ BUILTIN_AGENTS: dict[str, AgentInfo] = {
     ),
     "compaction": AgentInfo(
         name="compaction",
-        description="Context summarization agent (no tools)",
+        description="上下文摘要助理（无工具）",
         mode="hidden",
         tools=[],
         permissions=Ruleset(rules=[
@@ -106,7 +107,7 @@ BUILTIN_AGENTS: dict[str, AgentInfo] = {
     ),
     "title": AgentInfo(
         name="title",
-        description="Session title generator (no tools)",
+        description="会话标题生成助理（无工具）",
         mode="hidden",
         tools=[],
         permissions=Ruleset(rules=[
@@ -117,7 +118,7 @@ BUILTIN_AGENTS: dict[str, AgentInfo] = {
     ),
     "summary": AgentInfo(
         name="summary",
-        description="Change summary generator (no tools)",
+        description="变更摘要生成助理（无工具）",
         mode="hidden",
         tools=[],
         permissions=Ruleset(rules=[
@@ -169,11 +170,11 @@ class AgentRegistry:
         settings_agents: dict[str, Any] | None = None,
         project_dir: str = ".",
     ) -> None:
-        """Load custom agents from settings YAML and .openyak/agents/*.md files.
+        """Load custom agents from settings YAML and .fpiagent/agents/*.md files.
 
         Sources (later overrides earlier):
         1. settings.agents dict from YAML config
-        2. .openyak/agents/*.md Markdown files in the project directory
+        2. .fpiagent/agents/*.md Markdown files in the project directory
         """
         # 1. Load from settings.agents dict
         if settings_agents:
@@ -185,9 +186,9 @@ class AgentRegistry:
                 except Exception:
                     logger.exception("Failed to load custom agent '%s' from config", name)
 
-        # 2. Discover .openyak/agents/*.md files
+        # 2. Discover .fpiagent/agents/*.md files
         for agents_dir in [
-            Path(project_dir) / ".openyak" / "agents",
+            Path(project_dir) / APP_CONFIG_DIR_NAME / "agents",
             Path(project_dir) / ".agents",
         ]:
             if not agents_dir.is_dir():
@@ -216,7 +217,7 @@ def _agent_from_dict(name: str, config: dict[str, Any]) -> AgentInfo:
 
     return AgentInfo(
         name=name,
-        description=config.get("description", f"Custom agent: {name}"),
+        description=config.get("description", f"自定义助理：{name}"),
         mode=config.get("mode", "primary"),
         tools=config.get("tools", []),
         permissions=permissions,
@@ -275,7 +276,7 @@ def _parse_agent_markdown(path: Path) -> AgentInfo:
 
     return AgentInfo(
         name=name,
-        description=frontmatter.get("description", f"Custom agent: {name}"),
+        description=frontmatter.get("description", f"自定义助理：{name}"),
         mode=frontmatter.get("mode", "primary"),
         tools=frontmatter.get("tools", []),
         permissions=permissions,

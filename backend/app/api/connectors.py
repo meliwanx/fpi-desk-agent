@@ -8,11 +8,46 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
+from app.company_auth.store import CompanyConnectorPolicy, CompanyUser
+from app.connector.access import (
+    connector_allowed_for_request,
+    sync_remote_connector_policy_for_request,
+)
+
 router = APIRouter(prefix="/connectors")
 
 
 def _get_registry(request: Request):
     return getattr(request.app.state, "connector_registry", None)
+
+
+def _allowed_connector_ids_for_user(
+    policy: CompanyConnectorPolicy,
+    user: CompanyUser,
+) -> list[str]:
+    return [
+        entry.connector_id
+        for entry in policy.connectors
+        if user.id in entry.allowed_user_ids
+    ]
+
+
+async def _filter_allowed_connectors(
+    status: dict[str, dict[str, Any]],
+    request: Request,
+) -> dict[str, dict[str, Any]]:
+    filtered: dict[str, dict[str, Any]] = {}
+    for connector_id, detail in status.items():
+        if await connector_allowed_for_request(connector_id, request):
+            filtered[connector_id] = detail
+    return filtered
+
+
+async def _ensure_connector_allowed(connector_id: str, request: Request) -> None:
+    await sync_remote_connector_policy_for_request(request)
+    if await connector_allowed_for_request(connector_id, request):
+        return
+    raise HTTPException(status_code=403, detail=f"Connector not available for this user: {connector_id}")
 
 
 # ------------------------------------------------------------------
@@ -26,7 +61,40 @@ async def list_connectors(request: Request) -> dict[str, Any]:
     registry = _get_registry(request)
     if registry is None:
         return {"connectors": {}}
-    return {"connectors": registry.status()}
+    await sync_remote_connector_policy_for_request(request)
+    return {"connectors": await _filter_allowed_connectors(registry.status(), request)}
+
+
+# ------------------------------------------------------------------
+# Runtime policy
+# ------------------------------------------------------------------
+
+
+class RuntimeConnectorPolicyResponse(BaseModel):
+    connector_ids: list[str]
+
+
+@router.get("/policy/runtime", response_model=RuntimeConnectorPolicyResponse)
+async def get_runtime_connector_policy(request: Request) -> RuntimeConnectorPolicyResponse:
+    """Return connector IDs available to the current company user.
+
+    Desktop backends use this narrow runtime endpoint to obey the centrally
+    managed connector allowlist without receiving the full admin policy.
+    """
+    store = getattr(request.app.state, "company_auth_store", None)
+    settings = getattr(request.app.state, "settings", None)
+    if store is None or not getattr(settings, "company_auth_enabled", False):
+        return RuntimeConnectorPolicyResponse(connector_ids=[])
+
+    token = request.headers.get("X-FPI-Session", "").strip()
+    user = await store.get_session_user(token)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Company login required")
+
+    policy = await store.get_connector_policy()
+    return RuntimeConnectorPolicyResponse(
+        connector_ids=_allowed_connector_ids_for_user(policy, user),
+    )
 
 
 # ------------------------------------------------------------------
@@ -71,6 +139,7 @@ async def connector_detail(connector_id: str, request: Request) -> dict[str, Any
     detail = status.get(connector_id)
     if detail is None:
         raise HTTPException(status_code=404, detail=f"Connector not found: {connector_id}")
+    await _ensure_connector_allowed(connector_id, request)
     return detail
 
 
@@ -139,6 +208,7 @@ async def set_connector_token(
     connector = registry.get(connector_id)
     if not connector:
         return {"success": False, "error": f"Connector not found: {connector_id}"}
+    await _ensure_connector_allowed(connector_id, request)
 
     # Store the token and inject into MCP client
     mgr = registry.mcp_manager
@@ -164,7 +234,7 @@ async def set_connector_token(
     else:
         await registry.reconnect(connector_id)
 
-    return {"success": True, "connectors": registry.status()}
+    return {"success": True, "connectors": await _filter_allowed_connectors(registry.status(), request)}
 
 
 # ------------------------------------------------------------------
@@ -178,8 +248,9 @@ async def enable_connector(connector_id: str, request: Request) -> dict[str, Any
     registry = _get_registry(request)
     if registry is None:
         return {"success": False, "error": "Connector system not available"}
+    await _ensure_connector_allowed(connector_id, request)
     success = await registry.enable(connector_id)
-    return {"success": success, "connectors": registry.status()}
+    return {"success": success, "connectors": await _filter_allowed_connectors(registry.status(), request)}
 
 
 @router.post("/{connector_id}/disable")
@@ -188,8 +259,9 @@ async def disable_connector(connector_id: str, request: Request) -> dict[str, An
     registry = _get_registry(request)
     if registry is None:
         return {"success": False, "error": "Connector system not available"}
+    await _ensure_connector_allowed(connector_id, request)
     success = await registry.disable(connector_id)
-    return {"success": success, "connectors": registry.status()}
+    return {"success": success, "connectors": await _filter_allowed_connectors(registry.status(), request)}
 
 
 # ------------------------------------------------------------------
@@ -203,6 +275,7 @@ async def connect_connector(connector_id: str, request: Request) -> dict[str, An
     registry = _get_registry(request)
     if registry is None:
         return {"success": False, "error": "Connector system not available"}
+    await _ensure_connector_allowed(connector_id, request)
 
     settings = request.app.state.settings
     host = settings.host if settings.host != "0.0.0.0" else "localhost"
@@ -225,8 +298,9 @@ async def auth_callback_api(
     registry = _get_registry(request)
     if registry is None:
         return {"success": False, "error": "Connector system not available"}
+    await _ensure_connector_allowed(connector_id, request)
     success = await registry.complete_auth(body.state, body.code)
-    return {"success": success, "connectors": registry.status()}
+    return {"success": success, "connectors": await _filter_allowed_connectors(registry.status(), request)}
 
 
 @router.post("/{connector_id}/disconnect")
@@ -235,8 +309,9 @@ async def disconnect_connector(connector_id: str, request: Request) -> dict[str,
     registry = _get_registry(request)
     if registry is None:
         return {"success": False, "error": "Connector system not available"}
+    await _ensure_connector_allowed(connector_id, request)
     success = await registry.disconnect(connector_id)
-    return {"success": success, "connectors": registry.status()}
+    return {"success": success, "connectors": await _filter_allowed_connectors(registry.status(), request)}
 
 
 @router.post("/{connector_id}/reconnect")
@@ -245,5 +320,6 @@ async def reconnect_connector(connector_id: str, request: Request) -> dict[str, 
     registry = _get_registry(request)
     if registry is None:
         return {"success": False, "error": "Connector system not available"}
+    await _ensure_connector_allowed(connector_id, request)
     success = await registry.reconnect(connector_id)
-    return {"success": success, "connectors": registry.status()}
+    return {"success": success, "connectors": await _filter_allowed_connectors(registry.status(), request)}

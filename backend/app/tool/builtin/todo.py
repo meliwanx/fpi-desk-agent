@@ -28,17 +28,16 @@ class TodoTool(ToolDefinition):
     @property
     def description(self) -> str:
         return (
-            "Track progress for multi-step tasks (3+ steps). "
-            "The user sees updates in real-time.\n\n"
-            "States: pending | in_progress (ONE only) | completed\n\n"
-            "USAGE PATTERN:\n"
-            "1. Create list: first task \"in_progress\", others \"pending\"\n"
-            "2. After EACH task completes: call todo to update (mark done + start next)\n"
-            "3. Never batch updates — call immediately after each step\n\n"
-            "Fields:\n"
-            "- content: what to do (\"Fix bug\")\n"
-            "- activeForm: shown during work (\"Fixing bug\")\n"
-            "- status: pending/in_progress/completed"
+            "跟踪多步骤任务（3 步及以上）的进度，用户会实时看到更新。\n\n"
+            "状态：pending | in_progress（同一时间只能有一个）| completed\n\n"
+            "使用方式：\n"
+            "1. 创建列表时，第一个任务设为 in_progress，其余设为 pending。\n"
+            "2. 每完成一个任务后，立即调用 todo 更新状态，并启动下一个任务。\n"
+            "3. 不要攒到最后批量更新，每一步完成后都要及时更新。\n\n"
+            "字段：\n"
+            "- content：任务内容。\n"
+            "- activeForm：执行中展示的文案。\n"
+            "- status：pending/in_progress/completed。"
         )
 
     def parameters_schema(self) -> dict[str, Any]:
@@ -59,7 +58,7 @@ class TodoTool(ToolDefinition):
                         },
                         "required": ["content", "status"],
                     },
-                    "description": "The complete todo list (replaces existing)",
+                    "description": "完整待办列表；每次调用都会替换现有列表",
                 },
             },
             "required": ["todos"],

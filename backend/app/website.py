@@ -195,13 +195,6 @@ def _website_html() -> str:
       background: #f8fbff;
       font-weight: 700;
     }
-    .nav-cta {
-      color: #fff;
-      background: var(--blue);
-      padding: 10px 14px;
-      border-radius: 8px;
-      font-weight: 700;
-    }
     .hero {
       max-width: 1160px;
       margin: 0 auto;
@@ -301,7 +294,7 @@ def _website_html() -> str:
     .segmented {
       margin-top: 16px;
       display: inline-grid;
-      grid-template-columns: repeat(3, minmax(86px, 1fr));
+      grid-template-columns: repeat(2, minmax(112px, 1fr));
       border: 1px solid var(--line);
       border-radius: 8px;
       overflow: hidden;
@@ -321,13 +314,13 @@ def _website_html() -> str:
       cursor: pointer;
     }
     .segmented button:last-child { border-right: 0; }
-    .segmented button.active {
-      color: var(--blue-dark);
-      background: #eaf2ff;
-    }
     .segmented button.unavailable {
       color: #9aa6b6;
       background: #f1f4f8;
+    }
+    .segmented button.active {
+      color: #fff;
+      background: var(--blue);
     }
     .release-note {
       margin: 14px 0 0;
@@ -738,6 +731,225 @@ def _website_html() -> str:
       }
       .sheet-row span:last-child { border-bottom: 0; }
     }
+
+    /* shadcn-inspired website refresh: public web only. */
+    :root {
+      --blue: #155eef;
+      --blue-dark: #123f8c;
+      --ink: #101828;
+      --muted: #667085;
+      --line: #dfe4ec;
+      --panel: #ffffff;
+      --soft: #f6f7fb;
+      --green: #067647;
+      --amber: #b54708;
+      --violet: #7047eb;
+      --teal: #0e7490;
+    }
+    body {
+      background: #f6f7fb;
+    }
+    .site-header {
+      border-bottom: 1px solid rgba(15, 23, 42, .08);
+      background: rgba(255, 255, 255, .94);
+    }
+    .nav {
+      max-width: 1240px;
+      min-height: 66px;
+    }
+    .brand {
+      color: var(--ink);
+      font-size: 15px;
+    }
+    .brand img {
+      border: 1px solid var(--line);
+      box-shadow: none;
+    }
+    .nav-links a {
+      color: #475467;
+      font-weight: 700;
+    }
+    .support-link {
+      border-color: #bfdbfe;
+      background: #eff8ff;
+      color: #175cd3;
+    }
+    .hero {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, 520px) minmax(0, 1fr);
+      gap: 56px;
+      align-items: center;
+      max-width: 1240px;
+      min-height: 720px;
+      padding: 82px 24px 70px;
+      overflow: visible;
+    }
+    .hero-content {
+      position: relative;
+      z-index: 2;
+      width: 100%;
+      min-width: 0;
+    }
+    .eyebrow {
+      border-color: #abefc6;
+      background: #ecfdf3;
+      color: var(--green);
+    }
+    h1 {
+      max-width: 680px;
+      margin: 20px 0 18px;
+      color: var(--ink);
+      font-size: clamp(42px, 4.5vw, 64px);
+      line-height: .98;
+      font-weight: 850;
+    }
+    .hero-copy {
+      max-width: 520px;
+      color: #475467;
+      font-size: 18px;
+      line-height: 1.8;
+    }
+    .meta-pill {
+      border-color: var(--line);
+      background: #fff;
+      color: #344054;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+    }
+    .download-panel {
+      width: min(610px, 100%);
+      margin-top: 30px;
+      border-color: var(--line);
+      background: rgba(255, 255, 255, .96);
+      box-shadow: 0 20px 52px rgba(15, 23, 42, .12);
+    }
+    .download-button {
+      min-height: 50px;
+      box-shadow: 0 10px 22px rgba(21, 94, 239, .22);
+    }
+    .download-button:hover {
+      background: #0f4fd6;
+      border-color: #0f4fd6;
+    }
+    .segmented {
+      background: #f8fafc;
+    }
+    .segmented button.active {
+      color: #fff;
+      background: var(--blue);
+    }
+    .product-visual {
+      position: relative;
+      z-index: 1;
+      justify-self: end;
+      align-self: center;
+      width: 100%;
+      max-width: 650px;
+      border-color: var(--line);
+      border-radius: 8px;
+      box-shadow: 0 28px 80px rgba(15, 23, 42, .18);
+      transform: none;
+    }
+    .window-bar,
+    .analysis-toolbar {
+      background: #f8fafc;
+    }
+    .mock-sidebar {
+      background: #f1f5f9;
+    }
+    .mock-nav span,
+    .bar,
+    .cell-bar {
+      background: #e2e8f0;
+    }
+    .mock-nav span:first-child {
+      background: #dbeafe;
+      border-color: #bfdbfe;
+    }
+    .assistant-card,
+    .ops-card,
+    .task,
+    .feature,
+    .analysis-item,
+    .kpi {
+      border-color: var(--line);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+    }
+    .chips span {
+      background: #ecfdf3;
+      color: var(--green);
+    }
+    .sections {
+      border-top: 1px solid var(--line);
+      background: #fff;
+    }
+    .section-inner {
+      max-width: 1240px;
+      padding: 72px 24px;
+    }
+    .section-heading {
+      max-width: 760px;
+      color: var(--ink);
+      font-size: clamp(30px, 3vw, 42px);
+      font-weight: 820;
+    }
+    .section-kicker {
+      color: var(--blue);
+      letter-spacing: .04em;
+    }
+    .feature-grid {
+      gap: 14px;
+    }
+    .feature {
+      padding: 22px;
+    }
+    .feature .icon {
+      background: #eff6ff;
+      color: var(--blue);
+    }
+    .analysis-band {
+      border-top: 1px solid var(--line);
+      background: #f8fafc;
+    }
+    .analysis-layout {
+      gap: 34px;
+      align-items: center;
+    }
+    .analysis-preview {
+      border-color: var(--line);
+      border-radius: 8px;
+      box-shadow: 0 24px 60px rgba(15, 23, 42, .11);
+    }
+    .chart-strip i {
+      background: var(--blue);
+    }
+    footer {
+      max-width: 1240px;
+      border-top: 1px solid var(--line);
+    }
+    @media (max-width: 1080px) {
+      .hero {
+        grid-template-columns: 1fr;
+        gap: 34px;
+        min-height: auto;
+        padding-top: 52px;
+      }
+      .product-visual {
+        max-width: none;
+        width: 100%;
+        margin-top: 0;
+      }
+    }
+    @media (max-width: 560px) {
+      .hero {
+        padding: 34px 18px 44px;
+      }
+      .section-inner {
+        padding: 48px 18px;
+      }
+    }
   </style>
 </head>
 <body>
@@ -752,14 +964,13 @@ def _website_html() -> str:
           <a href="#features">能力</a>
           <a href="#analysis">数据分析</a>
           <span class="support-link">可视化发展部提供技术支持</span>
-          <a class="nav-cta" href="#download">立即下载</a>
         </div>
       </nav>
     </header>
 
     <main>
       <section class="hero">
-        <div>
+        <div class="hero-content">
           <span class="eyebrow">内部办公助手 · 企业统一托管</span>
           <h1>聚光智能办公助手</h1>
           <p class="hero-copy">为聚光同事准备的桌面 AI 工作台，把资料理解、任务推进、问题反馈和版本更新放到同一个入口。少切工具、少找文件，让日常办公更快落到结果。</p>
@@ -781,7 +992,6 @@ def _website_html() -> str:
             <div class="segmented" role="tablist" aria-label="选择下载版本">
               <button type="button" data-platform="macos">Mac</button>
               <button type="button" data-platform="windows">Windows</button>
-              <button type="button" data-platform="linux">Linux</button>
             </div>
             <p id="releaseNote" class="release-note"></p>
           </div>
@@ -875,8 +1085,7 @@ def _website_html() -> str:
   </div>
 
   <script>
-    const labels = { macos: "Mac 版本", windows: "Windows 版本", linux: "Linux 版本" };
-    const shortLabels = { macos: "Mac", windows: "Windows", linux: "Linux" };
+    const labels = { macos: "Mac 版本", windows: "Windows 版本" };
     let downloadOptions = { platforms: {} };
     let selectedPlatform = "macos";
 
@@ -888,7 +1097,6 @@ def _website_html() -> str:
       ].filter(Boolean).join(" ").toLowerCase();
       if (source.includes("win")) return "windows";
       if (source.includes("mac") || source.includes("darwin")) return "macos";
-      if (source.includes("linux")) return "linux";
       return "macos";
     }
 
@@ -906,7 +1114,7 @@ def _website_html() -> str:
 
     function firstAvailablePlatform(preferred) {
       if (downloadOptions.platforms[preferred]?.available) return preferred;
-      return ["macos", "windows", "linux"].find((key) => downloadOptions.platforms[key]?.available) || preferred;
+      return ["macos", "windows"].find((key) => downloadOptions.platforms[key]?.available) || preferred;
     }
 
     function selectPlatform(platform) {

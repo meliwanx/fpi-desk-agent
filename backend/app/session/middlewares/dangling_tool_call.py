@@ -63,7 +63,7 @@ class DanglingToolCallMiddleware(Middleware):
                     patched.append({
                         "role": "tool",
                         "tool_call_id": tc_id,
-                        "content": "[Tool call was interrupted and did not return a result.]",
+                        "content": "[工具调用被中断，没有返回结果。]",
                     })
                     patched_ids.add(tc_id)
                     patch_count += 1

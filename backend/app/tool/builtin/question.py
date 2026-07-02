@@ -29,10 +29,9 @@ class QuestionTool(ToolDefinition):
     @property
     def description(self) -> str:
         return (
-            "Ask the user a question and wait for their response. "
-            "Use this when you need clarification or user input to proceed. "
-            "Supports single-question mode (question + options) or "
-            "multi-question mode (questions array with tabs, radio/checkbox, and preview)."
+            "向用户提问并等待回复。需要澄清需求或必须由用户提供输入时使用。"
+            "支持单问题模式（question + options）和多问题模式"
+            "（questions 数组、标签页、单选/多选、预览内容）。"
         )
 
     def parameters_schema(self) -> dict[str, Any]:
@@ -42,17 +41,17 @@ class QuestionTool(ToolDefinition):
                 # Legacy single-question mode
                 "question": {
                     "type": "string",
-                    "description": "The question to ask the user (single-question mode)",
+                    "description": "要问用户的问题（单问题模式）",
                 },
                 "options": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional list of choices for single-question mode",
+                    "description": "单问题模式下的可选选项列表",
                 },
                 # Multi-question mode
                 "questions": {
                     "type": "array",
-                    "description": "Array of 1-4 questions (multi-question mode with tab UI)",
+                    "description": "1 到 4 个问题的数组（带标签页界面的多问题模式）",
                     "minItems": 1,
                     "maxItems": 4,
                     "items": {
@@ -60,16 +59,16 @@ class QuestionTool(ToolDefinition):
                         "properties": {
                             "question": {
                                 "type": "string",
-                                "description": "The question text",
+                                "description": "问题文本",
                             },
                             "header": {
                                 "type": "string",
-                                "description": "Tab label (max 12 chars)",
+                                "description": "标签页标题（最多 12 个字符）",
                                 "maxLength": 12,
                             },
                             "options": {
                                 "type": "array",
-                                "description": "2-4 selectable options",
+                                "description": "2 到 4 个可选项",
                                 "minItems": 2,
                                 "maxItems": 4,
                                 "items": {
@@ -77,15 +76,15 @@ class QuestionTool(ToolDefinition):
                                     "properties": {
                                         "label": {
                                             "type": "string",
-                                            "description": "Display text for this option",
+                                            "description": "该选项的显示文本",
                                         },
                                         "description": {
                                             "type": "string",
-                                            "description": "Explanation of what this option means",
+                                            "description": "该选项含义的说明",
                                         },
                                         "preview": {
                                             "type": "string",
-                                            "description": "Optional preview content (markdown) shown in side panel",
+                                            "description": "侧边栏显示的可选预览内容（Markdown）",
                                         },
                                     },
                                     "required": ["label"],
@@ -93,7 +92,7 @@ class QuestionTool(ToolDefinition):
                             },
                             "multiSelect": {
                                 "type": "boolean",
-                                "description": "true = checkboxes (multiple answers), false = radio (single answer)",
+                                "description": "true 表示复选框（多选），false 表示单选按钮（单选）",
                                 "default": False,
                             },
                         },

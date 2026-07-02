@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from app.runtime_paths import APP_CONFIG_DIR_NAME
 from app.mcp.oauth import AuthServerMeta, TokenSet
 
 logger = logging.getLogger(__name__)
@@ -15,15 +16,15 @@ logger = logging.getLogger(__name__)
 class McpTokenStore:
     """Persist OAuth tokens per MCP server to a JSON file.
 
-    Storage path: {project_dir}/.openyak/mcp-tokens.json
-    Fallback:     ~/.openyak/mcp-tokens.json
+    Storage path: {project_dir}/.fpiagent/mcp-tokens.json
+    Fallback:     ~/.fpiagent/mcp-tokens.json
     """
 
     def __init__(self, project_dir: str | None = None) -> None:
         if project_dir:
-            self._path = Path(project_dir).resolve() / ".openyak" / "mcp-tokens.json"
+            self._path = Path(project_dir).resolve() / APP_CONFIG_DIR_NAME / "mcp-tokens.json"
         else:
-            self._path = Path.home() / ".openyak" / "mcp-tokens.json"
+            self._path = Path.home() / APP_CONFIG_DIR_NAME / "mcp-tokens.json"
         self._data: dict[str, dict[str, Any]] = self._load()
         self._migrate_namespaced_keys()
 

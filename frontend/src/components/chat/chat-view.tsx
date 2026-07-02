@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useChat } from "@/hooks/use-chat";
 import { useMessages } from "@/hooks/use-messages";
@@ -13,6 +13,7 @@ import { useActivityStore } from "@/stores/activity-store";
 import { useWorkspaceStore, type WorkspaceTodo, type WorkspaceFile } from "@/stores/workspace-store";
 import { api } from "@/lib/api";
 import { API, queryKeys } from "@/lib/constants";
+import { latestVisibleAssistantMessage } from "@/lib/message-visibility";
 import { ChatHeader } from "./chat-header";
 import { ChatForm } from "./chat-form";
 import { MessageList } from "@/components/messages/message-list";
@@ -39,6 +40,7 @@ export function ChatView({ sessionId }: ChatViewProps) {
     isCompacting,
     streamId,
     pendingUserText,
+    pendingUserSentAt,
     pendingAttachments,
     streamingParts,
     streamingText,
@@ -59,27 +61,6 @@ export function ChatView({ sessionId }: ChatViewProps) {
     staleTime: 30_000,
   });
 
-  // Auto-fix sessions with default title — set to first user message
-  const qc = useQueryClient();
-  useEffect(() => {
-    if (!session || !messages || messages.length === 0) return;
-    if (session.title && session.title !== "New Session") return;
-    const firstUser = messages.find((m) => m.data?.role === "user");
-    if (!firstUser) return;
-    const textPart = firstUser.parts.find((p) => p.data?.type === "text");
-    const text = textPart?.data?.type === "text" ? (textPart.data as { type: "text"; text: string }).text : undefined;
-    if (!text) return;
-    const title = text.trim().slice(0, 60);
-    if (!title) return;
-    api.patch(API.SESSIONS.DETAIL(sessionId), { title }).then(() => {
-      qc.invalidateQueries({ queryKey: queryKeys.sessions.all });
-      qc.setQueryData<SessionResponse>(
-        queryKeys.sessions.detail(sessionId),
-        (old) => (old ? { ...old, title } : old),
-      );
-    }).catch((e) => console.warn("[chat-view] Failed to auto-set title:", e));
-  }, [session, messages, sessionId, qc]);
-
   // On session entry: hydrate this session's panels (artifact, activity,
   // workspace todos/files). We intentionally do NOT abort the in-flight
   // stream for any other session — the stream registry keeps it running in
@@ -89,11 +70,11 @@ export function ChatView({ sessionId }: ChatViewProps) {
     useChatStore.getState().setFocusedSession(sessionId);
     useArtifactStore.getState().clearAll();
     useActivityStore.getState().close();
-    useWorkspaceStore.getState().resetForSession();
+    useWorkspaceStore.getState().resetForSession(sessionId);
 
     api.get<SessionResponse>(API.SESSIONS.DETAIL(sessionId)).then((s) => {
       if (s.directory) {
-        useWorkspaceStore.getState().setActiveWorkspacePath(s.directory);
+        useWorkspaceStore.getState().setActiveWorkspacePath(s.directory, sessionId);
       }
     }).catch(() => {});
 
@@ -101,8 +82,11 @@ export function ChatView({ sessionId }: ChatViewProps) {
       API.SESSIONS.TODOS(sessionId),
     ).then((res) => {
       if (res.todos && res.todos.length > 0) {
-        useWorkspaceStore.getState().setTodos(res.todos as WorkspaceTodo[]);
-        useWorkspaceStore.getState().open();
+        const workspace = useWorkspaceStore.getState();
+        workspace.setTodos(res.todos as WorkspaceTodo[], sessionId);
+        if (useWorkspaceStore.getState().activeSessionId === sessionId) {
+          useWorkspaceStore.getState().open();
+        }
       }
     }).catch(() => {});
 
@@ -112,6 +96,7 @@ export function ChatView({ sessionId }: ChatViewProps) {
       if (res.files && res.files.length > 0) {
         useWorkspaceStore.getState().setWorkspaceFiles(
           res.files.map((f) => ({ name: f.name, path: f.path, type: f.type as WorkspaceFile["type"] })),
+          sessionId,
         );
       }
     }).catch(() => {});
@@ -131,10 +116,8 @@ export function ChatView({ sessionId }: ChatViewProps) {
   const handleCopyLast = useCallback(() => {
     if (!messages || messages.length === 0) return;
 
-    // Find last assistant message
-    const lastAssistantMessage = [...messages]
-      .reverse()
-      .find((msg) => (msg.data as { role: string }).role === "assistant");
+    // Find last user-visible assistant message.
+    const lastAssistantMessage = latestVisibleAssistantMessage(messages);
 
     if (!lastAssistantMessage) {
       toast.error("No assistant message found");
@@ -174,6 +157,7 @@ export function ChatView({ sessionId }: ChatViewProps) {
         isGenerating={isGenerating}
         streamId={streamId}
         pendingUserText={pendingUserText}
+        pendingUserSentAt={pendingUserSentAt}
         pendingAttachments={pendingAttachments}
         streamingParts={streamingParts}
         streamingText={streamingText}

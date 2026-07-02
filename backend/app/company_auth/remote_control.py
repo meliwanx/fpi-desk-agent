@@ -78,6 +78,47 @@ async def fetch_runtime_model_policy(
     return _policy_from_payload(payload)
 
 
+async def fetch_runtime_connector_policy(
+    *,
+    settings: Settings,
+    company_session_token: str,
+) -> set[str] | None:
+    """Fetch connector IDs available to the current company user."""
+    base_url = _control_url(settings)
+    if not base_url or not company_session_token:
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{base_url}/api/connectors/policy/runtime",
+                headers={"X-FPI-Session": company_session_token},
+            )
+            response.raise_for_status()
+            payload = response.json()
+    except httpx.HTTPStatusError as exc:
+        logger.warning(
+            "Enterprise connector policy fetch failed with status %s",
+            exc.response.status_code,
+        )
+        return None
+    except Exception as exc:
+        logger.warning("Enterprise connector policy fetch failed: %s", exc)
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+    raw_ids = payload.get("connector_ids")
+    if not isinstance(raw_ids, list):
+        return None
+    return {
+        connector_id
+        for value in raw_ids
+        for connector_id in [str(value or "").strip()]
+        if connector_id
+    }
+
+
 async def sync_remote_model_policy_for_request(
     *,
     settings: Settings,

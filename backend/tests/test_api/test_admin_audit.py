@@ -6,8 +6,10 @@ import hashlib
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from unittest.mock import MagicMock
 from sqlalchemy import select
 
+import app.api.admin as admin_api
 from app.company_auth.store import CompanyAuthStore, CompanyModelEntry, CompanyModelPolicy, CompanyUser
 from app.models.audit import (
     AuditAdminAction,
@@ -54,6 +56,11 @@ class _FakeCompanyStore:
             "windows_download_url": "",
             "linux_download_url": "",
             "default_download_url": "",
+        }
+        self.connector_policy = {
+            "connectors": [
+                {"connector_id": "sim-data-agent", "allowed_user_ids": []},
+            ],
         }
 
     async def list_users(self) -> list[CompanyUser]:
@@ -104,6 +111,13 @@ class _FakeCompanyStore:
         self.update_policy = values
         return self.update_policy
 
+    async def get_connector_policy(self):
+        return self.connector_policy
+
+    async def update_connector_policy(self, *, connectors: list[dict]):
+        self.connector_policy = {"connectors": connectors}
+        return self.connector_policy
+
 
 async def test_admin_can_create_and_list_company_users(app_client):
     app_client.app.state.company_auth_store = _FakeCompanyStore()
@@ -146,7 +160,140 @@ async def test_admin_can_create_and_list_company_users(app_client):
     ]
 
 
-async def test_admin_can_update_company_model_policy(app_client):
+async def test_admin_can_control_connector_policy_by_user(app_client):
+    store = _FakeCompanyStore()
+    store.users = [
+        CompanyUser(
+            id="user-1",
+            email="employee@example.com",
+            display_name="Employee One",
+            role="user",
+            is_active=True,
+        ),
+        CompanyUser(
+            id="user-2",
+            email="employee2@example.com",
+            display_name="Employee Two",
+            role="user",
+            is_active=True,
+        ),
+    ]
+    app_client.app.state.company_auth_store = store
+    app_client.app.state.connector_registry = MagicMock(
+        status=MagicMock(return_value={
+            "sim-data-agent": {
+                "name": "SIM 数据中台",
+                "description": "SIM connector",
+                "category": "data",
+                "icon_url": "/connectors/sim-data-agent.png",
+                "enabled": False,
+                "status": "disabled",
+            },
+        })
+    )
+    app_client.app.middleware_stack = None
+
+    async def inject_admin(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="admin-1",
+            email="admin",
+            display_name="Admin",
+            role="admin",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    app_client.app.middleware("http")(inject_admin)
+
+    loaded = await app_client.get("/api/admin/connector-policy")
+    assert loaded.status_code == 200
+    assert loaded.json()["connectors"][0]["connector_id"] == "sim-data-agent"
+    assert loaded.json()["connectors"][0]["allowed_user_ids"] == []
+    assert [user["id"] for user in loaded.json()["users"]] == ["user-1", "user-2"]
+
+    updated = await app_client.put(
+        "/api/admin/connector-policy",
+        json={
+            "connectors": [
+                {
+                    "connector_id": "sim-data-agent",
+                    "allowed_user_ids": ["user-1"],
+                },
+            ],
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["connectors"][0]["allowed_user_ids"] == ["user-1"]
+
+
+async def test_admin_can_update_company_model_policy(app_client, monkeypatch):
+    app_client.app.state.company_auth_store = _FakeCompanyStore()
+    app_client.app.middleware_stack = None
+
+    async def inject_admin(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="admin-1",
+            email="admin",
+            display_name="Admin",
+            role="admin",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    async def fake_probe(entry):
+        return f"测试成功：{entry.provider_id}/{entry.id}"
+
+    app_client.app.middleware("http")(inject_admin)
+    monkeypatch.setattr(admin_api, "_probe_admin_model_entry", fake_probe)
+
+    models = [
+        {
+            "provider_id": "custom_onlyme",
+            "id": "gpt-5.5",
+            "name": "GPT-5.5",
+            "protocol": "openai_compatible",
+            "base_url": "https://sub2api.onlymeok.com/v1",
+            "api_key": "sk-onlyme",
+        },
+        {
+            "provider_id": "custom_backup",
+            "id": "gpt-5.4",
+            "name": "GPT-5.4",
+            "protocol": "openai_compatible",
+            "base_url": "https://backup.example.com/v1",
+            "api_key": "sk-backup",
+        },
+    ]
+    tested_models = []
+    for model in models:
+        tested = await app_client.post("/api/admin/model-policy/test", json=model)
+        assert tested.status_code == 200
+        tested_models.append({**model, "test_token": tested.json()["test_token"]})
+
+    updated = await app_client.put(
+        "/api/admin/model-policy",
+        json={
+            "default_provider_id": "custom_backup",
+            "default_model_id": "gpt-5.4",
+            "models": tested_models,
+        },
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["default_provider_id"] == "custom_backup"
+    assert [model["id"] for model in updated.json()["models"]] == ["gpt-5.5", "gpt-5.4"]
+    assert updated.json()["models"][1]["protocol"] == "openai_compatible"
+    assert updated.json()["models"][1]["base_url"] == "https://backup.example.com/v1"
+    assert updated.json()["models"][1]["masked_key"] == "sk-b...ckup"
+    assert "api_key" not in updated.json()["models"][1]
+
+    loaded = await app_client.get("/api/admin/model-policy")
+    assert loaded.status_code == 200
+    assert loaded.json()["default_model_id"] == "gpt-5.4"
+    assert loaded.json()["models"][0]["masked_key"] == "sk-o...lyme"
+
+
+async def test_admin_rejects_untested_new_company_model_policy(app_client):
     app_client.app.state.company_auth_store = _FakeCompanyStore()
     app_client.app.middleware_stack = None
 
@@ -169,14 +316,6 @@ async def test_admin_can_update_company_model_policy(app_client):
             "default_model_id": "gpt-5.4",
             "models": [
                 {
-                    "provider_id": "custom_onlyme",
-                    "id": "gpt-5.5",
-                    "name": "GPT-5.5",
-                    "protocol": "openai_compatible",
-                    "base_url": "https://sub2api.onlymeok.com/v1",
-                    "api_key": "sk-onlyme",
-                },
-                {
                     "provider_id": "custom_backup",
                     "id": "gpt-5.4",
                     "name": "GPT-5.4",
@@ -188,18 +327,58 @@ async def test_admin_can_update_company_model_policy(app_client):
         },
     )
 
+    assert updated.status_code == 400
+    assert "测试" in updated.json()["detail"]
+
+
+async def test_admin_can_test_and_save_company_model_policy(app_client, monkeypatch):
+    app_client.app.state.company_auth_store = _FakeCompanyStore()
+    app_client.app.middleware_stack = None
+
+    async def inject_admin(request, call_next):
+        request.state.company_user = CompanyUser(
+            id="admin-1",
+            email="admin",
+            display_name="Admin",
+            role="admin",
+            is_active=True,
+        )
+        return await call_next(request)
+
+    async def fake_probe(entry):
+        assert entry.provider_id == "custom_backup"
+        assert entry.id == "gpt-5.4"
+        return "测试成功"
+
+    app_client.app.middleware("http")(inject_admin)
+    monkeypatch.setattr(admin_api, "_probe_admin_model_entry", fake_probe, raising=False)
+
+    model = {
+        "provider_id": "custom_backup",
+        "id": "gpt-5.4",
+        "name": "GPT-5.4",
+        "protocol": "openai_compatible",
+        "base_url": "https://backup.example.com/v1",
+        "api_key": "sk-backup",
+    }
+    tested = await app_client.post("/api/admin/model-policy/test", json=model)
+
+    assert tested.status_code == 200
+    assert tested.json()["ok"] is True
+    assert tested.json()["test_token"]
+
+    updated = await app_client.put(
+        "/api/admin/model-policy",
+        json={
+            "default_provider_id": "custom_backup",
+            "default_model_id": "gpt-5.4",
+            "models": [{**model, "test_token": tested.json()["test_token"]}],
+        },
+    )
+
     assert updated.status_code == 200
     assert updated.json()["default_provider_id"] == "custom_backup"
-    assert [model["id"] for model in updated.json()["models"]] == ["gpt-5.5", "gpt-5.4"]
-    assert updated.json()["models"][1]["protocol"] == "openai_compatible"
-    assert updated.json()["models"][1]["base_url"] == "https://backup.example.com/v1"
-    assert updated.json()["models"][1]["masked_key"] == "sk-b...ckup"
-    assert "api_key" not in updated.json()["models"][1]
-
-    loaded = await app_client.get("/api/admin/model-policy")
-    assert loaded.status_code == 200
-    assert loaded.json()["default_model_id"] == "gpt-5.4"
-    assert loaded.json()["models"][0]["masked_key"] == "sk-o...lyme"
+    assert updated.json()["models"][0]["masked_key"] == "sk-b...ckup"
 
 
 async def test_admin_can_update_company_app_update_policy(app_client):
@@ -267,6 +446,7 @@ async def test_admin_can_upload_update_asset_and_bind_policy(app_client, tmp_pat
             "/api/admin/update-assets/upload",
             data={
                 "platform": "macos",
+                "name": "macOS 1.4.0 正式安装包",
                 "version": "v1.4.0",
                 "signature": "signed-updater-package-signature",
             },
@@ -282,13 +462,19 @@ async def test_admin_can_upload_update_asset_and_bind_policy(app_client, tmp_pat
         assert uploaded.status_code == 200
         asset = uploaded.json()
         assert asset["platform"] == "macos"
+        assert asset["name"] == "macOS 1.4.0 正式安装包"
         assert asset["version"] == "1.4.0"
         assert asset["original_filename"] == "FPI Agent 1.4.0.dmg"
         assert asset["size_bytes"] == len(b"installer-bytes")
         assert asset["download_count"] == 0
         assert asset["uploaded_by_email"] == "admin@example.com"
+        assert asset["md5"] == hashlib.md5(b"installer-bytes").hexdigest()
         assert len(asset["sha256"]) == 64
         assert asset["signature"] == "signed-updater-package-signature"
+
+        listed = await app_client.get("/api/admin/update-assets")
+        assert listed.status_code == 200
+        assert listed.json()["items"][0]["id"] == asset["id"]
 
         saved_asset = await store.get_update_asset(asset["id"])
         assert saved_asset is not None
@@ -314,8 +500,42 @@ async def test_admin_can_upload_update_asset_and_bind_policy(app_client, tmp_pat
         policy = updated.json()
         assert policy["macos_asset_id"] == asset["id"]
         assert policy["macos_asset"]["id"] == asset["id"]
+        assert policy["macos_asset"]["name"] == "macOS 1.4.0 正式安装包"
+        assert policy["macos_asset"]["md5"] == hashlib.md5(b"installer-bytes").hexdigest()
         assert policy["macos_asset"]["uploaded_by_display_name"] == "Admin"
         assert policy["macos_asset"]["signature"] == "signed-updater-package-signature"
+
+        denied_delete = await app_client.delete(f"/api/admin/update-assets/{asset['id']}")
+        assert denied_delete.status_code == 400
+        assert stored_file.exists()
+
+        history_upload = await app_client.post(
+            "/api/admin/update-assets/upload",
+            data={
+                "platform": "macos",
+                "name": "macOS 1.3.9 历史安装包",
+                "version": "1.3.9",
+            },
+            files={
+                "file": (
+                    "FPI Agent 1.3.9.dmg",
+                    b"old-installer-bytes",
+                    "application/x-apple-diskimage",
+                )
+            },
+        )
+        assert history_upload.status_code == 200
+        history_asset = history_upload.json()
+        saved_history_asset = await store.get_update_asset(history_asset["id"])
+        assert saved_history_asset is not None
+        history_file = tmp_path / "update_assets" / saved_history_asset.stored_filename
+        assert history_file.exists()
+
+        deleted = await app_client.delete(f"/api/admin/update-assets/{history_asset['id']}")
+        assert deleted.status_code == 200
+        assert deleted.json() == {"success": True}
+        assert await store.get_update_asset(history_asset["id"]) is None
+        assert not history_file.exists()
     finally:
         await store.dispose()
 
@@ -639,24 +859,28 @@ async def test_employee_update_policy_serves_local_asset_and_counts_downloads(ap
     try:
         windows_asset = await store.create_update_asset(
             platform="windows",
+            name="Windows 1.4.0 正式包",
             version="1.4.0",
             original_filename="FPI Agent Setup.exe",
             stored_filename="windows.exe",
             mime_type="application/vnd.microsoft.portable-executable",
             size_bytes=len(windows_bytes),
             sha256=hashlib.sha256(windows_bytes).hexdigest(),
+            md5=hashlib.md5(windows_bytes).hexdigest(),
             uploaded_by_user_id="admin-1",
             uploaded_by_email="admin@example.com",
             uploaded_by_display_name="Admin",
         )
         default_asset = await store.create_update_asset(
             platform="default",
+            name="默认 1.4.0 包",
             version="1.4.0",
             original_filename="FPI Agent.zip",
             stored_filename="default.zip",
             mime_type="application/zip",
             size_bytes=len(default_bytes),
             sha256=hashlib.sha256(default_bytes).hexdigest(),
+            md5=hashlib.md5(default_bytes).hexdigest(),
             uploaded_by_user_id="admin-1",
             uploaded_by_email="admin@example.com",
             uploaded_by_display_name="Admin",
@@ -677,9 +901,35 @@ async def test_employee_update_policy_serves_local_asset_and_counts_downloads(ap
         assert response.status_code == 200
         payload = response.json()
         assert payload["update_available"] is True
+        assert payload["latest_package_name"] == "Windows 1.4.0 正式包"
+        assert payload["latest_package_sha256"] == hashlib.sha256(windows_bytes).hexdigest()
+        assert payload["latest_package_md5"] == hashlib.md5(windows_bytes).hexdigest()
         assert f"/download/{windows_asset.id}" in payload["download_url"]
         assert payload["download_filename"] == "FPI Agent Setup.exe"
         assert payload["download_sha256"] == hashlib.sha256(windows_bytes).hexdigest()
+
+        current_hash = await app_client.get(
+            "/api/app/update-policy"
+            f"?current_version=1.3.0&platform=windows&arch=x64&current_package_sha256={windows_asset.sha256}"
+        )
+        assert current_hash.status_code == 200
+        assert current_hash.json()["update_available"] is True
+
+        same_version_different_hash = await app_client.get(
+            "/api/app/update-policy"
+            "?current_version=1.4.0&platform=windows&arch=x64&current_package_sha256="
+            + ("0" * 64)
+        )
+        assert same_version_different_hash.status_code == 200
+        assert same_version_different_hash.json()["update_available"] is True
+        assert same_version_different_hash.json()["force_update"] is False
+
+        same_version_missing_hash = await app_client.get(
+            "/api/app/update-policy?current_version=1.4.0&platform=windows&arch=x64"
+        )
+        assert same_version_missing_hash.status_code == 200
+        assert same_version_missing_hash.json()["update_available"] is False
+        assert same_version_missing_hash.json()["force_update"] is False
 
         download = await app_client.get(payload["download_url"])
         assert download.status_code == 200
@@ -780,7 +1030,7 @@ async def test_employee_update_manifest_serves_signed_tauri_assets(app_client, t
         await store.dispose()
 
 
-async def test_employee_update_policy_uses_platform_asset_version_when_policy_is_newer(app_client, tmp_path):
+async def test_employee_update_policy_uses_selected_asset_hash_for_rebuilds(app_client, tmp_path):
     store = CompanyAuthStore(f"sqlite+aiosqlite:///{tmp_path / 'company_auth.db'}")
     await store.startup()
     app_client.app.state.company_auth_store = store
@@ -807,12 +1057,14 @@ async def test_employee_update_policy_uses_platform_asset_version_when_policy_is
     try:
         windows_asset = await store.create_update_asset(
             platform="windows",
+            name="Windows hotfix rebuild",
             version="1.3.0",
             original_filename="FPI Agent Setup.exe",
             stored_filename="windows.exe",
             mime_type="application/vnd.microsoft.portable-executable",
             size_bytes=len(windows_bytes),
             sha256=hashlib.sha256(windows_bytes).hexdigest(),
+            md5=hashlib.md5(windows_bytes).hexdigest(),
             uploaded_by_user_id="admin-1",
             uploaded_by_email="admin@example.com",
             uploaded_by_display_name="Admin",
@@ -827,13 +1079,24 @@ async def test_employee_update_policy_uses_platform_asset_version_when_policy_is
         )
 
         response = await app_client.get(
-            "/api/app/update-policy?current_version=1.3.0&platform=windows&arch=x64"
+            "/api/app/update-policy"
+            "?current_version=1.3.0&platform=windows&arch=x64&current_package_sha256="
+            + ("0" * 64)
         )
         assert response.status_code == 200
         payload = response.json()
         assert payload["latest_version"] == "1.3.0"
-        assert payload["update_available"] is False
-        assert payload["force_update"] is False
+        assert payload["update_available"] is True
+        assert payload["force_update"] is True
+        assert payload["latest_package_sha256"] == windows_asset.sha256
+
+        current = await app_client.get(
+            "/api/app/update-policy"
+            f"?current_version=1.3.0&platform=windows&arch=x64&current_package_sha256={windows_asset.sha256}"
+        )
+        assert current.status_code == 200
+        assert current.json()["update_available"] is False
+        assert current.json()["force_update"] is False
     finally:
         await store.dispose()
 
@@ -991,6 +1254,12 @@ async def test_audit_ingest_and_admin_query(app_client, session_factory, tmp_pat
             ],
             "parts": [
                 {
+                    "id": "local-part-step-start",
+                    "message_id": "local-message-1",
+                    "session_id": "local-session-1",
+                    "data": {"type": "step-start", "step": 1},
+                },
+                {
                     "id": "local-part-1",
                     "message_id": "local-message-1",
                     "session_id": "local-session-1",
@@ -1013,7 +1282,7 @@ async def test_audit_ingest_and_admin_query(app_client, session_factory, tmp_pat
         },
     )
     assert ingest.status_code == 200
-    assert ingest.json() == {"sessions": 1, "messages": 1, "parts": 2}
+    assert ingest.json() == {"sessions": 1, "messages": 1, "parts": 3}
 
     async with session_factory() as db:
         sessions = list((await db.execute(AuditSession.__table__.select())).mappings())
@@ -1024,7 +1293,7 @@ async def test_audit_ingest_and_admin_query(app_client, session_factory, tmp_pat
     assert sessions[0]["user_email"] == "employee@example.com"
     assert sessions[0]["workspace"] == "/Users/employee/work/acme"
     assert messages[0]["role"] == "user"
-    assert {part["part_type"] for part in parts} == {"text", "file"}
+    assert {part["part_type"] for part in parts} == {"step-start", "text", "file"}
     assert files[0]["local_part_id"] == "local-part-2"
     assert files[0]["content_uploaded"] is False
 
@@ -1051,10 +1320,18 @@ async def test_audit_ingest_and_admin_query(app_client, session_factory, tmp_pat
     )
     assert transcript.status_code == 200
     transcript_body = transcript.json()
+    assert {part["type"] for part in transcript_body["messages"][0]["parts"]} == {"text", "file"}
     assert transcript_body["messages"][0]["parts"][0]["data"]["text"] == "请分析这个销售表"
     file_part = next(part for part in transcript_body["messages"][0]["parts"] if part["type"] == "file")
     assert file_part["file"]["content_uploaded"] is True
     assert file_part["file"]["download_url"] == "/api/admin/audit/files/local-part-2/download"
+
+    entries = await app_client.get(
+        "/api/admin/audit/entries?limit=20",
+        headers={"X-Test-Company-Role": "admin"},
+    )
+    assert entries.status_code == 200
+    assert {item["type"] for item in entries.json()["items"]} == {"text", "file"}
 
     download = await app_client.get(
         "/api/admin/audit/files/local-part-2/download",
@@ -1118,7 +1395,11 @@ async def test_enterprise_audit_tracks_usage_tools_risks_and_admin_actions(
                     "id": "local-message-assistant",
                     "session_id": "local-session-observe",
                     "role": "assistant",
-                    "data": {"role": "assistant"},
+                    "data": {
+                        "role": "assistant",
+                        "model_id": "claude-sonnet-4",
+                        "provider_id": "anthropic",
+                    },
                 },
             ],
             "parts": [
@@ -1191,6 +1472,8 @@ async def test_enterprise_audit_tracks_usage_tools_risks_and_admin_actions(
     assert usage_rows[0]["input_tokens"] == 1000
     assert usage_rows[0]["total_tokens"] == 1275
     assert usage_rows[0]["cost"] == 0.0123
+    assert usage_rows[0]["model_id"] == "claude-sonnet-4"
+    assert usage_rows[0]["provider_id"] == "anthropic"
     assert tool_rows[0]["tool_name"] == "read"
     assert tool_rows[0]["status"] == "completed"
     assert "profiles.yaml" in tool_rows[0]["output_preview"]
@@ -1219,6 +1502,15 @@ async def test_enterprise_audit_tracks_usage_tools_risks_and_admin_actions(
     assert tool_calls.status_code == 200
     assert tool_calls.json()["items"][0]["call_id"] == "call-read-1"
 
+    transcript = await app_client.get(
+        "/api/admin/audit/sessions/local-session-observe/messages",
+        headers={"X-Test-Company-Role": "admin"},
+    )
+    assert transcript.status_code == 200
+    assistant_message = next(message for message in transcript.json()["messages"] if message["role"] == "assistant")
+    assert assistant_message["model_id"] == "claude-sonnet-4"
+    assert assistant_message["provider_id"] == "anthropic"
+
     tool_analytics = await app_client.get(
         "/api/admin/audit/analytics/tools",
         headers={"X-Test-Company-Role": "admin"},
@@ -1242,8 +1534,21 @@ async def test_enterprise_audit_tracks_usage_tools_risks_and_admin_actions(
         headers={"X-Test-Company-Role": "admin"},
     )
     assert model_analytics.status_code == 200
-    assert model_analytics.json()["model_list"][0]["message_count"] == 2
+    assert model_analytics.json()["model_list"][0]["model_id"] == "claude-sonnet-4"
+    assert model_analytics.json()["model_list"][0]["provider_id"] == "anthropic"
+    assert model_analytics.json()["model_list"][0]["message_count"] == 1
     assert model_analytics.json()["model_list"][0]["total_tokens"] == 1275
+
+    user_daily = await app_client.get(
+        "/api/admin/audit/analytics/user-daily-tokens?days=7",
+        headers={"X-Test-Company-Role": "admin"},
+    )
+    assert user_daily.status_code == 200
+    daily_item = user_daily.json()["items"][0]
+    assert daily_item["user_email"] == "employee@example.com"
+    assert daily_item["total_tokens"] == 1275
+    assert daily_item["conversations"][0]["session_id"] == "local-session-observe"
+    assert daily_item["models"][0]["model_id"] == "claude-sonnet-4"
 
     entries = await app_client.get(
         "/api/admin/audit/entries?limit=20",

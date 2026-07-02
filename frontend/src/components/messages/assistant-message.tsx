@@ -198,7 +198,11 @@ export const StreamingMessage = memo(function StreamingMessage({ sessionId, part
   return (
     <div className={freshMountRef.current ? "animate-fade-in" : undefined}>
       {!hasAnyActivity && <StreamingStage label={isModelLoading ? t("stageThinking") : stageLabel} />}
-      <MessageContent parts={liveParts} isStreaming />
+      <MessageContent
+        parts={liveParts}
+        isStreaming
+        activityKey={sessionId ? `stream:${sessionId}` : undefined}
+      />
       {showTail && (
         <div className="mt-2">
           <StreamingIndicator label={stageLabel} />

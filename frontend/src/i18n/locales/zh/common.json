@@ -108,7 +108,7 @@
   "remote": "远程",
   "modelsUnavailable": "模型不可用",
   "modelsUnavailableHint": "请检查服务商连接、防火墙或 VPN 设置。",
-  "setupProvider": "配置服务商",
-  "setUpProvider": "配置服务商",
+  "setupProvider": "模型服务",
+  "setUpProvider": "模型服务",
   "apiKey": "API 密钥"
 }

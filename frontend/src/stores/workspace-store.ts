@@ -53,8 +53,32 @@ export interface WorkspaceTaskBatch {
   tasks: WorkspaceAgentTask[];
 }
 
+interface WorkspaceSessionSnapshot {
+  todos: WorkspaceTodo[];
+  taskBatch: WorkspaceTaskBatch | null;
+  workspaceFiles: WorkspaceFile[];
+  scratchpadContent: string;
+  activeWorkspacePath: string | null;
+}
+
+function emptyWorkspaceSnapshot(): WorkspaceSessionSnapshot {
+  return {
+    todos: [],
+    taskBatch: null,
+    workspaceFiles: [],
+    scratchpadContent: "",
+    activeWorkspacePath: null,
+  };
+}
+
+function normalizeWorkspacePath(path: string | null): string | null {
+  return path && path !== "." ? path : null;
+}
+
 interface WorkspaceStore {
   isOpen: boolean;
+  activeSessionId: string | null;
+  workspaceBySession: Record<string, WorkspaceSessionSnapshot>;
   /** Per-section collapsed state (false / missing = expanded). */
   collapsedSections: Record<string, boolean>;
   todos: WorkspaceTodo[];
@@ -70,17 +94,19 @@ interface WorkspaceStore {
   toggleSection: (section: string) => void;
   expandSection: (section: string) => void;
   collapseSection: (section: string) => void;
-  setTodos: (todos: WorkspaceTodo[]) => void;
-  setTaskBatch: (batch: WorkspaceTaskBatch | null) => void;
-  addWorkspaceFile: (file: WorkspaceFile) => void;
-  setWorkspaceFiles: (files: WorkspaceFile[]) => void;
-  setScratchpadContent: (content: string) => void;
-  setActiveWorkspacePath: (path: string | null) => void;
-  resetForSession: () => void;
+  setTodos: (todos: WorkspaceTodo[], sessionId?: string | null) => void;
+  setTaskBatch: (batch: WorkspaceTaskBatch | null, sessionId?: string | null) => void;
+  addWorkspaceFile: (file: WorkspaceFile, sessionId?: string | null) => void;
+  setWorkspaceFiles: (files: WorkspaceFile[], sessionId?: string | null) => void;
+  setScratchpadContent: (content: string, sessionId?: string | null) => void;
+  setActiveWorkspacePath: (path: string | null, sessionId?: string | null) => void;
+  resetForSession: (sessionId: string) => void;
 }
 
 export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   isOpen: false,
+  activeSessionId: null,
+  workspaceBySession: {},
   collapsedSections: {
     progress: true,
     files: true,
@@ -127,31 +153,122 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       },
     })),
 
-  setTodos: (todos) => set({ todos, ...(todos.length > 0 ? { isOpen: true } : {}) }),
-  setTaskBatch: (taskBatch) => set({ taskBatch, ...(taskBatch ? { isOpen: true } : {}) }),
+  setTodos: (todos, sessionId) =>
+    set((s) => {
+      const targetSessionId = sessionId ?? s.activeSessionId;
+      if (!targetSessionId) {
+        return { todos, ...(todos.length > 0 ? { isOpen: true } : {}) };
+      }
 
-  addWorkspaceFile: (file) => {
-    const { workspaceFiles } = get();
-    if (workspaceFiles.some((f) => f.path === file.path)) return;
-    set({ workspaceFiles: [...workspaceFiles, file] });
-  },
+      const prev = s.workspaceBySession[targetSessionId] ?? emptyWorkspaceSnapshot();
+      const workspaceBySession = {
+        ...s.workspaceBySession,
+        [targetSessionId]: { ...prev, todos },
+      };
+      if (targetSessionId !== s.activeSessionId) return { workspaceBySession };
 
-  setWorkspaceFiles: (files) => set({ workspaceFiles: files }),
-  setScratchpadContent: (content) => set({ scratchpadContent: content }),
-  setActiveWorkspacePath: (path) => set({ activeWorkspacePath: path && path !== "." ? path : null }),
+      return { workspaceBySession, todos, ...(todos.length > 0 ? { isOpen: true } : {}) };
+    }),
 
-  resetForSession: () =>
-    set({
-      todos: [],
-      taskBatch: null,
-      workspaceFiles: [],
-      scratchpadContent: "",
-      collapsedSections: {
-        progress: true,
-        files: true,
-        context: true,
-      },
-      activeWorkspacePath: null,
-      isOpen: false,
+  setTaskBatch: (taskBatch, sessionId) =>
+    set((s) => {
+      const targetSessionId = sessionId ?? s.activeSessionId;
+      if (!targetSessionId) {
+        return { taskBatch, ...(taskBatch ? { isOpen: true } : {}) };
+      }
+
+      const prev = s.workspaceBySession[targetSessionId] ?? emptyWorkspaceSnapshot();
+      const workspaceBySession = {
+        ...s.workspaceBySession,
+        [targetSessionId]: { ...prev, taskBatch },
+      };
+      if (targetSessionId !== s.activeSessionId) return { workspaceBySession };
+
+      return { workspaceBySession, taskBatch, ...(taskBatch ? { isOpen: true } : {}) };
+    }),
+
+  addWorkspaceFile: (file, sessionId) =>
+    set((s) => {
+      const targetSessionId = sessionId ?? s.activeSessionId;
+      if (!targetSessionId) {
+        if (s.workspaceFiles.some((f) => f.path === file.path)) return s;
+        return { workspaceFiles: [...s.workspaceFiles, file] };
+      }
+
+      const prev = s.workspaceBySession[targetSessionId] ?? emptyWorkspaceSnapshot();
+      if (prev.workspaceFiles.some((f) => f.path === file.path)) return s;
+      const workspaceFiles = [...prev.workspaceFiles, file];
+      const workspaceBySession = {
+        ...s.workspaceBySession,
+        [targetSessionId]: { ...prev, workspaceFiles },
+      };
+      if (targetSessionId !== s.activeSessionId) return { workspaceBySession };
+
+      return { workspaceBySession, workspaceFiles };
+    }),
+
+  setWorkspaceFiles: (files, sessionId) =>
+    set((s) => {
+      const targetSessionId = sessionId ?? s.activeSessionId;
+      if (!targetSessionId) return { workspaceFiles: files };
+
+      const prev = s.workspaceBySession[targetSessionId] ?? emptyWorkspaceSnapshot();
+      const workspaceBySession = {
+        ...s.workspaceBySession,
+        [targetSessionId]: { ...prev, workspaceFiles: files },
+      };
+      if (targetSessionId !== s.activeSessionId) return { workspaceBySession };
+
+      return { workspaceBySession, workspaceFiles: files };
+    }),
+
+  setScratchpadContent: (content, sessionId) =>
+    set((s) => {
+      const targetSessionId = sessionId ?? s.activeSessionId;
+      if (!targetSessionId) return { scratchpadContent: content };
+
+      const prev = s.workspaceBySession[targetSessionId] ?? emptyWorkspaceSnapshot();
+      const workspaceBySession = {
+        ...s.workspaceBySession,
+        [targetSessionId]: { ...prev, scratchpadContent: content },
+      };
+      if (targetSessionId !== s.activeSessionId) return { workspaceBySession };
+
+      return { workspaceBySession, scratchpadContent: content };
+    }),
+
+  setActiveWorkspacePath: (path, sessionId) =>
+    set((s) => {
+      const targetSessionId = sessionId ?? s.activeSessionId;
+      const activeWorkspacePath = normalizeWorkspacePath(path);
+      if (!targetSessionId) return { activeWorkspacePath };
+
+      const prev = s.workspaceBySession[targetSessionId] ?? emptyWorkspaceSnapshot();
+      const workspaceBySession = {
+        ...s.workspaceBySession,
+        [targetSessionId]: { ...prev, activeWorkspacePath },
+      };
+      if (targetSessionId !== s.activeSessionId) return { workspaceBySession };
+
+      return { workspaceBySession, activeWorkspacePath };
+    }),
+
+  resetForSession: (sessionId) =>
+    set((s) => {
+      const snapshot = s.workspaceBySession[sessionId] ?? emptyWorkspaceSnapshot();
+      return {
+        activeSessionId: sessionId,
+        todos: snapshot.todos,
+        taskBatch: snapshot.taskBatch,
+        workspaceFiles: snapshot.workspaceFiles,
+        scratchpadContent: snapshot.scratchpadContent,
+        collapsedSections: {
+          progress: true,
+          files: true,
+          context: true,
+        },
+        activeWorkspacePath: snapshot.activeWorkspacePath,
+        isOpen: false,
+      };
     }),
 }));

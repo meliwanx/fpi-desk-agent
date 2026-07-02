@@ -8,6 +8,7 @@ import io
 import json
 import mimetypes
 import re
+import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,10 @@ from starlette.responses import FileResponse
 
 from app.company_auth.model_policy_sync import sync_company_model_policy
 from app.company_auth.store import (
+    CompanyAnnouncement,
+    CompanyConnectorPolicy,
     CompanyFeedback,
+    CompanyModelEntry,
     CompanyModelPolicy,
     CompanySessionRecord,
     CompanyUpdateAsset,
@@ -52,6 +56,7 @@ _VPN_HINT_RE = re.compile(
     r"(订阅|subscription|clash|v2ray|trojan|shadowsocks|sing-box|surge|quantumult|proxy|vpn)",
     re.IGNORECASE,
 )
+_ADMIN_INTERNAL_AUDIT_PART_TYPES = ("step-start", "step_start")
 
 
 class AdminUserResponse(BaseModel):
@@ -84,6 +89,7 @@ class AdminModelPolicyEntryRequest(BaseModel):
     base_url: str = ""
     api_key: str | None = None
     enabled: bool = True
+    test_token: str | None = None
 
 
 class AdminModelPolicyEntryResponse(BaseModel):
@@ -108,6 +114,12 @@ class AdminModelPolicyResponse(BaseModel):
     models: list[AdminModelPolicyEntryResponse]
 
 
+class AdminModelPolicyTestResponse(BaseModel):
+    ok: bool
+    message: str
+    test_token: str
+
+
 class AdminUpdatePolicyRequest(BaseModel):
     enabled: bool = False
     latest_version: str = ""
@@ -127,11 +139,13 @@ class AdminUpdatePolicyRequest(BaseModel):
 class AdminUpdateAssetResponse(BaseModel):
     id: str
     platform: str
+    name: str
     version: str
     original_filename: str
     mime_type: str
     size_bytes: int
     sha256: str
+    md5: str
     signature: str
     uploaded_by_user_id: str
     uploaded_by_email: str
@@ -163,6 +177,58 @@ class AdminUpdatePolicyResponse(BaseModel):
     windows_download_url: str
     linux_download_url: str
     default_download_url: str
+
+
+class AdminConnectorPolicyEntryRequest(BaseModel):
+    connector_id: str = Field(..., min_length=1)
+    allowed_user_ids: list[str] = Field(default_factory=list)
+
+
+class AdminConnectorPolicyEntryResponse(BaseModel):
+    connector_id: str
+    name: str
+    description: str
+    category: str
+    icon_url: str
+    enabled: bool
+    status: str
+    allowed_user_ids: list[str]
+
+
+class AdminConnectorPolicyRequest(BaseModel):
+    connectors: list[AdminConnectorPolicyEntryRequest] = Field(default_factory=list)
+
+
+class AdminConnectorPolicyResponse(BaseModel):
+    connectors: list[AdminConnectorPolicyEntryResponse]
+    users: list[AdminUserResponse]
+
+
+class AdminAnnouncementRequest(BaseModel):
+    enabled: bool = True
+    content: str = ""
+    target_user_ids: list[str] = Field(default_factory=list)
+
+
+class AdminAnnouncementResponse(BaseModel):
+    id: str
+    enabled: bool
+    content: str
+    target_user_ids: list[str]
+    published_by_user_id: str
+    published_by_email: str
+    published_by_display_name: str
+    time_created: datetime
+    time_updated: datetime
+    users: list[AdminUserResponse]
+
+    @field_serializer("time_created", "time_updated")
+    def _serialize_datetime_shanghai(self, value: datetime) -> str:
+        return as_shanghai(value).isoformat()
+
+
+class AdminUpdateAssetListResponse(BaseModel):
+    items: list[AdminUpdateAssetResponse]
 
 
 class AdminFeedbackResponse(BaseModel):
@@ -338,6 +404,223 @@ def _public_model_policy(policy: CompanyModelPolicy) -> AdminModelPolicyResponse
     )
 
 
+def _connector_policy_entries(policy: Any) -> dict[str, list[str]]:
+    if isinstance(policy, CompanyConnectorPolicy):
+        return {
+            entry.connector_id: list(entry.allowed_user_ids)
+            for entry in policy.connectors
+        }
+    if isinstance(policy, dict):
+        entries: dict[str, list[str]] = {}
+        for raw in policy.get("connectors", []):
+            if not isinstance(raw, dict):
+                continue
+            connector_id = str(raw.get("connector_id") or raw.get("id") or "").strip()
+            if not connector_id:
+                continue
+            raw_user_ids = raw.get("allowed_user_ids") or []
+            if not isinstance(raw_user_ids, list):
+                raw_user_ids = []
+            entries[connector_id] = [
+                str(user_id).strip()
+                for user_id in raw_user_ids
+                if str(user_id).strip()
+            ]
+        return entries
+    return {}
+
+
+def _public_connector_policy(
+    *,
+    policy: Any,
+    users: list[CompanyUser],
+    connector_status: dict[str, dict[str, Any]],
+) -> AdminConnectorPolicyResponse:
+    allowed_by_connector = _connector_policy_entries(policy)
+    connector_ids = sorted(
+        set(connector_status) | set(allowed_by_connector),
+        key=lambda connector_id: str(connector_status.get(connector_id, {}).get("name") or connector_id),
+    )
+    return AdminConnectorPolicyResponse(
+        connectors=[
+            AdminConnectorPolicyEntryResponse(
+                connector_id=connector_id,
+                name=str(meta.get("name") or connector_id),
+                description=str(meta.get("description") or ""),
+                category=str(meta.get("category") or ""),
+                icon_url=str(meta.get("icon_url") or ""),
+                enabled=bool(meta.get("enabled", False)),
+                status=str(meta.get("status") or "disabled"),
+                allowed_user_ids=allowed_by_connector.get(connector_id, []),
+            )
+            for connector_id in connector_ids
+            for meta in [connector_status.get(connector_id, {})]
+        ],
+        users=[_public_user(user) for user in users],
+    )
+
+
+def _public_announcement(
+    announcement: CompanyAnnouncement,
+    users: list[CompanyUser],
+) -> AdminAnnouncementResponse:
+    return AdminAnnouncementResponse(
+        id=announcement.id,
+        enabled=announcement.enabled,
+        content=announcement.content,
+        target_user_ids=list(announcement.target_user_ids),
+        published_by_user_id=announcement.published_by_user_id,
+        published_by_email=announcement.published_by_email,
+        published_by_display_name=announcement.published_by_display_name,
+        time_created=announcement.time_created,
+        time_updated=announcement.time_updated,
+        users=[_public_user(user) for user in users],
+    )
+
+
+def _normalise_admin_model_protocol(value: str | None) -> str:
+    raw = (value or "openai_compatible").strip().lower().replace("-", "_")
+    aliases = {
+        "openai": "openai_compatible",
+        "openai_compat": "openai_compatible",
+        "openai_compatible": "openai_compatible",
+        "anthropic": "anthropic",
+        "anthropic_native": "anthropic",
+        "claude": "anthropic",
+    }
+    return aliases.get(raw, raw)
+
+
+def _resolve_admin_model_entry(
+    body: AdminModelPolicyEntryRequest,
+    existing_policy: CompanyModelPolicy,
+) -> CompanyModelEntry:
+    provider_id = body.provider_id.strip()
+    model_id = body.id.strip()
+    if not provider_id or not model_id:
+        raise ValueError("供应商 ID 和模型 ID 不能为空")
+
+    existing_by_model = {(model.provider_id, model.id): model for model in existing_policy.models}
+    existing_by_provider = {model.provider_id: model for model in existing_policy.models}
+    fallback = existing_by_model.get((provider_id, model_id)) or existing_by_provider.get(provider_id)
+    protocol = _normalise_admin_model_protocol(body.protocol or (fallback.protocol if fallback else "openai_compatible"))
+    if protocol not in {"openai_compatible", "anthropic"}:
+        raise ValueError(f"不支持的模型协议：{protocol}")
+
+    base_url = (body.base_url or (fallback.base_url if fallback else "")).strip()
+    if protocol == "anthropic":
+        base_url = ""
+    api_key = (body.api_key or "").strip()
+    if not api_key and fallback is not None:
+        api_key = fallback.api_key
+
+    if body.enabled:
+        if protocol == "openai_compatible" and not base_url:
+            raise ValueError("OpenAI 兼容模型必须填写 Base URL")
+        if not api_key:
+            raise ValueError("启用模型必须填写 API Key，或保留可复用的旧配置")
+
+    return CompanyModelEntry(
+        provider_id=provider_id,
+        id=model_id,
+        name=(body.name or model_id).strip() or model_id,
+        protocol=protocol,
+        base_url=base_url,
+        api_key=api_key,
+        enabled=body.enabled,
+    )
+
+
+def _admin_model_test_fingerprint(entry: CompanyModelEntry) -> str:
+    payload = {
+        "provider_id": entry.provider_id,
+        "id": entry.id,
+        "protocol": entry.protocol,
+        "base_url": entry.base_url,
+        "api_key": entry.api_key,
+        "enabled": entry.enabled,
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _admin_model_test_cache(request: Request) -> dict[str, tuple[str, datetime]]:
+    cache = getattr(request.app.state, "admin_model_test_tokens", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        request.app.state.admin_model_test_tokens = cache
+    now = shanghai_now()
+    expired = [token for token, (_fingerprint, expires_at) in cache.items() if expires_at <= now]
+    for token in expired:
+        cache.pop(token, None)
+    return cache
+
+
+def _existing_admin_model_fingerprints(policy: CompanyModelPolicy) -> set[str]:
+    return {_admin_model_test_fingerprint(model) for model in policy.models if model.enabled}
+
+
+def _validate_admin_model_test_tokens(
+    request: Request,
+    entries: list[CompanyModelEntry],
+    existing_policy: CompanyModelPolicy,
+    raw_models: list[AdminModelPolicyEntryRequest],
+) -> None:
+    existing_fingerprints = _existing_admin_model_fingerprints(existing_policy)
+    cache = _admin_model_test_cache(request)
+    for entry, raw in zip(entries, raw_models, strict=False):
+        if not entry.enabled:
+            continue
+        fingerprint = _admin_model_test_fingerprint(entry)
+        if fingerprint in existing_fingerprints:
+            continue
+        token = (raw.test_token or "").strip()
+        cached = cache.get(token)
+        if not token or cached is None or cached[0] != fingerprint:
+            raise ValueError(f"模型 {entry.provider_id}/{entry.id} 尚未测试通过，不能保存")
+
+
+async def _probe_admin_model_entry(entry: CompanyModelEntry) -> str:
+    models_override = [{"id": entry.id, "name": entry.name or entry.id}]
+    if entry.protocol == "anthropic":
+        from app.provider.anthropic_provider import AnthropicDesktopProvider
+
+        provider = AnthropicDesktopProvider(
+            api_key=entry.api_key,
+            provider_id=entry.provider_id,
+            models_override=models_override,
+        )
+    else:
+        from app.provider.factory import create_provider
+
+        provider = create_provider(
+            entry.provider_id,
+            entry.api_key,
+            base_url=entry.base_url,
+            models_override=models_override,
+        )
+
+    has_visible_content = False
+    async for chunk in provider.stream_chat(
+        entry.id,
+        [{"role": "user", "content": "请只回复：测试成功"}],
+        temperature=0,
+        max_tokens=32,
+    ):
+        if chunk.type == "error":
+            message = str(chunk.data.get("message") or "模型返回错误")
+            raise ValueError(message)
+        if chunk.type in {"text-delta", "reasoning-delta"}:
+            text = str(chunk.data.get("text") or "").strip()
+            if text:
+                has_visible_content = True
+                break
+
+    if not has_visible_content:
+        raise ValueError("模型服务没有返回可显示内容")
+    return "测试通过，模型可以正常返回内容"
+
+
 def _update_policy_value(policy: CompanyUpdatePolicy | dict[str, Any], key: str, default: Any = "") -> Any:
     if isinstance(policy, dict):
         return policy.get(key, default)
@@ -348,11 +631,13 @@ def _public_update_asset(asset: CompanyUpdateAsset) -> AdminUpdateAssetResponse:
     return AdminUpdateAssetResponse(
         id=asset.id,
         platform=asset.platform,
+        name=asset.name,
         version=asset.version,
         original_filename=asset.original_filename,
         mime_type=asset.mime_type,
         size_bytes=asset.size_bytes,
         sha256=asset.sha256,
+        md5=asset.md5,
         signature=asset.signature,
         uploaded_by_user_id=asset.uploaded_by_user_id,
         uploaded_by_email=asset.uploaded_by_email,
@@ -581,6 +866,43 @@ async def update_admin_user(
     return _public_user(user)
 
 
+@router.delete("/admin/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_admin_user(
+    user_id: str,
+    request: Request,
+    db: DbDep,
+) -> Response:
+    admin = _require_admin(request)
+    if user_id == admin.id:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+
+    store = _company_store(request)
+    user = await store.delete_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    revoked_count = await store.revoke_sessions(
+        user_ids=[user_id],
+        revoked_by_user_id=admin.id,
+        revoked_by_email=admin.email,
+        reason="管理员删除员工",
+    )
+    await _record_admin_action(
+        db,
+        user=admin,
+        action="delete_company_user",
+        target_type="company_user",
+        target_id=user_id,
+        metadata={
+            "email": user.email,
+            "display_name": user.display_name,
+            "role": user.role,
+            "revoked_count": revoked_count,
+        },
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/admin/sessions", response_model=AdminCompanySessionListResponse)
 async def list_admin_company_sessions(
     request: Request,
@@ -712,6 +1034,28 @@ async def get_admin_model_policy(request: Request) -> AdminModelPolicyResponse:
     return _public_model_policy(policy)
 
 
+@router.post("/admin/model-policy/test", response_model=AdminModelPolicyTestResponse)
+async def test_admin_model_policy_entry(
+    request: Request,
+    body: AdminModelPolicyEntryRequest,
+) -> AdminModelPolicyTestResponse:
+    _require_admin(request)
+    try:
+        existing_policy = await _company_store(request).get_model_policy()
+        entry = _resolve_admin_model_entry(body, existing_policy)
+        if not entry.enabled:
+            raise ValueError("禁用模型不需要测试，请启用后再测试")
+        message = await _probe_admin_model_entry(entry)
+        fingerprint = _admin_model_test_fingerprint(entry)
+        token = secrets.token_urlsafe(32)
+        _admin_model_test_cache(request)[token] = (fingerprint, shanghai_now() + timedelta(minutes=30))
+        return AdminModelPolicyTestResponse(ok=True, message=message, test_token=token)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"模型测试失败：{exc}") from exc
+
+
 @router.put("/admin/model-policy", response_model=AdminModelPolicyResponse)
 async def update_admin_model_policy(
     request: Request,
@@ -719,6 +1063,12 @@ async def update_admin_model_policy(
 ) -> AdminModelPolicyResponse:
     _require_admin(request)
     try:
+        existing_policy = await _company_store(request).get_model_policy()
+        resolved_entries = [
+            _resolve_admin_model_entry(model, existing_policy)
+            for model in body.models
+        ]
+        _validate_admin_model_test_tokens(request, resolved_entries, existing_policy, body.models)
         policy = await _company_store(request).update_model_policy(
             default_provider_id=body.default_provider_id,
             default_model_id=body.default_model_id,
@@ -730,6 +1080,113 @@ async def update_admin_model_policy(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _public_model_policy(policy)
+
+
+@router.get("/admin/connector-policy", response_model=AdminConnectorPolicyResponse)
+async def get_admin_connector_policy(request: Request) -> AdminConnectorPolicyResponse:
+    _require_admin(request)
+    store = _company_store(request)
+    policy = await store.get_connector_policy()
+    users = await store.list_users()
+    registry = getattr(request.app.state, "connector_registry", None)
+    connector_status = registry.status() if registry is not None else {}
+    return _public_connector_policy(
+        policy=policy,
+        users=users,
+        connector_status=connector_status,
+    )
+
+
+@router.put("/admin/connector-policy", response_model=AdminConnectorPolicyResponse)
+async def update_admin_connector_policy(
+    request: Request,
+    body: AdminConnectorPolicyRequest,
+) -> AdminConnectorPolicyResponse:
+    _require_admin(request)
+    store = _company_store(request)
+    users = await store.list_users()
+    known_user_ids = {user.id for user in users}
+    registry = getattr(request.app.state, "connector_registry", None)
+    connector_status = registry.status() if registry is not None else {}
+    known_connector_ids = set(connector_status)
+
+    connectors: list[dict[str, Any]] = []
+    for entry in body.connectors:
+        connector_id = entry.connector_id.strip()
+        if not connector_id:
+            raise HTTPException(status_code=400, detail="连接器 ID 不能为空")
+        if known_connector_ids and connector_id not in known_connector_ids:
+            raise HTTPException(status_code=400, detail=f"未知连接器：{connector_id}")
+        allowed_user_ids: list[str] = []
+        seen_user_ids: set[str] = set()
+        for raw_user_id in entry.allowed_user_ids:
+            user_id = str(raw_user_id or "").strip()
+            if not user_id or user_id in seen_user_ids:
+                continue
+            if user_id not in known_user_ids:
+                raise HTTPException(status_code=400, detail=f"未知员工：{user_id}")
+            seen_user_ids.add(user_id)
+            allowed_user_ids.append(user_id)
+        connectors.append(
+            {
+                "connector_id": connector_id,
+                "allowed_user_ids": allowed_user_ids,
+            }
+        )
+
+    try:
+        policy = await store.update_connector_policy(connectors=connectors)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _public_connector_policy(
+        policy=policy,
+        users=users,
+        connector_status=connector_status,
+    )
+
+
+@router.get("/admin/announcement", response_model=AdminAnnouncementResponse)
+async def get_admin_announcement(request: Request) -> AdminAnnouncementResponse:
+    _require_admin(request)
+    store = _company_store(request)
+    announcement = await store.get_announcement()
+    users = await store.list_users()
+    return _public_announcement(announcement, users)
+
+
+@router.put("/admin/announcement", response_model=AdminAnnouncementResponse)
+async def update_admin_announcement(
+    request: Request,
+    body: AdminAnnouncementRequest,
+) -> AdminAnnouncementResponse:
+    admin_user = _require_admin(request)
+    store = _company_store(request)
+    users = await store.list_users()
+    known_user_ids = {user.id for user in users}
+
+    target_user_ids: list[str] = []
+    seen_user_ids: set[str] = set()
+    for raw_user_id in body.target_user_ids:
+        user_id = str(raw_user_id or "").strip()
+        if not user_id or user_id in seen_user_ids:
+            continue
+        if user_id not in known_user_ids:
+            raise HTTPException(status_code=400, detail=f"未知员工：{user_id}")
+        seen_user_ids.add(user_id)
+        target_user_ids.append(user_id)
+
+    try:
+        announcement = await store.publish_announcement(
+            enabled=body.enabled,
+            content=body.content,
+            target_user_ids=target_user_ids,
+            published_by_user_id=admin_user.id,
+            published_by_email=admin_user.email,
+            published_by_display_name=admin_user.display_name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _public_announcement(announcement, users)
 
 
 @router.get("/admin/update-policy", response_model=AdminUpdatePolicyResponse)
@@ -768,11 +1225,56 @@ async def update_admin_update_policy(
     return await _public_update_policy(policy, store)
 
 
+@router.get("/admin/update-assets", response_model=AdminUpdateAssetListResponse)
+async def list_admin_update_assets(request: Request) -> AdminUpdateAssetListResponse:
+    _require_admin(request)
+    store = _company_store(request)
+    if not hasattr(store, "list_update_assets"):
+        return AdminUpdateAssetListResponse(items=[])
+    assets = await store.list_update_assets()
+    return AdminUpdateAssetListResponse(items=[_public_update_asset(asset) for asset in assets])
+
+
+@router.delete("/admin/update-assets/{asset_id}")
+async def delete_admin_update_asset(
+    asset_id: str,
+    request: Request,
+    settings: SettingsDep,
+) -> dict[str, bool]:
+    _require_admin(request)
+    store = _company_store(request)
+    if not hasattr(store, "delete_update_asset"):
+        raise HTTPException(status_code=404, detail="Update asset not found")
+
+    policy = await store.get_update_policy()
+    referenced_asset_ids = {
+        str(_update_policy_value(policy, "macos_asset_id", "") or ""),
+        str(_update_policy_value(policy, "windows_asset_id", "") or ""),
+        str(_update_policy_value(policy, "linux_asset_id", "") or ""),
+        str(_update_policy_value(policy, "default_asset_id", "") or ""),
+    }
+    if asset_id in referenced_asset_ids:
+        raise HTTPException(status_code=400, detail="当前最新包正在使用，不能删除")
+
+    asset = await store.delete_update_asset(asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Update asset not found")
+
+    if asset.stored_filename:
+        file_path = _update_asset_storage_dir(settings) / Path(asset.stored_filename).name
+        try:
+            file_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return {"success": True}
+
+
 @router.post("/admin/update-assets/upload", response_model=AdminUpdateAssetResponse)
 async def upload_admin_update_asset(
     request: Request,
     settings: SettingsDep,
     platform: str = Form(...),
+    name: str = Form(""),
     version: str = Form(...),
     signature: str = Form(""),
     file: UploadFile = File(...),
@@ -786,6 +1288,7 @@ async def upload_admin_update_asset(
     target = storage_dir / stored_filename
 
     digest = hashlib.sha256()
+    md5_digest = hashlib.md5()
     size = 0
     try:
         with target.open("wb") as handle:
@@ -795,6 +1298,7 @@ async def upload_admin_update_asset(
                     break
                 size += len(chunk)
                 digest.update(chunk)
+                md5_digest.update(chunk)
                 handle.write(chunk)
     except Exception:
         if target.exists():
@@ -809,12 +1313,14 @@ async def upload_admin_update_asset(
     try:
         asset = await store.create_update_asset(
             platform=platform,
+            name=name or original_filename,
             version=version,
             original_filename=original_filename,
             stored_filename=stored_filename,
             mime_type=mime_type,
             size_bytes=size,
             sha256=digest.hexdigest(),
+            md5=md5_digest.hexdigest(),
             signature=signature,
             uploaded_by_user_id=user.id,
             uploaded_by_email=user.email,
@@ -849,6 +1355,24 @@ def _public_feedback(request: Request, feedback: CompanyFeedback) -> AdminFeedba
 
 def _datetime_iso(value: datetime) -> str:
     return as_shanghai(value).isoformat()
+
+
+def _message_model_id(message: AuditMessage, session: AuditSession | None = None) -> str | None:
+    value = message.data.get("model_id") if isinstance(message.data, dict) else None
+    if value:
+        return str(value)
+    if message.role == "assistant" and session is not None and session.model_id:
+        return session.model_id
+    return None
+
+
+def _message_provider_id(message: AuditMessage, session: AuditSession | None = None) -> str | None:
+    value = message.data.get("provider_id") if isinstance(message.data, dict) else None
+    if value:
+        return str(value)
+    if message.role == "assistant" and session is not None and session.provider_id:
+        return session.provider_id
+    return None
 
 
 def _is_session_online(
@@ -1077,6 +1601,19 @@ async def _upsert_audit_usage(db: AsyncSession, *, item: AuditIngestPart) -> Non
         cost = float(data.get("cost") or 0)
     except (TypeError, ValueError):
         cost = 0.0
+    model_id = str(data.get("model_id") or "").strip() or None
+    provider_id = str(data.get("provider_id") or "").strip() or None
+    if not model_id or not provider_id:
+        message = (
+            await db.execute(select(AuditMessage).where(AuditMessage.local_message_id == item.message_id))
+        ).scalar_one_or_none()
+        session = (
+            await db.execute(select(AuditSession).where(AuditSession.local_session_id == item.session_id))
+        ).scalar_one_or_none()
+        if not model_id and message is not None:
+            model_id = _message_model_id(message, session)
+        if not provider_id and message is not None:
+            provider_id = _message_provider_id(message, session)
 
     existing = (
         await db.execute(select(AuditUsage).where(AuditUsage.local_part_id == item.id))
@@ -1092,6 +1629,8 @@ async def _upsert_audit_usage(db: AsyncSession, *, item: AuditIngestPart) -> Non
         "cache_write_tokens": cache_write_tokens,
         "total_tokens": total_tokens,
         "cost": cost,
+        "model_id": model_id,
+        "provider_id": provider_id,
     }
     if existing is None:
         db.add(AuditUsage(local_part_id=item.id, **values))
@@ -1552,6 +2091,9 @@ async def get_audit_session_messages(
     db: DbDep,
 ) -> dict[str, Any]:
     _require_admin(request)
+    session = (
+        await db.execute(select(AuditSession).where(AuditSession.local_session_id == session_id))
+    ).scalar_one_or_none()
     messages = list(
         (
             await db.execute(
@@ -1573,6 +2115,7 @@ async def get_audit_session_messages(
                 await db.execute(
                     select(AuditPart)
                     .where(AuditPart.local_message_id.in_(message_ids))
+                    .where(~AuditPart.part_type.in_(_ADMIN_INTERNAL_AUDIT_PART_TYPES))
                     .order_by(AuditPart.time_created.asc())
                 )
             ).scalars().all()
@@ -1613,6 +2156,8 @@ async def get_audit_session_messages(
                 "id": message.local_message_id,
                 "role": message.role,
                 "data": message.data,
+                "model_id": _message_model_id(message, session),
+                "provider_id": _message_provider_id(message, session),
                 "time_created": _datetime_iso(message.time_created),
                 "parts": [
                     {
@@ -1679,6 +2224,7 @@ async def get_audit_session_messages(
                 ],
             }
             for message in messages
+            if parts_by_message.get(message.local_message_id)
         ],
     }
 
@@ -1706,7 +2252,7 @@ async def list_audit_entries(
         .join(AuditMessage, AuditMessage.local_message_id == AuditPart.local_message_id)
         .outerjoin(AuditSession, AuditSession.local_session_id == AuditPart.local_session_id)
     )
-    filters = []
+    filters = [~AuditPart.part_type.in_(_ADMIN_INTERNAL_AUDIT_PART_TYPES)]
     if role:
         filters.append(AuditMessage.role == role.strip())
     if part_type:
@@ -1765,6 +2311,8 @@ async def list_audit_entries(
                     "id": message.local_message_id,
                     "role": message.role,
                     "data": message.data,
+                    "model_id": _message_model_id(message, session),
+                    "provider_id": _message_provider_id(message, session),
                     "time_created": _datetime_iso(message.time_created),
                 },
                 "session": (
@@ -1943,44 +2491,25 @@ async def get_model_analytics(
     days = min(max(days, 1), 90)
     cutoff = shanghai_now() - timedelta(days=days)
 
-    # 按模型统计
-    message_counts = (
-        select(
-            AuditMessage.local_session_id.label("local_session_id"),
-            func.count(AuditMessage.local_message_id).label("message_count"),
-        )
-        .group_by(AuditMessage.local_session_id)
-        .subquery()
-    )
-    usage_totals = (
-        select(
-            AuditUsage.local_session_id.label("local_session_id"),
-            func.coalesce(func.sum(AuditUsage.total_tokens), 0).label("total_tokens"),
-            func.coalesce(func.sum(AuditUsage.input_tokens), 0).label("input_tokens"),
-            func.coalesce(func.sum(AuditUsage.output_tokens), 0).label("output_tokens"),
-            func.coalesce(func.sum(AuditUsage.cost), 0).label("total_cost"),
-        )
-        .group_by(AuditUsage.local_session_id)
-        .subquery()
-    )
     model_stats = (
         await db.execute(
             select(
-                AuditSession.model_id,
-                AuditSession.provider_id,
-                func.count(func.distinct(AuditSession.local_session_id)).label("session_count"),
-                func.coalesce(func.sum(message_counts.c.message_count), 0).label("message_count"),
-                func.coalesce(func.sum(usage_totals.c.total_tokens), 0).label("total_tokens"),
-                func.coalesce(func.sum(usage_totals.c.input_tokens), 0).label("input_tokens"),
-                func.coalesce(func.sum(usage_totals.c.output_tokens), 0).label("output_tokens"),
-                func.coalesce(func.sum(usage_totals.c.total_cost), 0).label("total_cost"),
+                AuditUsage.model_id,
+                AuditUsage.provider_id,
+                func.count(func.distinct(AuditUsage.local_session_id)).label("session_count"),
+                func.count(func.distinct(AuditUsage.local_message_id)).label("message_count"),
+                func.coalesce(func.sum(AuditUsage.total_tokens), 0).label("total_tokens"),
+                func.coalesce(func.sum(AuditUsage.input_tokens), 0).label("input_tokens"),
+                func.coalesce(func.sum(AuditUsage.output_tokens), 0).label("output_tokens"),
+                func.coalesce(func.sum(AuditUsage.reasoning_tokens), 0).label("reasoning_tokens"),
+                func.coalesce(func.sum(AuditUsage.cache_read_tokens), 0).label("cache_read_tokens"),
+                func.coalesce(func.sum(AuditUsage.cache_write_tokens), 0).label("cache_write_tokens"),
+                func.coalesce(func.sum(AuditUsage.cost), 0).label("total_cost"),
             )
-            .select_from(AuditSession)
-            .outerjoin(message_counts, message_counts.c.local_session_id == AuditSession.local_session_id)
-            .outerjoin(usage_totals, usage_totals.c.local_session_id == AuditSession.local_session_id)
-            .where(AuditSession.time_created >= cutoff)
-            .group_by(AuditSession.model_id, AuditSession.provider_id)
-            .order_by(func.count(func.distinct(AuditSession.local_session_id)).desc())
+            .select_from(AuditUsage)
+            .where(AuditUsage.time_created >= cutoff)
+            .group_by(AuditUsage.model_id, AuditUsage.provider_id)
+            .order_by(func.coalesce(func.sum(AuditUsage.total_tokens), 0).desc())
         )
     ).mappings().all()
 
@@ -1995,6 +2524,9 @@ async def get_model_analytics(
                 "total_tokens": int(row["total_tokens"]),
                 "input_tokens": int(row["input_tokens"]),
                 "output_tokens": int(row["output_tokens"]),
+                "reasoning_tokens": int(row["reasoning_tokens"]),
+                "cache_read_tokens": int(row["cache_read_tokens"]),
+                "cache_write_tokens": int(row["cache_write_tokens"]),
                 "total_cost": float(row["total_cost"]),
                 "avg_cost_per_session": (
                     float(row["total_cost"]) / int(row["session_count"])
@@ -2005,6 +2537,112 @@ async def get_model_analytics(
             for row in model_stats
         ],
     }
+
+
+@router.get("/admin/audit/analytics/user-daily-tokens")
+async def get_user_daily_token_analytics(
+    request: Request,
+    db: DbDep,
+    days: int = 30,
+    user_id: str | None = None,
+) -> dict[str, Any]:
+    """Return per-user per-day token totals with conversation drilldown metadata."""
+    _require_admin(request)
+    days = min(max(days, 1), 90)
+    cutoff = shanghai_now() - timedelta(days=days)
+
+    stmt = (
+        select(AuditUsage, AuditSession)
+        .outerjoin(AuditSession, AuditSession.local_session_id == AuditUsage.local_session_id)
+        .where(AuditUsage.time_created >= cutoff)
+        .order_by(AuditUsage.time_created.desc())
+    )
+    if user_id:
+        stmt = stmt.where(AuditSession.user_id == user_id)
+    rows = list((await db.execute(stmt)).all())
+
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for usage, session in rows:
+        day = as_shanghai(usage.time_created).date().isoformat()
+        employee_id = session.user_id if session is not None else ""
+        key = (employee_id, day)
+        item = grouped.setdefault(
+            key,
+            {
+                "date": day,
+                "user_id": employee_id,
+                "user_email": session.user_email if session is not None else "",
+                "user_display_name": session.user_display_name if session is not None else "",
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "reasoning_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "total_tokens": 0,
+                "total_cost": 0.0,
+                "_conversations": {},
+                "_models": {},
+            },
+        )
+        item["input_tokens"] += usage.input_tokens
+        item["output_tokens"] += usage.output_tokens
+        item["reasoning_tokens"] += usage.reasoning_tokens
+        item["cache_read_tokens"] += usage.cache_read_tokens
+        item["cache_write_tokens"] += usage.cache_write_tokens
+        item["total_tokens"] += usage.total_tokens
+        item["total_cost"] += usage.cost
+
+        conversation = item["_conversations"].setdefault(
+            usage.local_session_id,
+            {
+                "session_id": usage.local_session_id,
+                "title": session.title if session is not None else "",
+                "workspace": session.workspace if session is not None else "",
+                "total_tokens": 0,
+                "total_cost": 0.0,
+            },
+        )
+        conversation["total_tokens"] += usage.total_tokens
+        conversation["total_cost"] += usage.cost
+
+        model_key = (usage.provider_id or "", usage.model_id or "")
+        model = item["_models"].setdefault(
+            model_key,
+            {
+                "provider_id": usage.provider_id,
+                "model_id": usage.model_id,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "reasoning_tokens": 0,
+                "total_tokens": 0,
+                "total_cost": 0.0,
+            },
+        )
+        model["input_tokens"] += usage.input_tokens
+        model["output_tokens"] += usage.output_tokens
+        model["reasoning_tokens"] += usage.reasoning_tokens
+        model["total_tokens"] += usage.total_tokens
+        model["total_cost"] += usage.cost
+
+    items = []
+    for item in grouped.values():
+        conversations = sorted(
+            item.pop("_conversations").values(),
+            key=lambda conversation: int(conversation["total_tokens"]),
+            reverse=True,
+        )
+        models = sorted(
+            item.pop("_models").values(),
+            key=lambda model: int(model["total_tokens"]),
+            reverse=True,
+        )
+        item["conversation_count"] = len(conversations)
+        item["conversations"] = conversations
+        item["models"] = models
+        items.append(item)
+
+    items.sort(key=lambda item: (item["date"], int(item["total_tokens"])), reverse=True)
+    return {"period_days": days, "items": items}
 
 
 @router.get("/admin/audit/analytics/tools")

@@ -12,6 +12,16 @@ from unittest.mock import patch
 from app.connector.registry import ConnectorRegistry
 
 
+class RecordingMcpManager:
+    def __init__(self) -> None:
+        self._config = {}
+        self.reconnect_calls = []
+
+    async def reconnect(self, name: str) -> bool:
+        self.reconnect_calls.append((name, dict(self._config.get(name, {}))))
+        return name in self._config
+
+
 class TestNormalizeUrl:
     def test_strips_trailing_slash(self):
         assert ConnectorRegistry._normalize_url("https://api.com/") == "https://api.com"
@@ -35,33 +45,41 @@ class TestRegisterFromPlugin:
     def test_creates_connector(self, tmp_path: Path):
         reg = self._make_registry(tmp_path)
         ids = reg.register_from_plugin("myplugin", {
+            "sim-data-agent": {"url": "https://sim.example/mcp", "type": "remote"},
+        })
+        assert "sim-data-agent" in ids
+        c = reg.get("sim-data-agent")
+        assert c is not None
+        assert c.url == "https://sim.example/mcp"
+
+    def test_skips_bundled_connector_not_in_allowlist(self, tmp_path: Path):
+        reg = self._make_registry(tmp_path)
+        ids = reg.register_from_plugin("myplugin", {
             "slack": {"url": "https://slack.mcp.io/sse", "type": "remote"},
         })
-        assert "slack" in ids
-        c = reg.get("slack")
-        assert c is not None
-        assert c.url == "https://slack.mcp.io/sse"
+        assert ids == []
+        assert reg.get("slack") is None
 
     def test_dedup_by_url(self, tmp_path: Path):
         reg = self._make_registry(tmp_path)
         reg.register_from_plugin("plugin-a", {
-            "slack": {"url": "https://slack.mcp.io/sse", "type": "remote"},
+            "sim-data-agent": {"url": "https://sim.example/mcp", "type": "remote"},
         })
         reg.register_from_plugin("plugin-b", {
-            "slack": {"url": "https://slack.mcp.io/sse", "type": "remote"},
+            "sim-data-agent": {"url": "https://sim.example/mcp", "type": "remote"},
         })
         connectors = reg.list_connectors()
-        slack_connectors = [c for c in connectors if c.id == "slack"]
-        assert len(slack_connectors) == 1
-        assert "plugin-a" in slack_connectors[0].referenced_by
-        assert "plugin-b" in slack_connectors[0].referenced_by
+        sim_connectors = [c for c in connectors if c.id == "sim-data-agent"]
+        assert len(sim_connectors) == 1
+        assert "plugin-a" in sim_connectors[0].referenced_by
+        assert "plugin-b" in sim_connectors[0].referenced_by
 
     def test_strips_namespace(self, tmp_path: Path):
         reg = self._make_registry(tmp_path)
         ids = reg.register_from_plugin("eng", {
-            "engineering:slack": {"url": "https://slack.mcp.io/sse", "type": "remote"},
+            "engineering:sim-data-agent": {"url": "https://sim.example/mcp", "type": "remote"},
         })
-        assert "slack" in ids
+        assert "sim-data-agent" in ids
 
     def test_skips_remote_without_url(self, tmp_path: Path):
         reg = self._make_registry(tmp_path)
@@ -69,6 +87,36 @@ class TestRegisterFromPlugin:
             "nourl": {"type": "remote"},
         })
         assert ids == []
+
+
+class TestBuiltinCatalog:
+    def test_registers_allowlisted_catalog_connectors_without_plugin(self, tmp_path: Path):
+        with patch.object(
+            ConnectorRegistry,
+            "_load_catalog",
+            return_value={
+                "sim-data-agent": {
+                    "name": "SIM 数据中台",
+                    "url": "https://sim.example/mcp",
+                    "description": "SIM connector",
+                    "category": "data",
+                    "icon_url": "/connectors/sim-data-agent.png",
+                },
+                "slack": {
+                    "name": "Slack",
+                    "url": "https://slack.example/mcp",
+                },
+            },
+        ):
+            reg = ConnectorRegistry(project_dir=str(tmp_path))
+
+        sim = reg.get("sim-data-agent")
+        assert sim is not None
+        assert sim.name == "SIM 数据中台"
+        assert sim.url == "https://sim.example/mcp"
+        assert sim.enabled is False
+        assert sim.source == "builtin"
+        assert reg.get("slack") is None
 
 
 class TestRegisterCustom:
@@ -88,6 +136,32 @@ class TestRegisterCustom:
         with pytest.raises(ValueError):
             reg.register_custom("my-tool", "My Tool 2", "https://my.tool2/sse")
 
+    @pytest.mark.asyncio
+    async def test_custom_connector_syncs_to_mcp_config_before_enable(self, tmp_path: Path):
+        reg = self._make_registry(tmp_path)
+        mcp_manager = RecordingMcpManager()
+        reg._mcp_manager = mcp_manager
+
+        reg.register_custom("my-tool", "My Tool", "https://my.tool/sse")
+
+        assert mcp_manager._config["my-tool"] == {
+            "type": "remote",
+            "url": "https://my.tool/sse",
+            "enabled": False,
+        }
+
+        assert await reg.enable("my-tool") is True
+        assert mcp_manager.reconnect_calls == [
+            (
+                "my-tool",
+                {
+                    "type": "remote",
+                    "url": "https://my.tool/sse",
+                    "enabled": True,
+                },
+            )
+        ]
+
 
 class TestRemoveCustom:
     def _make_registry(self, tmp_path: Path) -> ConnectorRegistry:
@@ -102,8 +176,8 @@ class TestRemoveCustom:
 
     def test_returns_false_for_builtin(self, tmp_path: Path):
         reg = self._make_registry(tmp_path)
-        reg.register_from_plugin("p", {"slack": {"url": "https://s.io", "type": "remote"}})
-        assert reg.remove_custom("slack") is False
+        reg.register_from_plugin("p", {"sim-data-agent": {"url": "https://sim.example/mcp", "type": "remote"}})
+        assert reg.remove_custom("sim-data-agent") is False
 
     def test_returns_false_for_nonexistent(self, tmp_path: Path):
         reg = self._make_registry(tmp_path)

@@ -72,7 +72,7 @@ class TestRecursionGuard:
             "prompt": "test",
         }, ctx)
         assert result.error is not None
-        assert "nesting depth" in result.error
+        assert "嵌套深度" in result.error
 
     @pytest.mark.asyncio
     async def test_over_max_depth_blocked(self):
@@ -84,7 +84,7 @@ class TestRecursionGuard:
             "prompt": "test",
         }, ctx)
         assert result.error is not None
-        assert "nesting depth" in result.error
+        assert "嵌套深度" in result.error
 
     @pytest.mark.asyncio
     async def test_no_app_state_error(self):
@@ -96,4 +96,4 @@ class TestRecursionGuard:
             "prompt": "test",
         }, ctx)
         assert result.error is not None
-        assert "app state" in result.error
+        assert "缺少应用状态" in result.error

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from app.runtime_paths import APP_CONFIG_DIR_NAME
 from app.utils.id import generate_ulid
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ class TruncationResult:
 def _get_output_dir(workspace: str | None) -> Path:
     """Return output directory, creating if needed."""
     base = Path(workspace) if workspace else Path(".")
-    d = base / ".openyak" / OUTPUT_DIR_NAME
+    d = base / APP_CONFIG_DIR_NAME / OUTPUT_DIR_NAME
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -53,7 +54,7 @@ def truncate_output(
     Mirrors OpenCode ``Truncate.output()``.
 
     When output exceeds *max_lines* or *max_bytes* the full text is written to
-    a file under ``{workspace}/.openyak/tool-output/`` and a truncated preview
+    a file under ``{workspace}/.fpiagent/tool-output/`` and a truncated preview
     with a hint is returned so the agent can use Read/Grep to access the rest.
     """
     lines = text.split("\n")
@@ -101,24 +102,22 @@ def truncate_output(
     # Build hint message
     if has_task_tool:
         hint = (
-            f"The tool call succeeded but the output was truncated. "
-            f"Full output saved to: {filepath}\n"
-            f"Use the Task tool to have explore agent process this file "
-            f"with Grep and Read (with offset/limit). "
-            f"Do NOT read the full file yourself — delegate to save context."
+            f"工具调用已成功，但输出过长已被截断。"
+            f"完整输出已保存到：{filepath}\n"
+            f"请使用 task 工具让 explore 子任务助理通过 grep 和 read（带 offset/limit）处理该文件。"
+            f"不要自己读取完整文件，以节省上下文。"
         )
     else:
         hint = (
-            f"The tool call succeeded but the output was truncated. "
-            f"Full output saved to: {filepath}\n"
-            f"Use Grep to search the full content or "
-            f"Read with offset/limit to view specific sections."
+            f"工具调用已成功，但输出过长已被截断。"
+            f"完整输出已保存到：{filepath}\n"
+            f"请使用 grep 搜索完整内容，或使用 read 配合 offset/limit 查看指定片段。"
         )
 
     if direction == "head":
-        message = f"{preview}\n\n...{removed} {unit} truncated...\n\n{hint}"
+        message = f"{preview}\n\n...已截断 {removed} {unit}...\n\n{hint}"
     else:
-        message = f"...{removed} {unit} truncated...\n\n{hint}\n\n{preview}"
+        message = f"...已截断 {removed} {unit}...\n\n{hint}\n\n{preview}"
 
     return TruncationResult(
         content=message, truncated=True, output_path=str(filepath)
@@ -130,11 +129,11 @@ def cleanup_old_outputs(workspace: str | None = None) -> int:
     # Don't use _get_output_dir() here — it creates the directory.
     # Cleanup should be a no-op if no truncation has ever happened.
     base = Path(workspace) if workspace else Path(".")
-    output_dir = base / ".openyak" / OUTPUT_DIR_NAME
-    if not output_dir.exists():
-        return 0
     removed = 0
     cutoff = time.time() - RETENTION_SECONDS
+    output_dir = base / APP_CONFIG_DIR_NAME / OUTPUT_DIR_NAME
+    if not output_dir.exists():
+        return 0
     for f in output_dir.iterdir():
         if f.is_file() and f.stat().st_mtime < cutoff:
             f.unlink(missing_ok=True)

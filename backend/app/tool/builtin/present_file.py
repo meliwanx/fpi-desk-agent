@@ -23,10 +23,9 @@ class PresentFileTool(ToolDefinition):
     @property
     def description(self) -> str:
         return (
-            "Open an existing file in the user's visual preview panel. "
-            "Use this after creating a final deliverable file the user asked for, "
-            "or when an existing meaningful file should be shown for inspection. "
-            "Do not use it for temporary scripts, scratch files, logs, or helper files."
+            "在用户的可视化预览面板中打开已有文件。"
+            "当你创建了用户要求的最终交付文件，或需要展示一个有价值的已有文件时使用。"
+            "不要用于临时脚本、草稿文件、日志或辅助文件。"
         )
 
     def parameters_schema(self) -> dict[str, Any]:
@@ -35,11 +34,11 @@ class PresentFileTool(ToolDefinition):
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Absolute or workspace-relative path to the file to present",
+                    "description": "要展示的文件绝对路径或工作区相对路径",
                 },
                 "title": {
                     "type": "string",
-                    "description": "Optional display title for the preview panel",
+                    "description": "预览面板中可选的展示标题",
                 },
             },
             "required": ["file_path"],

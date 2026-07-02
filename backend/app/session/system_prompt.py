@@ -24,10 +24,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+from app.runtime_paths import (
+    APP_CONFIG_DIR_NAME,
+    WORKSPACE_OUTPUT_DIR_NAME,
+)
 from app.schemas.agent import AgentInfo
 
 _SKILL_ROUTING_BUDGET_CHARS = 8_000
-_SKILL_ROUTING_DESC_CHARS = 180
 
 
 @dataclass(frozen=True)
@@ -147,8 +150,8 @@ def load_project_instructions(directory: str | None) -> str | None:
 
     candidates = [
         os.path.join(directory, "AGENTS.md"),
-        os.path.join(directory, ".openyak", "instructions.md"),
-        os.path.join(directory, ".openyak", "instructions"),
+        os.path.join(directory, APP_CONFIG_DIR_NAME, "instructions.md"),
+        os.path.join(directory, APP_CONFIG_DIR_NAME, "instructions"),
     ]
 
     for path in candidates:
@@ -157,7 +160,7 @@ def load_project_instructions(directory: str | None) -> str | None:
                 with open(path, "r", encoding="utf-8") as f:
                     content = f.read().strip()
                 if content:
-                    return f"# Project Instructions\n{content}"
+                    return f"# 项目指令\n{content}"
             except OSError:
                 continue
 
@@ -185,22 +188,21 @@ def render_skills_section(active_skills: Iterable[Any]) -> str | None:
         return None
 
     lines = [
-        "# Skill Routing",
-        "If the task matches one of the skills below, call the `skill` tool before major work.",
-        "Use skills for specialised workflows or output-generation tasks. Do not load a skill just to read a file.",
+        "# 技能路由",
+        "如果任务匹配下面任一技能，请在主要工作前调用 `skill` 工具。",
+        "技能用于专业工作流或输出生成任务；不要只为了读取文件而加载技能。",
         "",
-        "Currently available skills:",
+        "当前可用技能：",
     ]
 
     shown = 0
     total = len(skills)
     for skill in skills:
-        desc = _truncate((skill.description or "").strip(), _SKILL_ROUTING_DESC_CHARS)
         label = _skill_label(skill)
-        line = f"- {label}: {desc}" if desc else f"- {label}"
+        line = f"- {label}"
         remaining_after = total - shown - 1
         reserve = (
-            len(f"\n- (and {remaining_after} more available via the `skill` tool)")
+            len(f"\n- （还有 {remaining_after} 个技能可通过 `skill` 工具加载）")
             if remaining_after > 0
             else 0
         )
@@ -211,7 +213,7 @@ def render_skills_section(active_skills: Iterable[Any]) -> str | None:
 
     remaining = total - shown
     if remaining > 0:
-        summary = f"- (and {remaining} more available via the `skill` tool)"
+        summary = f"- （还有 {remaining} 个技能可通过 `skill` 工具加载）"
         if len("\n".join([*lines, summary])) <= _SKILL_ROUTING_BUDGET_CHARS:
             lines.append(summary)
 
@@ -223,12 +225,6 @@ def _skill_label(skill: Any) -> str:
     if display_name and display_name != skill.name:
         return f"{skill.name} ({display_name})"
     return str(skill.name)
-
-
-def _truncate(value: str, max_chars: int) -> str:
-    if len(value) <= max_chars:
-        return value
-    return value[: max_chars - 3].rstrip() + "..."
 
 
 def active_skills_from_registry() -> list[Any]:
@@ -258,58 +254,53 @@ def _environment_section(
     today = now.strftime("%Y-%m-%d")
     current_time = now.strftime("%H:%M")
 
-    section = f"""# Environment
-- Working directory: {cwd}
-- Platform: {platform_name}
-- Current date: {today} ({current_time} {tz_name})
-- Current year: {now.year}"""
+    section = f"""# 环境信息
+- 工作目录：{cwd}
+- 运行平台：{platform_name}
+- 当前日期：{today}（{current_time} {tz_name}）
+- 当前年份：{now.year}
+- 语言要求：所有思考、推理、计划、摘要和最终回复都必须使用中文。除代码、命令、路径、文件名、接口字段、JSON/XML 标签、工具名、模型名、品牌名、专有名词和引用原文外，默认不要输出英文。"""
 
     if workspace:
-        output_dir = str(Path(workspace) / "openyak_written")
+        output_dir = str(Path(workspace) / WORKSPACE_OUTPUT_DIR_NAME)
         section += f"""
 
-# Workspace Access
-The active workspace is: {workspace}
-Use it as the default context for project files, relative paths, full-text `search`, \
-and generated outputs. If the user asks about local computer state or a file is not \
-found in the workspace, you may use read-only tools (`read`, `glob`, `grep`) or shell \
-commands with explicit absolute paths to inspect other local locations.
-File writes, edits, patches, and generated outputs must stay inside the workspace unless \
-the user explicitly chooses a different workspace in a new chat.
+# 工作区访问
+当前工作区是：{workspace}
+默认将它作为项目文件、相对路径、全文 `search` 和生成输出的上下文。如果用户询问本地电脑状态，或文件不在工作区内，可以使用只读工具（`read`、`glob`、`grep`）或带明确绝对路径的 shell 命令检查其他本地位置。
+除非用户在新对话中明确选择其他工作区，否则写入、编辑、补丁和生成输出都必须留在当前工作区内。
 
-# Default Output Directory
-When creating new files and the user does not specify a location, \
-place them in: {output_dir}
-This directory is auto-created for you. Use it to keep generated files organized.
-If the user explicitly specifies a different path (within the workspace), use that instead."""
+# 默认输出目录
+如果创建新文件且用户没有指定位置，请放在：{output_dir}
+该目录会自动创建，用于保持生成文件有序。如果用户明确指定工作区内其他路径，则使用用户指定路径。"""
     else:
         section += f"""
 
-# File Reference Format
-You are not restricted to a workspace for this session.
-When referencing local files in your response, prefer absolute paths rooted from the working directory: {cwd}
-Do not return relative paths like `src/main.py` when an absolute path is available.
+# 文件引用格式
+本次会话没有绑定工作区。
+回复中引用本地文件时，优先使用从工作目录开始的绝对路径：{cwd}
+如果可以提供绝对路径，不要只返回类似 `src/main.py` 的相对路径。
 
-# Full-Text Search
-Full-text `search` is unavailable until the user selects a workspace folder.
-When no workspace is selected, use `glob`, `grep`, `read`, or shell commands with explicit paths instead."""
+# 全文搜索
+用户选择工作区文件夹之前，全文 `search` 不可用。
+没有工作区时，请改用 `glob`、`grep`、`read` 或带明确路径的 shell 命令。"""
 
     if fts_status:
         status = fts_status.get("status", "unknown")
         file_count = fts_status.get("file_count")
-        count_str = f" ({file_count:,} files)" if file_count else ""
+        count_str = f"（{file_count:,} 个文件）" if file_count else ""
         if status == "indexed":
             section += f"""
 
-# Full-Text Search
-- FTS: enabled, workspace indexed{count_str}
-- Full-text search available via `search` tool — use it for broad keyword discovery
-- Use `grep` for exact regex pattern matching"""
+# 全文搜索
+- FTS：已启用，工作区已建立索引{count_str}
+- 可以通过 `search` 工具进行全文搜索，适合宽泛关键词发现
+- 精确正则匹配仍使用 `grep`"""
         elif status == "indexing":
             section += """
 
-# Full-Text Search
-- FTS: enabled, workspace indexing in progress
-- Full-text `search` tool will be available once indexing completes"""
+# 全文搜索
+- FTS：已启用，工作区正在建立索引
+- 索引完成后即可使用全文 `search` 工具"""
 
     return section

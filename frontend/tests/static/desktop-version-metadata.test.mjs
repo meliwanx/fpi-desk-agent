@@ -49,7 +49,11 @@ assert.equal(
 assert.match(releasePolicy, /## Release Version Policy/, "release policy should document release version rules");
 assert.match(releasePolicy, /package\.json` is the single source of truth/, "release policy should name root package.json as the version source");
 assert.match(releasePolicy, /npm run set:release-version -- 1\.4\.1/, "release policy should document the version bump command");
-assert.match(releasePolicy, /sha256.*integrity/i, "release policy should state sha256 is for package integrity, not update ordering");
+assert.match(
+  releasePolicy,
+  /SHA-256[\s\S]+package identity[\s\S]+latest package/i,
+  "release policy should state SHA-256 package identity controls enterprise update detection",
+);
 assert.match(
   desktopWorkflow,
   /name: Validate release version metadata[\s\S]+npm run check:release-version/,

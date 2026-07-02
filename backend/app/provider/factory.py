@@ -7,11 +7,21 @@ are only loaded when the provider is actually used.
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlparse
 
 from app.provider.base import BaseProvider
 from app.provider.catalog import PROVIDER_CATALOG
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_custom_openai_base_url(base_url: str) -> str:
+    """Default bare custom OpenAI-compatible hosts to the conventional /v1 root."""
+    url = (base_url or "").strip().rstrip("/")
+    parsed = urlparse(url)
+    if parsed.scheme and parsed.netloc and parsed.path in ("", "/"):
+        return f"{url}/v1"
+    return url
 
 
 def create_provider(
@@ -83,6 +93,8 @@ def create_provider(
                 f"Provider '{provider_id}' requires a base_url. "
                 f"Ensure the corresponding setting is provided."
             )
+        if pdef.kind == "openai_compat_custom" and effective_url:
+            effective_url = _normalize_custom_openai_base_url(effective_url)
 
         merged_headers: dict[str, str] | None = None
         if pdef.default_headers or extra_headers:

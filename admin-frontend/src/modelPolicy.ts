@@ -7,6 +7,7 @@ export interface ModelEntry {
   enabled?: boolean;
   api_key?: string;
   masked_key?: string;
+  test_token?: string;
 }
 
 export interface ModelPolicy {

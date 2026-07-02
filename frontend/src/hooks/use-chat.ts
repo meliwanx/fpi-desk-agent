@@ -163,7 +163,7 @@ export function useChat(currentSessionId?: string) {
             parent_id: null,
             slug: null,
             directory: settingsState.workspaceDirectory || null,
-            title: text.trim().slice(0, 60),
+            title: null,
             version: 0,
             summary_additions: 0,
             summary_deletions: 0,
@@ -337,6 +337,7 @@ export function useChat(currentSessionId?: string) {
         ws.todos.map((t) =>
           t.status === "in_progress" ? { ...t, status: "pending" as const, activeForm: undefined } : t,
         ),
+        targetSessionId,
       );
     }
     if (targetSessionId) {
@@ -441,8 +442,8 @@ export function useChat(currentSessionId?: string) {
         chatState.startGeneration(res.session_id, res.stream_id);
         void startStream(res.session_id, res.stream_id);
 
-        useWorkspaceStore.getState().setTodos([]);
-        useWorkspaceStore.getState().setWorkspaceFiles([]);
+        useWorkspaceStore.getState().setTodos([], currentSessionId);
+        useWorkspaceStore.getState().setWorkspaceFiles([], currentSessionId);
 
         const trimmed = newText.trim();
         queryClient.setQueryData<InfiniteData<PaginatedMessages>>(
@@ -485,7 +486,12 @@ export function useChat(currentSessionId?: string) {
           return {
             sessions: {
               ...s.sessions,
-              [currentSessionId]: { ...cur, pendingUserText: null, pendingAttachments: null },
+              [currentSessionId]: {
+                ...cur,
+                pendingUserText: null,
+                pendingUserSentAt: null,
+                pendingAttachments: null,
+              },
             },
           };
         });
@@ -600,6 +606,7 @@ export function useChat(currentSessionId?: string) {
     isCompacting: session.isCompacting,
     streamId: session.streamId,
     pendingUserText: session.pendingUserText,
+    pendingUserSentAt: session.pendingUserSentAt,
     pendingAttachments: session.pendingAttachments,
     streamingParts: session.streamingParts,
     streamingText: session.streamingText,

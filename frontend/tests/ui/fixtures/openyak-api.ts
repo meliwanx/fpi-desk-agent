@@ -1051,7 +1051,7 @@ const artifactMessagePage = {
                 title: "GUI Preflight Plan",
                 plan: "## Plan\n\n1. Run desktop workflows.\n2. Run settings workflows.\n3. Run mobile handoff workflows.",
                 plan_path:
-                  "/Users/alex/openyak-demo/.openyak/plans/gui-preflight.md",
+                  "/Users/alex/openyak-demo/.fpiagent/plans/gui-preflight.md",
                 files_to_modify: [
                   "frontend/tests/ui/openyak-preflight.spec.ts",
                 ],

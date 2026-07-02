@@ -1,16 +1,18 @@
 "use client";
 
-import { useMemo, useRef, useEffect, useState } from "react";
+import { useCallback, useMemo, useRef, useEffect, useState } from "react";
 import { ArrowDown, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useScrollAnchor } from "@/hooks/use-scroll-anchor";
 import { MessageItem } from "./message-item";
 import { AssistantMessageGroup } from "./assistant-message-group";
 import { StreamingMessage } from "./assistant-message";
+import { ConversationNavigator, type ConversationNavItem } from "./conversation-navigator";
 import { FileChip } from "@/components/chat/file-chip";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { FileAttachment } from "@/types/chat";
 import { extractTextFromPartResponses } from "@/lib/utils";
+import { chatMessageIsVisible, partHasVisibleChatContent } from "@/lib/message-visibility";
 import type { MessageResponse, PartData } from "@/types/message";
 
 /** A user message or a group of consecutive assistant messages. */
@@ -45,6 +47,10 @@ function groupMessages(messages: MessageResponse[]): MessageGroup[] {
   };
 
   for (const msg of messages) {
+    if (!chatMessageIsVisible(msg)) {
+      continue;
+    }
+
     if (msg.data.role === "assistant") {
       if (isStandaloneAssistantMessage(msg)) {
         flushBatch();
@@ -52,13 +58,6 @@ function groupMessages(messages: MessageResponse[]): MessageGroup[] {
         continue;
       }
       assistantBatch.push(msg);
-    } else if (
-      msg.data.role === "user" &&
-      (msg.data as unknown as Record<string, unknown>).system
-    ) {
-      // System-injected user messages (continuations, nudges) are invisible
-      // and must NOT break the assistant message grouping.
-      continue;
     } else {
       flushBatch();
       groups.push({ kind: "user", message: msg });
@@ -69,6 +68,39 @@ function groupMessages(messages: MessageResponse[]): MessageGroup[] {
   return groups;
 }
 
+function previewText(text: string, fallback: string, maxLength = 96): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return fallback;
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized;
+}
+
+function buildConversationNavItems(groups: MessageGroup[]): ConversationNavItem[] {
+  const items: ConversationNavItem[] = [];
+
+  for (let i = 0; i < groups.length; i += 1) {
+    const group = groups[i];
+    if (group.kind !== "user") continue;
+
+    const replyText: string[] = [];
+    for (let j = i + 1; j < groups.length; j += 1) {
+      const next = groups[j];
+      if (next.kind === "user") break;
+      replyText.push(
+        ...next.messages.map((message) => extractTextFromPartResponses(message.parts)),
+      );
+    }
+
+    items.push({
+      id: group.message.id,
+      index: items.length + 1,
+      promptPreview: previewText(extractTextFromPartResponses(group.message.parts), "文件消息"),
+      replyPreview: previewText(replyText.join("\n"), ""),
+    });
+  }
+
+  return items;
+}
+
 interface MessageListProps {
   messages: MessageResponse[];
   isLoading: boolean;
@@ -77,6 +109,8 @@ interface MessageListProps {
   streamId: string | null;
   /** Optimistic user message text shown before the API confirms. */
   pendingUserText: string | null;
+  /** Client-side send timestamp for the optimistic user bubble. */
+  pendingUserSentAt?: string | null;
   /** Attachments for the optimistic user bubble. */
   pendingAttachments?: FileAttachment[] | null;
   streamingParts: PartData[];
@@ -102,6 +136,7 @@ export function MessageList({
   isGenerating,
   streamId,
   pendingUserText,
+  pendingUserSentAt,
   pendingAttachments,
   streamingParts,
   streamingText,
@@ -115,8 +150,10 @@ export function MessageList({
 }: MessageListProps) {
   const { scrollRef, scrollElementRef, bottomRef, isAtBottom, scrollToBottom } = useScrollAnchor();
   const topSentinelRef = useRef<HTMLDivElement>(null);
+  const userNodeRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [unreadCount, setUnreadCount] = useState(0);
   const [canFetchOlderMessages, setCanFetchOlderMessages] = useState(false);
+  const [activeConversationNodeId, setActiveConversationNodeId] = useState<string | null>(null);
   const anchoredSessionRef = useRef<string | undefined>(undefined);
 
   // Keep StreamingMessage visible briefly after generation finishes so the
@@ -250,31 +287,110 @@ export function MessageList({
     () => groupMessages(messages),
     [messages]
   );
+  const conversationNavItems = useMemo(
+    () => buildConversationNavItems(groups),
+    [groups],
+  );
+
+  const setUserNodeRef = useCallback((messageId: string) => (node: HTMLDivElement | null) => {
+    if (node) {
+      userNodeRefs.current.set(messageId, node);
+    } else {
+      userNodeRefs.current.delete(messageId);
+    }
+  }, []);
+
+  const handleSelectConversationNode = useCallback((messageId: string) => {
+    setActiveConversationNodeId(messageId);
+    userNodeRefs.current.get(messageId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
+  useEffect(() => {
+    const latestNodeId = conversationNavItems[conversationNavItems.length - 1]?.id ?? null;
+    setActiveConversationNodeId((current) => {
+      if (current && conversationNavItems.some((item) => item.id === current)) return current;
+      return latestNodeId;
+    });
+  }, [conversationNavItems]);
+
+  useEffect(() => {
+    const container = scrollElementRef.current;
+    if (!container || conversationNavItems.length === 0) return;
+
+    let frameId = 0;
+    const updateActiveConversationNode = () => {
+      if (frameId) return;
+      frameId = requestAnimationFrame(() => {
+        frameId = 0;
+        const latestNodeId = conversationNavItems[conversationNavItems.length - 1]?.id ?? null;
+        if (!latestNodeId) return;
+
+        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+        if (isNearBottom) {
+          setActiveConversationNodeId(latestNodeId);
+          return;
+        }
+
+        const containerTop = container.getBoundingClientRect().top;
+        const threshold = containerTop + Math.min(container.clientHeight * 0.35, 180);
+        let activeNodeId = conversationNavItems[0]?.id ?? latestNodeId;
+
+        for (const item of conversationNavItems) {
+          const node = userNodeRefs.current.get(item.id);
+          if (!node) continue;
+          if (node.getBoundingClientRect().top <= threshold) {
+            activeNodeId = item.id;
+          } else {
+            break;
+          }
+        }
+
+        setActiveConversationNodeId(activeNodeId);
+      });
+    };
+
+    updateActiveConversationNode();
+    container.addEventListener("scroll", updateActiveConversationNode, { passive: true });
+
+    return () => {
+      container.removeEventListener("scroll", updateActiveConversationNode);
+      if (frameId) cancelAnimationFrame(frameId);
+    };
+  }, [conversationNavItems, scrollElementRef]);
 
   // The shell message only exists after the backend created it (streamId is set).
   // During beginSending (streamId is null), we must NOT hide the previous response.
   const hasActiveStream = !!streamId;
   const hasVisibleStreamingReplacement = useMemo(() => {
     if (streamingText.trim() || streamingReasoning.trim()) return true;
-    return streamingParts.some(
-      (part) => part.type !== "step-start" && part.type !== "step-finish",
-    );
+    return streamingParts.some(partHasVisibleChatContent);
   }, [streamingParts, streamingReasoning, streamingText]);
 
+  const latestVisiblePersistedUserMatchesPending = useMemo(() => {
+    if (!pendingUserText) return false;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const message = messages[i];
+      if (!chatMessageIsVisible(message)) continue;
+      if ((message.data as { role: string }).role !== "user") continue;
+      const messageTime = Date.parse(message.time_created);
+      const pendingTime = pendingUserSentAt ? Date.parse(pendingUserSentAt) : Number.NaN;
+      if (Number.isFinite(messageTime) && Number.isFinite(pendingTime) && messageTime < pendingTime) {
+        return false;
+      }
+      const fullText = extractTextFromPartResponses(message.parts);
+      return fullText.includes(pendingUserText);
+    }
+    return false;
+  }, [pendingUserText, pendingUserSentAt, messages]);
+
   // Don't show the optimistic user bubble if the DB-fetched messages already
-  // contain a matching user message. This prevents duplicates after navigating
-  // from /c/new to /c/{sessionId} (where useMessages fetches the persisted
-  // user message while pendingUserText is still set in the global store).
+  // include the same latest user message created for the current send. The timestamp
+  // guard prevents an older repeated short prompt like "你好" from hiding the
+  // fresh optimistic bubble while the backend is still creating the new row.
   const showPendingBubble = useMemo(() => {
     if (!pendingUserText) return false;
-    if (messages.length === 0) return true;
-    const hasPendingInDb = messages.some((m) => {
-      if ((m.data as { role: string }).role !== "user") return false;
-      const fullText = extractTextFromPartResponses(m.parts);
-      return fullText.includes(pendingUserText);
-    });
-    return !hasPendingInDb;
-  }, [pendingUserText, messages]);
+    return !latestVisiblePersistedUserMatchesPending;
+  }, [latestVisiblePersistedUserMatchesPending, pendingUserText]);
 
   // Only show the loading state on the very first load (no cached/placeholder data).
   // When switching sessions with keepPreviousData, messages.length > 0 so we
@@ -293,7 +409,7 @@ export function MessageList({
         >
           {/* Show optimistic user bubble during loading so it doesn't flash
               away between navigation and message fetch completion */}
-          {pendingUserText && (
+          {showPendingBubble && (
             <div className="px-4 py-3">
               <div className="mx-auto max-w-3xl xl:max-w-4xl">
                 <div className="flex justify-end">
@@ -393,6 +509,12 @@ export function MessageList({
 
   return (
     <div className="relative flex-1 overflow-hidden">
+      <ConversationNavigator
+        items={conversationNavItems}
+        activeItemId={activeConversationNodeId}
+        onSelect={handleSelectConversationNode}
+      />
+
       <div
         ref={scrollRef}
         data-testid="message-list-scroller"
@@ -406,7 +528,7 @@ export function MessageList({
           </div>
         )}
 
-        {messages.length === 0 && !isGenerating ? (
+        {groups.length === 0 && !isGenerating && !showPendingBubble ? (
           <div className="flex items-center justify-center h-full text-[var(--text-tertiary)] text-sm">
             No messages yet
           </div>
@@ -415,15 +537,21 @@ export function MessageList({
             {groups.map((group) => {
               if (group.kind === "user") {
                 return (
-                  <MessageItem
+                  <div
                     key={group.message.id}
-                    message={group.message}
-                    isNew={newMessageIds.has(group.message.id) && group.message.id !== lastUserMessageId}
-                    onEditAndResend={onEditAndResend}
-                    isGenerating={isGenerating}
-                    directory={directory}
-                    sessionId={sessionId}
-                  />
+                    ref={setUserNodeRef(group.message.id)}
+                    data-conversation-node-id={group.message.id}
+                    className="scroll-mt-20"
+                  >
+                    <MessageItem
+                      message={group.message}
+                      isNew={newMessageIds.has(group.message.id) && group.message.id !== lastUserMessageId}
+                      onEditAndResend={onEditAndResend}
+                      isGenerating={isGenerating}
+                      directory={directory}
+                      sessionId={sessionId}
+                    />
+                  </div>
                 );
               }
 

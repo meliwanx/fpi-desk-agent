@@ -22,6 +22,7 @@ from app.dependencies import (
     ToolRegistryDep,
 )
 from app.audit.client import AuditContext, reset_audit_context, set_audit_context
+from app.connector.access import tool_registry_for_request
 from app.company_auth.model_policy_sync import sync_company_model_policy
 from app.company_auth.remote_control import sync_remote_model_policy_for_request
 from app.models.todo import Todo
@@ -65,7 +66,8 @@ def _audit_context_from_request(request: Request) -> AuditContext | None:
     token = request.headers.get("X-FPI-Session", "").strip()
     if not token:
         return None
-    return AuditContext(company_session_token=token)
+    source_client_id = str(request.scope.get("state", {}).get("company_session_id", "") or "")
+    return AuditContext(company_session_token=token, source_client_id=source_client_id)
 
 
 async def _sync_model_policy_for_request(request: Request, provider_registry) -> None:
@@ -173,7 +175,7 @@ def _on_task_done(task: asyncio.Task[None], *, job: GenerationJob) -> None:
     if exc is not None:
         logger.error("Unhandled exception in generation task %s: %s", task.get_name(), exc, exc_info=exc)
         try:
-            job.publish(SSEEvent(AGENT_ERROR, {"error_message": "An internal error occurred. Please try again."}))
+            job.publish(SSEEvent(AGENT_ERROR, {"error_message": "发生内部错误，请稍后重试。"}))
         except Exception:
             logger.exception("Failed to publish AGENT_ERROR for task %s", task.get_name())
 
@@ -279,13 +281,14 @@ async def start_prompt(
     job.interactive = True
 
     # Launch the full agent loop in a background task with concurrency limiting
+    request_tool_registry = await tool_registry_for_request(request, tool_registry)
     coro = run_generation(
         job,
         body,
         session_factory=session_factory,
         provider_registry=provider_registry,
         agent_registry=agent_registry,
-        tool_registry=tool_registry,
+        tool_registry=request_tool_registry,
         index_manager=index_manager,
     )
     task = _create_task_with_audit_context(
@@ -330,13 +333,14 @@ async def start_task_batch(
     job = sm.create_job(stream_id=stream_id, session_id=session_id)
     job.interactive = True
 
+    request_tool_registry = await tool_registry_for_request(request, tool_registry)
     coro = run_task_batch(
         job,
         body,
         session_factory=session_factory,
         provider_registry=provider_registry,
         agent_registry=agent_registry,
-        tool_registry=tool_registry,
+        tool_registry=request_tool_registry,
         index_manager=index_manager,
     )
     task = _create_task_with_audit_context(
@@ -503,13 +507,14 @@ async def edit_and_resend(
         workspace=body.workspace,
     )
 
+    request_tool_registry = await tool_registry_for_request(request, tool_registry)
     coro = run_generation(
         job,
         edit_request,
         session_factory=session_factory,
         provider_registry=provider_registry,
         agent_registry=agent_registry,
-        tool_registry=tool_registry,
+        tool_registry=request_tool_registry,
         index_manager=index_manager,
         skip_user_message=True,
     )

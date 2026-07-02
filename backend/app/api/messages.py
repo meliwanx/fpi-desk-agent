@@ -10,9 +10,31 @@ from sqlalchemy.orm import selectinload
 from app.dependencies import get_db
 from app.models.message import Message
 from app.schemas.message import MessageResponse, PaginatedMessages, PartResponse
-from app.session.manager import count_messages, get_messages
+from app.session.manager import get_messages
 
 router = APIRouter()
+
+_INTERNAL_PART_TYPES = {"step-start", "step-finish"}
+
+
+def _part_has_visible_content(data: dict) -> bool:
+    part_type = data.get("type")
+    if part_type in _INTERNAL_PART_TYPES:
+        return False
+    if part_type in {"text", "reasoning"}:
+        return bool(str(data.get("text") or "").strip())
+    return bool(part_type)
+
+
+def _is_visible_chat_message(msg: Message) -> bool:
+    data = dict(msg.data) if msg.data else {}
+    if data.get("system") is True:
+        return False
+    if data.get("role") != "assistant":
+        return True
+    if data.get("error"):
+        return True
+    return any(_part_has_visible_content(p.data or {}) for p in msg.parts)
 
 
 def _msg_to_response(msg: Message) -> MessageResponse:
@@ -45,9 +67,13 @@ async def list_messages(
 
     offset=-1 (default) returns the latest page.
     """
-    total = await count_messages(db, session_id)
+    visible_messages = [
+        msg for msg in await get_messages(db, session_id)
+        if _is_visible_chat_message(msg)
+    ]
+    total = len(visible_messages)
     actual_offset = max(0, total - limit) if offset < 0 else offset
-    messages = await get_messages(db, session_id, limit=limit, offset=actual_offset)
+    messages = visible_messages[actual_offset:actual_offset + limit]
     return PaginatedMessages(
         total=total,
         offset=actual_offset,

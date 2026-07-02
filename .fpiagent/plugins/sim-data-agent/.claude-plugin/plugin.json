@@ -1,0 +1,8 @@
+{
+  "name": "sim-data-agent",
+  "version": "0.1.0",
+  "description": "Connects the desktop agent to SIM data warehouse tools for tenant 3: schema discovery, lineage, semantic search, read-only PGSQL queries, CSV export, and SQL draft generation.",
+  "author": {
+    "name": "SIM"
+  }
+}

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import Boolean, Float, Index, JSON, String, Text, UniqueConstraint
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, Float, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
@@ -139,6 +141,8 @@ class AuditUsage(Base, TimestampMixin):
     cache_write_tokens: Mapped[int] = mapped_column(nullable=False, default=0)
     total_tokens: Mapped[int] = mapped_column(nullable=False, default=0)
     cost: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    model_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    provider_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class AuditRiskFinding(Base, TimestampMixin):
@@ -183,3 +187,22 @@ class AuditAdminAction(Base, TimestampMixin):
     target_type: Mapped[str] = mapped_column(String(100), nullable=False, default="")
     target_id: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+
+
+class AuditOutboxItem(Base, TimestampMixin):
+    """A durable client-side audit upload task."""
+
+    __tablename__ = "audit_outbox_item"
+    __table_args__ = (
+        Index("ix_audit_outbox_status_next", "status", "next_attempt_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=generate_ulid)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    server_url: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    company_session_token: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

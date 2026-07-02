@@ -22,9 +22,9 @@ class PlanTool(ToolDefinition):
     @property
     def description(self) -> str:
         return (
-            "Switch between plan and build modes. "
-            "Use command='enter' to switch to plan mode (read-only analysis), "
-            "or command='exit' to return to build mode (full tool access)."
+            "在计划模式和构建模式之间切换。"
+            "使用 command='enter' 进入计划模式（只读分析），"
+            "使用 command='exit' 返回构建模式（完整工具权限）。"
         )
 
     def parameters_schema(self) -> dict[str, Any]:
@@ -34,7 +34,7 @@ class PlanTool(ToolDefinition):
                 "command": {
                     "type": "string",
                     "enum": ["enter", "exit"],
-                    "description": "'enter' to switch to read-only plan mode, 'exit' to return to build mode",
+                    "description": "'enter' 表示切换到只读计划模式，'exit' 表示返回构建模式",
                 },
             },
             "required": ["command"],
@@ -46,22 +46,21 @@ class PlanTool(ToolDefinition):
         if command == "enter":
             # Guard: already in plan mode
             if ctx.agent.name == "plan":
-                return ToolResult(error="Already in plan mode.")
+                return ToolResult(error="当前已经是计划模式。")
 
             return ToolResult(
                 output=(
-                    "Switched to plan mode. You now have read-only access "
-                    "for analysis and planning. Use plan(command='exit') to return to "
-                    "build mode when ready to implement."
+                    "已切换到计划模式。现在只有只读权限，可用于分析和制定计划。"
+                    "准备开始实施时，使用 plan(command='exit') 返回构建模式。"
                 ),
                 metadata={"switch_agent": "plan"},
             )
         else:  # exit
             # Guard: not in plan mode
             if ctx.agent.name != "plan":
-                return ToolResult(error="Not in plan mode.")
+                return ToolResult(error="当前不在计划模式。")
 
             return ToolResult(
-                output="Switched to build mode. Full tool access restored.",
+                output="已切换到构建模式，完整工具权限已恢复。",
                 metadata={"switch_agent": "build"},
             )

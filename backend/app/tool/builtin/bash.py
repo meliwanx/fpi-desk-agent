@@ -36,11 +36,9 @@ class BashTool(ToolDefinition):
     @property
     def description(self) -> str:
         return (
-            "Execute a local shell command. Returns stdout and stderr. "
-            "Commands run on this computer. They default to the workspace but "
-            "may inspect explicit absolute local paths; the configured local "
-            "sandbox limits writes when available. "
-            "Timeout defaults to 120 seconds (max 600)."
+            "执行本机 shell 命令，并返回 stdout 和 stderr。"
+            "命令在这台电脑上运行，默认工作目录为当前工作区；也可以通过明确绝对路径只读查看本机其他位置。"
+            "如果配置了本地沙箱，会限制写入范围。默认超时时间 120 秒，最大 600 秒。"
         )
 
     def parameters_schema(self) -> dict[str, Any]:
@@ -49,16 +47,16 @@ class BashTool(ToolDefinition):
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": "The shell command to execute",
+                    "description": "要执行的 shell 命令",
                 },
                 "timeout": {
                     "type": "integer",
-                    "description": "Timeout in seconds",
+                    "description": "超时时间，单位秒",
                     "default": _bash_cfg()[0],
                 },
                 "cwd": {
                     "type": "string",
-                    "description": "Working directory for the command",
+                    "description": "命令的工作目录",
                 },
             },
             "required": ["command"],
@@ -70,7 +68,7 @@ class BashTool(ToolDefinition):
         timeout = min(args.get("timeout", default_timeout), max_timeout)
         cwd = args.get("cwd")
 
-        # Workspace restriction: validate/default cwd (defaults to openyak_written/)
+        # Workspace restriction: validate/default cwd (defaults to fpiagent_written/)
         try:
             if not cwd and ctx.workspace:
                 cwd = get_default_output_dir(ctx.workspace)
@@ -78,7 +76,7 @@ class BashTool(ToolDefinition):
         except WorkspaceViolation as e:
             return ToolResult(error=str(e))
 
-        # Ensure cwd exists — openyak_written/ may not have been created yet
+        # Ensure cwd exists — fpiagent_written/ may not have been created yet
         if cwd:
             import pathlib
             try:

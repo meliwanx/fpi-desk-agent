@@ -66,6 +66,7 @@ from app.streaming.manager import GenerationJob
 from app.tool.context import ToolContext
 from app.tool.registry import ToolRegistry
 from app.config import get_settings
+from app.runtime_paths import workspace_output_dir
 from app.session.utils import (
     calculate_step_cost as _calculate_step_cost,
     compute_safe_max_tokens as _compute_safe_max_tokens,
@@ -164,6 +165,7 @@ async def _track_session_file(
     session_id: str,
     file_path: str,
     tool_id: str,
+    message_id: str | None = None,
 ) -> None:
     """Persist a file record for the workspace panel (deduplicated by path)."""
     import os
@@ -173,6 +175,7 @@ async def _track_session_file(
 
     file_name = os.path.basename(file_path)
     try:
+        should_schedule_audit = bool(message_id)
         async with session_factory() as db:
             async with db.begin():
                 # Deduplicate: skip if this exact path is already tracked
@@ -182,16 +185,24 @@ async def _track_session_file(
                         SessionFile.file_path == file_path,
                     ).limit(1)
                 )
-                if existing.scalar_one_or_none() is not None:
-                    return
-                db.add(SessionFile(
-                    id=generate_ulid(),
-                    session_id=session_id,
-                    file_path=file_path,
-                    file_name=file_name,
-                    tool_id=tool_id,
-                    file_type="generated",
-                ))
+                if existing.scalar_one_or_none() is None:
+                    db.add(SessionFile(
+                        id=generate_ulid(),
+                        session_id=session_id,
+                        file_path=file_path,
+                        file_name=file_name,
+                        tool_id=tool_id,
+                        file_type="generated",
+                    ))
+        if should_schedule_audit:
+            from app.audit.client import schedule_generated_file_audit
+
+            schedule_generated_file_audit(
+                session_id=session_id,
+                message_id=message_id,
+                file_path=file_path,
+                tool_id=tool_id,
+            )
     except Exception:
         logger.debug("Failed to track session file: %s", file_path, exc_info=True)
 
@@ -243,12 +254,10 @@ def _presentation_reminder(tool_id: str, metadata: dict[str, Any] | None) -> str
 
     joined = ", ".join(candidates[:5])
     return (
-        "\n\n<reminder>Potential final deliverable file(s) were created: "
-        f"{joined}. If these are final files the user asked for, call present_file "
-        "for each user-facing deliverable before your final response. Mention "
-        "supporting data files separately unless the user asked to open or share "
-        "them. Do not present temporary scripts, scratch files, logs, helper "
-        "files, or intermediate outputs.</reminder>"
+        "\n\n<reminder>可能已经创建最终交付文件："
+        f"{joined}。如果这些是用户要求的最终文件，请在最终回复前对每个面向用户的交付文件调用 present_file。"
+        "辅助数据文件单独说明即可，除非用户明确要求打开或分享。"
+        "不要展示临时脚本、草稿文件、日志、辅助文件或中间产物。</reminder>"
     )
 
 
@@ -290,8 +299,9 @@ async def _save_artifact_as_file(
     session_id: str,
     workspace: str | None,
     metadata: dict[str, Any],
+    message_id: str | None = None,
 ) -> None:
-    """Save artifact content to openyak_written/ and track as a session file."""
+    """Save artifact content to fpiagent_written/ and track as a session file."""
     import re
     from pathlib import Path
 
@@ -319,7 +329,7 @@ async def _save_artifact_as_file(
         safe_title = safe_title[:100]
 
     filename = f"{safe_title}{ext}"
-    output_dir = Path(workspace).resolve() / "openyak_written"
+    output_dir = workspace_output_dir(workspace)
 
     try:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -331,6 +341,7 @@ async def _save_artifact_as_file(
             session_id=session_id,
             file_path=str(file_path),
             tool_id="artifact",
+            message_id=message_id,
         )
     except Exception:
         logger.debug("Failed to save artifact as file: %s", filename, exc_info=True)
@@ -385,7 +396,7 @@ async def run_generation(
         }))
     except Exception:
         logger.exception("Generation error for stream %s", job.stream_id)
-        job.publish(SSEEvent(AGENT_ERROR, {"error_message": "An internal error occurred. Please try again."}))
+        job.publish(SSEEvent(AGENT_ERROR, {"error_message": "发生内部错误，请稍后重试。"}))
     finally:
         job.complete()
 
@@ -749,6 +760,8 @@ class SessionProcessor:
                         "reason": "error",
                         "tokens": {},
                         "cost": 0.0,
+                        "model_id": sp.model_id,
+                        "provider_id": sp.provider.id if sp.provider else None,
                     },
                 )
         self.finish_reason = "error"
@@ -1080,6 +1093,8 @@ class SessionProcessor:
                             "reason": self.finish_reason,
                             "tokens": self.usage_data,
                             "cost": self.step_cost,
+                            "model_id": sp.model_id,
+                            "provider_id": sp.provider.id if sp.provider else None,
                         },
                     )
             job.publish(SSEEvent(
@@ -1099,12 +1114,14 @@ class SessionProcessor:
         return "stop"
 
     async def _handle_empty_output_after_retries(self) -> bool:
-        """Return True if the step produced nothing after retries (caller continues the loop).
+        """Convert an exhausted empty model stream into a visible assistant error.
 
-        The model produced nothing (no text, no tools, no reasoning) even after retries.
-        Rather than surfacing an error, delete the empty assistant message shell and let
-        the outer loop re-invoke the LLM with the full conversation context intact.
-        The hard step cap (50) prevents infinite looping.
+        A provider that repeatedly returns an empty stream (no text, no
+        reasoning, no tool calls) cannot be repaired by re-entering the agent
+        loop with the same conversation. Continuing used to create dozens of
+        internal-only step markers until the hard cap, leaving the chat visibly
+        blank. After per-request retries are exhausted, surface a concrete
+        message and let the normal persistence path finish the step.
         """
         sp = self._sp
         job = sp.job
@@ -1118,23 +1135,36 @@ class SessionProcessor:
         ):
             return False
 
-        logger.warning(
-            "LLM produced no output after retries for session %s, continuing loop",
-            job.session_id,
+        provider_id = getattr(getattr(sp, "provider", None), "id", None) or "unknown-provider"
+        model_id = getattr(sp, "model_id", None) or "unknown-model"
+        message = (
+            f"模型服务没有返回可显示内容（{provider_id}/{model_id}）。"
+            "请切换其他模型重试，或联系管理员检查该模型的接口配置。"
         )
-        # Publish a paired non-terminal STEP_FINISH so the frontend step tracker
-        # stays consistent without seeing an undeclared terminal reason.
+        logger.warning(
+            "LLM produced no output after retries for session %s, provider=%s model=%s; "
+            "surfacing visible error",
+            job.session_id,
+            provider_id,
+            model_id,
+        )
+        self._accumulated_text = message
+        self.finish_reason = "error"
+        job.publish(SSEEvent(TEXT_DELTA, {
+            "session_id": job.session_id,
+            "message_id": self._assistant_msg_id,
+            "text": message,
+        }))
         job.publish(SSEEvent(
-            STEP_FINISH,
+            AGENT_ERROR,
             {
-                "tokens": None,
-                "cost": 0.0,
-                "total_cost": sp.total_cost,
-                "reason": "tool_use",
+                "error_type": "EMPTY_MODEL_RESPONSE",
+                "error_message": message,
+                "model_id": model_id,
+                "provider_id": provider_id,
             },
         ))
-        await _delete_empty_assistant_messages(sp.session_factory, job.session_id)
-        return True
+        return False
 
     async def _persist_text_and_reasoning(self) -> None:
         """Persist accumulated text + reasoning as parts on the assistant message."""
@@ -1312,6 +1342,7 @@ class SessionProcessor:
                 session_id=job.session_id,
                 file_path=result.metadata["file_path"],
                 tool_id=tool.id,
+                message_id=self._assistant_msg_id,
             )
 
         # Track files created or modified inside code_execute runs.
@@ -1327,6 +1358,7 @@ class SessionProcessor:
                     session_id=job.session_id,
                     file_path=file_path,
                     tool_id=tool.id,
+                    message_id=self._assistant_msg_id,
                 )
 
         # Track artifacts as workspace files (save to disk)
@@ -1341,6 +1373,7 @@ class SessionProcessor:
                 session_id=job.session_id,
                 workspace=sp.workspace,
                 metadata=result.metadata,
+                message_id=self._assistant_msg_id,
             )
 
         # Track todos from todo tool results
@@ -1468,6 +1501,8 @@ class SessionProcessor:
                         "reason": self.finish_reason,
                         "tokens": self.usage_data,
                         "cost": self.step_cost,
+                        "model_id": sp.model_id,
+                        "provider_id": sp.provider.id if sp.provider else None,
                     },
                 )
 
