@@ -1300,6 +1300,16 @@ class CompanyAuthStore:
             row = result.mappings().first()
         return self._update_asset_from_mapping(row) if row is not None else None
 
+    async def delete_update_asset(self, asset_id: str) -> CompanyUpdateAsset | None:
+        asset = await self.get_update_asset(asset_id)
+        if asset is None:
+            return None
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                delete(self.update_assets).where(self.update_assets.c.id == asset_id)
+            )
+        return asset
+
     async def increment_update_asset_download_count(self, asset_id: str) -> CompanyUpdateAsset | None:
         now = shanghai_now()
         async with self.engine.begin() as conn:

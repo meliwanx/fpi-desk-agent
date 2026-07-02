@@ -25,6 +25,11 @@ async def test_session_message_and_part_creation_schedule_audit_sync(db, monkeyp
     async def fake_send_audit_payload(**kwargs):
         sent.append(kwargs["payload"])
 
+    # This test asserts the direct-send path (no outbox). Earlier tests may
+    # have left the DI session factory pointing at a disposed engine, which
+    # would route payloads into a broken outbox and swallow them — reset it
+    # so the audit client falls back to sending directly.
+    monkeypatch.setattr("app.dependencies._session_factory", None)
     monkeypatch.setattr(audit_client, "_send_audit_payload", fake_send_audit_payload)
     monkeypatch.setattr(
         audit_client,
